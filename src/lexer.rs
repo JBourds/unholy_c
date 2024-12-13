@@ -36,7 +36,7 @@ impl Lexer {
 pub enum Token<'a> {
     Ident(&'a str),
     Constant(&'a str),
-    Int(&'a str),
+    Int,
     Void,
     Return,
     LParen,
@@ -50,9 +50,6 @@ pub enum Token<'a> {
 impl Token<'_> {
     const IDENT: &'static str = r"^[a-zA-Z_]\w*\b";
     const CONSTANT: &'static str = r"^[0-9]+\b";
-    const INT: &'static str = r"^int\b";
-    const VOID: &'static str = r"^void\b";
-    const RETURN: &'static str = r"^return\b";
     const LPAREN: &'static str = r"^\(";
     const RPAREN: &'static str = r"^\)";
     const LSQUIRLY: &'static str = r"^\{";
@@ -61,15 +58,13 @@ impl Token<'_> {
     const PATTERN_STRINGS: &'static [&'static str] = &[
         Self::IDENT,
         Self::CONSTANT,
-        Self::INT,
-        Self::VOID,
-        Self::RETURN,
         Self::LPAREN,
         Self::RPAREN,
         Self::LSQUIRLY,
         Self::RSQUIRLY,
         Self::SEMI,
     ];
+    const KEYWORD_STRINGS: &'static [&'static str] = &["int", "void", "return"];
     pub fn consume<'a>(
         mut stream: &'a str,
         line: &mut u32,
@@ -114,16 +109,32 @@ impl Token<'_> {
             let (full, _) = capture.extract::<0>();
             stream = &stream[full.len()..];
             let token = match longest_match_index {
-                0 => Token::Ident(full),
+                0 => {
+                    let mut keyword_index = None;
+                    for (index, keyword) in Self::KEYWORD_STRINGS.iter().enumerate() {
+                        if full == *keyword {
+                            keyword_index = Some(index);
+                            break;
+                        }
+                    }
+
+                    if let Some(keyword_index) = keyword_index {
+                        match keyword_index {
+                            0 => Token::Int,
+                            1 => Token::Void,
+                            2 => Token::Return,
+                            _ => unreachable!(),
+                        }
+                    } else {
+                        Token::Ident(full)
+                    }
+                }
                 1 => Token::Constant(full),
-                2 => Token::Int(full),
-                3 => Token::Void,
-                4 => Token::Return,
-                5 => Token::LParen,
-                6 => Token::RParen,
-                7 => Token::LSquirly,
-                8 => Token::RSquirly,
-                9 => Token::Semi,
+                2 => Token::LParen,
+                3 => Token::RParen,
+                4 => Token::LSquirly,
+                5 => Token::RSquirly,
+                6 => Token::Semi,
                 _ => unreachable!(),
             };
             Ok((token, stream))
@@ -142,18 +153,19 @@ mod tests {
     #[test]
     fn test_return2() {
         let return2 = "
-        int main() {
+        int main(void) {
             return 2;
         }  
         ";
         let tokens = Lexer::lex(return2).unwrap();
         let expected = vec![
-            Token::Ident("int"),
+            Token::Int,
             Token::Ident("main"),
             Token::LParen,
+            Token::Void,
             Token::RParen,
             Token::LSquirly,
-            Token::Ident("return"),
+            Token::Return,
             Token::Constant("2"),
             Token::Semi,
             Token::RSquirly,

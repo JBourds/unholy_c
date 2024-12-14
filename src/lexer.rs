@@ -35,7 +35,7 @@ impl Lexer {
 #[derive(Debug, PartialEq)]
 pub enum Token<'a> {
     Ident(&'a str),
-    Constant(&'a str),
+    Literal(&'a str),
     Int,
     Void,
     Return,
@@ -129,7 +129,7 @@ impl Token<'_> {
                         Token::Ident(full)
                     }
                 }
-                1 => Token::Constant(full),
+                1 => Token::Literal(full),
                 2 => Token::LParen,
                 3 => Token::RParen,
                 4 => Token::LSquirly,
@@ -166,7 +166,7 @@ mod tests {
             Token::RParen,
             Token::LSquirly,
             Token::Return,
-            Token::Constant("2"),
+            Token::Literal("2"),
             Token::Semi,
             Token::RSquirly,
         ];

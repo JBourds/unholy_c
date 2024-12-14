@@ -56,7 +56,7 @@ fn main() -> Result<()> {
     let tokens = lexer::Lexer::lex(&contents)?;
 
     if args.lex {
-        println!("Parsed tokens: {:?}", tokens);
+        println!("Lexed tokens: {:?}", tokens);
         return Ok(());
     }
 

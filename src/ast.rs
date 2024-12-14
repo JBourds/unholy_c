@@ -3,8 +3,12 @@ use anyhow::{bail, Result};
 
 #[allow(dead_code)]
 fn parse<'a>(tokens: &'a [Token]) -> Result<Program<'a>> {
-    let (program, _) = Program::consume(tokens)?;
-    Ok(program)
+    let (program, tokens) = Program::consume(tokens)?;
+    if !tokens.is_empty() {
+        bail!("Found extra tokens after parsing program: {:?}", tokens)
+    } else {
+        Ok(program)
+    }
 }
 
 pub trait AstNode<'a> {
@@ -47,14 +51,18 @@ impl<'a> AstNode<'a> for Function<'a> {
         {
             let name = Token::Ident(s);
             let (stmt, tokens) = Stmt::consume(tokens)?;
-            Ok((
-                Self {
-                    ret_t,
-                    name,
-                    body: vec![stmt],
-                },
-                tokens,
-            ))
+            if let Some(Token::RSquirly) = tokens.first() {
+                Ok((
+                    Self {
+                        ret_t,
+                        name,
+                        body: vec![stmt],
+                    },
+                    &tokens[1..],
+                ))
+            } else {
+                bail!("Did not find closing brace for function.");
+            }
         } else {
             bail!("Failed to parse function.")
         }

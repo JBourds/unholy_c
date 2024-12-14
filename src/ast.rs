@@ -1,8 +1,7 @@
 use crate::lexer::Token;
 use anyhow::{bail, Result};
 
-#[allow(dead_code)]
-fn parse<'a>(tokens: &'a [Token]) -> Result<Program<'a>> {
+pub fn parse<'a>(tokens: &'a [Token]) -> Result<Program<'a>> {
     let (program, tokens) = Program::consume(tokens)?;
     if !tokens.is_empty() {
         bail!("Found extra tokens after parsing program: {:?}", tokens)
@@ -177,5 +176,20 @@ mod tests {
             },
         };
         assert_eq!(expected, program);
+    }
+
+    #[test]
+    fn missing_return() {
+        let tokens = &[
+            Token::Int,
+            Token::Ident("main"),
+            Token::LParen,
+            Token::Void,
+            Token::RParen,
+            Token::LSquirly,
+            Token::RSquirly,
+        ];
+        let program = parse(tokens);
+        assert!(program.is_err());
     }
 }

@@ -56,11 +56,16 @@ fn main() -> Result<()> {
     let tokens = lexer::Lexer::lex(&contents)?;
 
     if args.lex {
-        println!("Lexed tokens: {:?}", tokens);
+        println!("Lexed tokens:\n{:#?}", tokens);
         return Ok(());
     }
 
     // Parse
+    let ast = ast::parse(&tokens)?;
+    if args.parse {
+        println!("Parsed AST:\n{:#?}", ast);
+        return Ok(());
+    }
 
     // Codegen
 

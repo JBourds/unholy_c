@@ -1,10 +1,14 @@
+mod asm;
 mod ast;
+mod codegen;
 mod lexer;
 
 use std::process::Command;
 
 use anyhow::{bail, ensure, Context, Result};
 use clap::Parser;
+
+use asm::AsmGen;
 
 #[derive(Parser, Debug)]
 struct Args {
@@ -18,6 +22,9 @@ struct Args {
 
     #[arg(long)]
     codegen: bool,
+
+    #[arg(long)]
+    asm: bool,
 }
 
 fn main() -> Result<()> {
@@ -68,7 +75,21 @@ fn main() -> Result<()> {
     }
 
     // Codegen
+    let asm_nodes = codegen::gen(&ast)?;
+    if args.codegen {
+        println!("Generated asm nodes:\n{:#?}", asm_nodes);
+        return Ok(());
+    }
 
+    // Step 2.5: Turn AsmNodes to asm text
+    let mut asm = String::new();
+
+    asm::x64::Generator::gen(&mut asm, &asm_nodes)?;
+
+    if args.asm {
+        println!("Generated asm:\n{asm}");
+        return Ok(());
+    }
     // Step 3: Assemble and link the file
 
     Ok(())

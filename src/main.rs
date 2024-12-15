@@ -39,7 +39,7 @@ fn main() -> Result<()> {
     };
 
     // Step 2.5: Turn AsmNodes to asm text
-    let Some(asm) = gen_asm::<std::string::String, asm::x64::Generator>(&args, &asm_nodes)? else {
+    let Some(asm) = gen_asm::<std::string::String, asm::x64::Generator>(&args, asm_nodes)? else {
         return Ok(());
     };
 
@@ -91,7 +91,7 @@ fn lex_parse_codegen(
 > {
     // Lex
     let tokens: &'static [lexer::Token<'static>] =
-        Box::leak(Box::new(lexer::Lexer::lex(&contents)?));
+        Box::leak(Box::new(lexer::Lexer::lex(contents)?));
 
     if args.lex {
         println!("Lexed tokens:\n{:#?}", tokens);
@@ -106,7 +106,7 @@ fn lex_parse_codegen(
     }
 
     // Codegen
-    let asm: &'static codegen::Program<'static> = Box::leak(Box::new(codegen::gen(&ast)?));
+    let asm: &'static codegen::Program<'static> = Box::leak(Box::new(codegen::gen(ast)?));
     if args.codegen {
         println!("Generated asm nodes:\n{:#?}", asm);
         return Ok(None);
@@ -121,7 +121,7 @@ fn gen_asm<W: std::fmt::Write, T: AsmGen<'static, W>>(
 ) -> Result<Option<String>> {
     let mut asm_txt = String::new();
 
-    asm::x64::Generator::gen(&mut asm_txt, &asm)?;
+    asm::x64::Generator::gen(&mut asm_txt, asm)?;
 
     if args.asm {
         println!("Generated asm:\n{asm_txt}");

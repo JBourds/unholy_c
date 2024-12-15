@@ -41,7 +41,7 @@ pub mod x64 {
 
         for instr in function.instructions.iter() {
             w.write_char('\t')?;
-            gen_instruction(w, &instr)?;
+            gen_instruction(w, instr)?;
         }
 
         Ok(())

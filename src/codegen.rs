@@ -1,5 +1,5 @@
-use crate::{ast, lexer};
-use anyhow::{bail, Result};
+use crate::ast;
+use anyhow::{bail, ensure, Result};
 
 pub fn gen<'a>(program: &'a ast::Program<'a>) -> Result<Program<'a>> {
     let prog = Program::consume(program)?;
@@ -51,7 +51,7 @@ impl<'a> AsmNode<'a> for Function<'a> {
         Self: Sized,
     {
         let instructions: Result<Vec<Instruction>> = node
-            .body
+            .statements
             .iter()
             .map(Instruction::consume)
             .try_fold(vec![], |mut unrolled, result| {
@@ -60,10 +60,7 @@ impl<'a> AsmNode<'a> for Function<'a> {
             });
 
         Ok(vec![Function {
-            name: match node.name {
-                lexer::Token::Ident(s) => s,
-                _ => bail!("Got a function with a non Ident name: {:?}", node.name),
-            },
+            name: node.name,
             instructions: instructions?,
         }])
     }
@@ -83,19 +80,21 @@ impl<'a> AsmNode<'a> for Instruction {
         Self: Sized,
     {
         match node {
-            ast::Stmt::Return(expr) => match expr {
-                ast::Expr::Literal(e) => {
-                    let ops = Operand::consume(&e)?;
-                    assert!(ops.len() == 1);
-                    Ok(vec![
-                        Instruction::Mov {
-                            src: ops.into_iter().next().unwrap(),
-                            dst: Operand::Register,
-                        },
-                        Instruction::Ret,
-                    ])
+            ast::Stmt::Return(expr) => {
+                let mut vec = vec![];
+                if let Some(e) = expr {
+                    let ops = match e {
+                        ast::Expr::Literal(e) => Operand::consume(e)?,
+                    };
+                    ensure!(ops.len() == 1);
+                    vec.push(Instruction::Mov {
+                        src: ops.into_iter().next().unwrap(),
+                        dst: Operand::Register,
+                    });
                 }
-            },
+                vec.push(Instruction::Ret);
+                Ok(vec)
+            }
         }
     }
 }
@@ -113,9 +112,9 @@ impl<'a> AsmNode<'a> for Operand {
     where
         Self: Sized,
     {
-        match node {
-            &ast::Literal::Int(i) => Ok(vec![Operand::Imm(i)]),
-            &ast::Literal::String(_) => bail!("Strings are unsupported"),
+        match *node {
+            ast::Literal::Int(i) => Ok(vec![Operand::Imm(i)]),
+            ast::Literal::String(_) => bail!("Strings are unsupported"),
         }
     }
 }

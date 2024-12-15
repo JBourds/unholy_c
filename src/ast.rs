@@ -18,7 +18,7 @@ pub trait AstNode<'a> {
 
 #[derive(Debug, PartialEq)]
 pub struct Program<'a> {
-    function: Function<'a>,
+    pub function: Function<'a>,
 }
 impl<'a> AstNode<'a> for Program<'a> {
     fn consume(tokens: &'a [Token<'a>]) -> Result<(Program<'a>, &'a [Token<'a>])> {
@@ -38,9 +38,9 @@ impl<'a> AstNode<'a> for Program<'a> {
 
 #[derive(Debug, PartialEq)]
 pub struct Function<'a> {
-    ret_t: Type,
-    name: Token<'a>,
-    body: Vec<Stmt<'a>>,
+    pub ret_t: Type,
+    pub name: Token<'a>,
+    pub body: Vec<Stmt<'a>>,
 }
 impl<'a> AstNode<'a> for Function<'a> {
     fn consume(tokens: &'a [Token<'a>]) -> Result<(Function<'a>, &'a [Token<'a>])> {

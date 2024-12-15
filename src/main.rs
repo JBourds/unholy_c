@@ -25,7 +25,7 @@ fn main() -> Result<()> {
 
     let file = args.file.clone();
 
-    if !std::fs::exists(&file).with_context(|| format!("Cehcking file \"{}\" failed", file))? {
+    if !std::fs::exists(&file).with_context(|| format!("Checking file \"{}\" failed", file))? {
         bail!("File \"{}\" does not exist", file);
     }
 

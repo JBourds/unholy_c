@@ -140,15 +140,17 @@ impl From<&ast::Literal> for Val {
 pub enum UnaryOp {
     Complement,
     Negate,
+    Not,
 }
 
 // TODO: I created a separated version of this struct to prevent different
 // modules from leaking into each other but these structs are identical
-impl From<&ast::Unary> for UnaryOp {
-    fn from(node: &ast::Unary) -> Self {
+impl From<&ast::UnaryOp> for UnaryOp {
+    fn from(node: &ast::UnaryOp) -> Self {
         match node {
-            ast::Unary::Complement => Self::Complement,
-            ast::Unary::Negate => Self::Negate,
+            ast::UnaryOp::Complement => Self::Complement,
+            ast::UnaryOp::Negate => Self::Negate,
+            ast::UnaryOp::Not => Self::Not,
         }
     }
 }
@@ -179,7 +181,7 @@ mod tests {
     fn test_return_unary() {
         test_and_reset(|| {
             let ast = ast::Stmt::Return(Some(ast::Expr::Unary(
-                ast::Unary::Complement,
+                ast::UnaryOp::Complement,
                 Box::new(ast::Expr::Literal(ast::Literal::Int(2))),
             )));
             let actual = Vec::<Instruction>::from(&ast);
@@ -198,11 +200,11 @@ mod tests {
     fn test_return_nested_unary() {
         test_and_reset(|| {
             let ast = ast::Stmt::Return(Some(ast::Expr::Unary(
-                ast::Unary::Negate,
+                ast::UnaryOp::Negate,
                 Box::new(ast::Expr::Unary(
-                    ast::Unary::Complement,
+                    ast::UnaryOp::Complement,
                     Box::new(ast::Expr::Unary(
-                        ast::Unary::Negate,
+                        ast::UnaryOp::Negate,
                         Box::new(ast::Expr::Literal(ast::Literal::Int(2))),
                     )),
                 )),

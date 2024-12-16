@@ -1,5 +1,8 @@
 use crate::ast;
+use crate::tacky;
 use anyhow::{ensure, Result};
+use std::fmt;
+use std::rc::Rc;
 
 pub fn gen<'a>(program: &'a ast::Program<'a>) -> Result<Program<'a>> {
     let prog = Program::consume(program)?;
@@ -67,8 +70,42 @@ impl<'a> AsmNode<'a> for Function<'a> {
 }
 
 #[derive(Debug, PartialEq)]
+pub enum UnaryOp {
+    Complement,
+    Negate,
+    Not,
+}
+
+impl From<&tacky::UnaryOp> for UnaryOp {
+    fn from(node: &tacky::UnaryOp) -> Self {
+        match node {
+            tacky::UnaryOp::Complement => Self::Complement,
+            tacky::UnaryOp::Negate => Self::Negate,
+            tacky::UnaryOp::Not => Self::Not,
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Clone, Copy)]
+pub enum Reg {
+    Eax,
+    R10,
+}
+
+impl fmt::Display for Reg {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Eax => write!(f, "eax"),
+            Self::R10 => write!(f, "r10"),
+        }
+    }
+}
+
+#[derive(Debug, PartialEq)]
 pub enum Instruction {
     Mov { src: Operand, dst: Operand },
+    Unary { op: UnaryOp, dst: Operand },
+    AllocStack(i32),
     Ret,
 }
 
@@ -88,9 +125,10 @@ impl<'a> AsmNode<'a> for Instruction {
                         _ => todo!(),
                     };
                     ensure!(ops.len() == 1);
+                    // TODO: Is this the right register?
                     vec.push(Instruction::Mov {
                         src: ops.into_iter().next().unwrap(),
-                        dst: Operand::Register,
+                        dst: Operand::Reg(Reg::Eax),
                     });
                 }
                 vec.push(Instruction::Ret);
@@ -100,10 +138,23 @@ impl<'a> AsmNode<'a> for Instruction {
     }
 }
 
-#[derive(Debug, PartialEq, Clone, Copy)]
+impl From<&tacky::Instruction> for Vec<Instruction> {
+    fn from(_instruction: &tacky::Instruction) -> Vec<Instruction> {
+        todo!()
+        //match instruction {
+        //    tacky::Instruction::Return(Some(e)) => vec![],
+        //    tacky::Instruction::Unary { op, src, dst } => vec![],
+        //    _ => todo!(),
+        //}
+    }
+}
+
+#[derive(Debug, PartialEq, Clone)]
 pub enum Operand {
     Imm(i32),
-    Register,
+    Reg(Reg),
+    Pseudo(Rc<String>),
+    Stack(i32),
 }
 
 impl<'a> AsmNode<'a> for Operand {
@@ -115,6 +166,15 @@ impl<'a> AsmNode<'a> for Operand {
     {
         match *node {
             ast::Literal::Int(i) => Ok(vec![Operand::Imm(i)]),
+        }
+    }
+}
+
+impl From<&tacky::Val> for Operand {
+    fn from(val: &tacky::Val) -> Self {
+        match val {
+            tacky::Val::Constant(i) => Self::Imm(*i),
+            tacky::Val::Var(r) => Self::Pseudo(r.clone()),
         }
     }
 }

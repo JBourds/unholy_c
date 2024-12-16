@@ -140,13 +140,13 @@ impl<'a> AstNode<'a> for Stmt {
 #[derive(Debug, PartialEq)]
 pub enum Expr {
     Literal(Literal),
-    Unary(Unary, Box<Expr>),
+    Unary(UnaryOp, Box<Expr>),
 }
 impl<'a> AstNode<'a> for Expr {
     fn consume(tokens: &'a [Token<'a>]) -> Result<(Expr, &'a [Token<'a>])> {
         if let Ok((literal, tokens)) = Literal::consume(tokens) {
             Ok((Expr::Literal(literal), tokens))
-        } else if let Ok((unary, tokens)) = Unary::consume(tokens) {
+        } else if let Ok((unary, tokens)) = UnaryOp::consume(tokens) {
             // We have to parse an Expr here
             let (expr, tokens) =
                 Expr::consume(tokens).context("Parsing grammer rule: <unop> <exp> failed")?;
@@ -213,12 +213,13 @@ impl<'a> AstNode<'a> for Literal {
 }
 
 #[derive(Debug, PartialEq)]
-pub enum Unary {
+pub enum UnaryOp {
     Complement,
     Negate,
+    Not,
 }
 
-impl<'a> AstNode<'a> for Unary {
+impl<'a> AstNode<'a> for UnaryOp {
     fn consume(tokens: &'a [Token<'a>]) -> Result<(Self, &'a [Token<'a>])>
     where
         Self: Sized,
@@ -348,7 +349,10 @@ mod tests {
         assert!(tokens.is_empty());
         assert_eq!(
             expr,
-            Expr::Unary(Unary::Complement, Box::new(Expr::Literal(Literal::Int(1))))
+            Expr::Unary(
+                UnaryOp::Complement,
+                Box::new(Expr::Literal(Literal::Int(1)))
+            )
         );
     }
 
@@ -361,7 +365,7 @@ mod tests {
         assert!(tokens.is_empty());
         assert_eq!(
             expr,
-            Expr::Unary(Unary::Negate, Box::new(Expr::Literal(Literal::Int(1))))
+            Expr::Unary(UnaryOp::Negate, Box::new(Expr::Literal(Literal::Int(1))))
         );
     }
 
@@ -404,9 +408,9 @@ mod tests {
         assert_eq!(
             expr,
             Expr::Unary(
-                Unary::Complement,
+                UnaryOp::Complement,
                 Box::new(Expr::Unary(
-                    Unary::Negate,
+                    UnaryOp::Negate,
                     Box::new(Expr::Literal(Literal::Int(2)))
                 ))
             )
@@ -438,9 +442,9 @@ mod tests {
                 name: "main",
                 signature: vec![],
                 statements: vec![Stmt::Return(Some(Expr::Unary(
-                    Unary::Negate,
+                    UnaryOp::Negate,
                     Box::new(Expr::Unary(
-                        Unary::Negate,
+                        UnaryOp::Negate,
                         Box::new(Expr::Literal(Literal::Int(2))),
                     )),
                 )))],
@@ -467,9 +471,9 @@ mod tests {
         assert_eq!(
             expr,
             Expr::Unary(
-                Unary::Negate,
+                UnaryOp::Negate,
                 Box::new(Expr::Unary(
-                    Unary::Negate,
+                    UnaryOp::Negate,
                     Box::new(Expr::Literal(Literal::Int(2))),
                 ))
             )

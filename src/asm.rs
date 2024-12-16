@@ -55,6 +55,7 @@ pub mod x64 {
                 w.write_fmt(format_args!("mov {dst}, {src}\n"))?;
             }
             codegen::Instruction::Ret => w.write_str("ret\n")?,
+            _ => todo!(),
         }
         Ok(())
     }
@@ -62,7 +63,8 @@ pub mod x64 {
     fn gen_operand(operand: &codegen::Operand) -> String {
         match operand {
             codegen::Operand::Imm(i) => format!("{i}"),
-            codegen::Operand::Register => "eax".to_string(),
+            codegen::Operand::Reg(r) => format!("{r}"),
+            _ => todo!(),
         }
     }
 }

@@ -2,6 +2,7 @@ mod asm;
 mod ast;
 mod codegen;
 mod lexer;
+mod tacky;
 
 use std::{ffi::OsStr, io::Write, process::Command};
 

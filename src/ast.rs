@@ -41,7 +41,7 @@ pub struct Function<'a> {
     pub ret_t: Type,
     pub name: &'a str,
     pub signature: Vec<(Type, Option<&'a str>)>,
-    pub statements: Vec<Stmt<'a>>,
+    pub statements: Vec<Stmt>,
 }
 
 impl<'a> AstNode<'a> for Function<'a> {
@@ -110,16 +110,16 @@ impl<'a> AstNode<'a> for Function<'a> {
 }
 
 #[derive(Debug, PartialEq)]
-pub enum Stmt<'a> {
-    Return(Option<Expr<'a>>),
+pub enum Stmt {
+    Return(Option<Expr>),
     //If {
     //    condition: Expr<'a>,
     //    then_stmt: Box<Stmt<'a>>,
     //    else_stmt: Option<Box<Stmt<'a>>>,
     //},
 }
-impl<'a> AstNode<'a> for Stmt<'a> {
-    fn consume(tokens: &'a [Token<'a>]) -> Result<(Stmt<'a>, &'a [Token<'a>])> {
+impl<'a> AstNode<'a> for Stmt {
+    fn consume(tokens: &'a [Token<'a>]) -> Result<(Stmt, &'a [Token<'a>])> {
         match tokens {
             [Token::Return, Token::Semi, ..] => Ok((Self::Return(None), tokens)),
             [Token::Return, tokens @ ..] => {
@@ -138,12 +138,12 @@ impl<'a> AstNode<'a> for Stmt<'a> {
 }
 
 #[derive(Debug, PartialEq)]
-pub enum Expr<'a> {
-    Literal(Literal<'a>),
-    Unary(Unary, Box<Expr<'a>>),
+pub enum Expr {
+    Literal(Literal),
+    Unary(Unary, Box<Expr>),
 }
-impl<'a> AstNode<'a> for Expr<'a> {
-    fn consume(tokens: &'a [Token<'a>]) -> Result<(Expr<'a>, &'a [Token<'a>])> {
+impl<'a> AstNode<'a> for Expr {
+    fn consume(tokens: &'a [Token<'a>]) -> Result<(Expr, &'a [Token<'a>])> {
         if let Ok((literal, tokens)) = Literal::consume(tokens) {
             Ok((Expr::Literal(literal), tokens))
         } else if let Ok((unary, tokens)) = Unary::consume(tokens) {
@@ -190,12 +190,10 @@ impl<'a> AstNode<'a> for Type {
 }
 
 #[derive(Debug, PartialEq)]
-pub enum Literal<'a> {
+pub enum Literal {
     Int(i32),
-    #[allow(dead_code)]
-    String(&'a str),
 }
-impl<'a> AstNode<'a> for Literal<'a> {
+impl<'a> AstNode<'a> for Literal {
     fn consume(tokens: &'a [Token<'a>]) -> Result<(Literal, &'a [Token<'a>])> {
         if let Some(token) = tokens.first() {
             match token {

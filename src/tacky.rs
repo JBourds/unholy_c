@@ -24,28 +24,36 @@ impl From<ast::Function<'_>> for Function {
 
 #[derive(Debug, PartialEq)]
 pub enum Instruction {
-    Return(Val),
+    Return(Option<Val>),
     Unary { op: UnaryOp, src: Val, dst: Val },
 }
-impl From<ast::Expr<'_>> for Vec<Instruction> {
-    fn from(_node: ast::Expr<'_>) -> Self {
-        unimplemented!()
-    }
-}
-impl From<ast::Stmt<'_>> for Vec<Instruction> {
-    fn from(_node: ast::Stmt<'_>) -> Self {
-        unimplemented!()
+impl From<ast::Stmt> for Vec<Instruction> {
+    fn from(node: ast::Stmt) -> Self {
+        let mut instructions = vec![];
+        match node {
+            //ast::Stmt::Return(Some(expr)) => {
+            //
+            //}
+            ast::Stmt::Return(None) => {
+                instructions.push(Instruction::Return(None));
+            }
+            _ => todo!(),
+        }
+        instructions
     }
 }
 
+// TODO: Other types
 #[derive(Debug, PartialEq)]
 pub enum Val {
     Constant(i32),
     Var(String),
 }
-impl From<ast::Literal<'_>> for Val {
-    fn from(_node: ast::Literal<'_>) -> Self {
-        unimplemented!()
+impl From<ast::Literal> for Val {
+    fn from(node: ast::Literal) -> Self {
+        match node {
+            ast::Literal::Int(i) => Self::Constant(i),
+        }
     }
 }
 

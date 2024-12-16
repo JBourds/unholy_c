@@ -1,5 +1,5 @@
 use crate::ast;
-use anyhow::{bail, ensure, Result};
+use anyhow::{ensure, Result};
 
 pub fn gen<'a>(program: &'a ast::Program<'a>) -> Result<Program<'a>> {
     let prog = Program::consume(program)?;
@@ -73,7 +73,7 @@ pub enum Instruction {
 }
 
 impl<'a> AsmNode<'a> for Instruction {
-    type T = ast::Stmt<'a>;
+    type T = ast::Stmt;
 
     fn consume(node: &'a Self::T) -> Result<Vec<Self>>
     where
@@ -107,7 +107,7 @@ pub enum Operand {
 }
 
 impl<'a> AsmNode<'a> for Operand {
-    type T = ast::Literal<'a>;
+    type T = ast::Literal;
 
     fn consume(node: &'a Self::T) -> Result<Vec<Self>>
     where
@@ -115,7 +115,6 @@ impl<'a> AsmNode<'a> for Operand {
     {
         match *node {
             ast::Literal::Int(i) => Ok(vec![Operand::Imm(i)]),
-            ast::Literal::String(_) => bail!("Strings are unsupported"),
         }
     }
 }

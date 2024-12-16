@@ -1,5 +1,5 @@
 use crate::ast;
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
 use std::rc::Rc;
 
 static mut TEMP_VAR_COUNTER: usize = 0;
@@ -28,9 +28,13 @@ pub struct Program {
     function: Function,
 }
 
-impl From<ast::Program<'_>> for Program {
-    fn from(_node: ast::Program<'_>) -> Self {
-        unimplemented!()
+impl TryFrom<&ast::Program<'_>> for Program {
+    type Error = anyhow::Error;
+    fn try_from(node: &ast::Program<'_>) -> Result<Self> {
+        Ok(Self {
+            function: Function::try_from(&node.function)
+                .context("Failed to parse \"main\" function into TACKY representation")?,
+        })
     }
 }
 
@@ -39,9 +43,26 @@ pub struct Function {
     name: String,
     instructions: Vec<Instruction>,
 }
-impl From<ast::Function<'_>> for Function {
-    fn from(_node: ast::Function<'_>) -> Self {
-        unimplemented!()
+impl TryFrom<&ast::Function<'_>> for Function {
+    type Error = anyhow::Error;
+    // TODO: Use the return type and arguments for something.
+    //  This is a try_from even though it cannot fail right now, assuming that
+    //  there wil actually be a possibility of failure once we use all of the
+    //  function information.
+    fn try_from(node: &ast::Function<'_>) -> Result<Self> {
+        let ast::Function {
+            name, statements, ..
+        } = node;
+        let instructions = statements
+            .iter()
+            .fold(Vec::new(), |mut instructions, stmt| {
+                instructions.extend(Vec::<Instruction>::from(stmt));
+                instructions
+            });
+        Ok(Self {
+            name: name.to_string(),
+            instructions,
+        })
     }
 }
 
@@ -50,8 +71,8 @@ pub enum Instruction {
     Return(Option<Val>),
     Unary { op: UnaryOp, src: Val, dst: Val },
 }
-impl From<ast::Stmt> for Vec<Instruction> {
-    fn from(node: ast::Stmt) -> Self {
+impl From<&ast::Stmt> for Vec<Instruction> {
+    fn from(node: &ast::Stmt) -> Self {
         match node {
             ast::Stmt::Return(Some(expr)) => {
                 let Expr {
@@ -74,8 +95,8 @@ pub struct Expr {
     val: Val,
 }
 
-impl From<ast::Expr> for Expr {
-    fn from(node: ast::Expr) -> Self {
+impl From<&ast::Expr> for Expr {
+    fn from(node: &ast::Expr) -> Self {
         match node {
             ast::Expr::Literal(v) => Self {
                 instructions: vec![],
@@ -85,10 +106,10 @@ impl From<ast::Expr> for Expr {
                 let Expr {
                     mut instructions,
                     val,
-                } = Expr::from(*e);
+                } = Expr::from(e.as_ref());
                 let dst = Val::Var(make_temp_var().unwrap().into());
                 instructions.push(Instruction::Unary {
-                    op: op.into(),
+                    op: UnaryOp::from(op),
                     src: val,
                     dst: dst.clone(),
                 });
@@ -107,10 +128,10 @@ pub enum Val {
     Constant(i32),
     Var(Rc<String>),
 }
-impl From<ast::Literal> for Val {
-    fn from(node: ast::Literal) -> Self {
+impl From<&ast::Literal> for Val {
+    fn from(node: &ast::Literal) -> Self {
         match node {
-            ast::Literal::Int(i) => Self::Constant(i),
+            ast::Literal::Int(i) => Self::Constant(*i),
         }
     }
 }
@@ -123,8 +144,8 @@ pub enum UnaryOp {
 
 // TODO: I created a separated version of this struct to prevent different
 // modules from leaking into each other but these structs are identical
-impl From<ast::Unary> for UnaryOp {
-    fn from(node: ast::Unary) -> Self {
+impl From<&ast::Unary> for UnaryOp {
+    fn from(node: &ast::Unary) -> Self {
         match node {
             ast::Unary::Complement => Self::Complement,
             ast::Unary::Negate => Self::Negate,
@@ -148,7 +169,7 @@ mod tests {
     fn test_return_literal() {
         test_and_reset(|| {
             let ast = ast::Stmt::Return(Some(ast::Expr::Literal(ast::Literal::Int(2))));
-            let actual = Vec::<Instruction>::from(ast);
+            let actual = Vec::<Instruction>::from(&ast);
             let expected = vec![Instruction::Return(Some(Val::Constant(2)))];
             assert_eq!(actual, expected);
         })
@@ -161,7 +182,7 @@ mod tests {
                 ast::Unary::Complement,
                 Box::new(ast::Expr::Literal(ast::Literal::Int(2))),
             )));
-            let actual = Vec::<Instruction>::from(ast);
+            let actual = Vec::<Instruction>::from(&ast);
             let expected = vec![
                 Instruction::Unary {
                     op: UnaryOp::Complement,
@@ -186,7 +207,7 @@ mod tests {
                     )),
                 )),
             )));
-            let actual = Vec::<Instruction>::from(ast);
+            let actual = Vec::<Instruction>::from(&ast);
             let expected = vec![
                 Instruction::Unary {
                     op: UnaryOp::Negate,

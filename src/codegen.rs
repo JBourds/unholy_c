@@ -139,13 +139,29 @@ impl<'a> AsmNode<'a> for Instruction {
 }
 
 impl From<&tacky::Instruction> for Vec<Instruction> {
-    fn from(_instruction: &tacky::Instruction) -> Vec<Instruction> {
-        todo!()
-        //match instruction {
-        //    tacky::Instruction::Return(Some(e)) => vec![],
-        //    tacky::Instruction::Unary { op, src, dst } => vec![],
-        //    _ => todo!(),
-        //}
+    fn from(instruction: &tacky::Instruction) -> Vec<Instruction> {
+        match instruction {
+            tacky::Instruction::Return(None) => vec![Instruction::Ret],
+            tacky::Instruction::Return(Some(ref val)) => vec![
+                Instruction::Mov {
+                    src: Operand::from(val),
+                    dst: Operand::Reg(Reg::Eax),
+                },
+                Instruction::Ret,
+            ],
+            tacky::Instruction::Unary { op, src, dst } => {
+                vec![
+                    Instruction::Mov {
+                        src: src.into(),
+                        dst: dst.into(),
+                    },
+                    Instruction::Unary {
+                        op: op.into(),
+                        dst: dst.into(),
+                    },
+                ]
+            }
+        }
     }
 }
 
@@ -176,5 +192,46 @@ impl From<&tacky::Val> for Operand {
             tacky::Val::Constant(i) => Self::Imm(*i),
             tacky::Val::Var(r) => Self::Pseudo(r.clone()),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_tacky_ret_to_asm() {
+        let tacky = tacky::Instruction::Return(Some(tacky::Val::Constant(2)));
+        let expected = vec![
+            Instruction::Mov {
+                src: Operand::Imm(2),
+                dst: Operand::Reg(Reg::Eax),
+            },
+            Instruction::Ret,
+        ];
+        let actual = Vec::<Instruction>::from(&tacky);
+        assert_eq!(expected, actual);
+    }
+
+    #[test]
+    fn test_tacky_unary_to_asm() {
+        let pseudo = Rc::new("pseudoreg".to_string());
+        let tacky = tacky::Instruction::Unary {
+            op: tacky::UnaryOp::Not,
+            src: tacky::Val::Constant(2),
+            dst: tacky::Val::Var(Rc::clone(&pseudo)),
+        };
+        let expected = vec![
+            Instruction::Mov {
+                src: Operand::Imm(2),
+                dst: Operand::Pseudo(Rc::clone(&pseudo)),
+            },
+            Instruction::Unary {
+                op: UnaryOp::Not,
+                dst: Operand::Pseudo(Rc::clone(&pseudo)),
+            },
+        ];
+        let actual = Vec::<Instruction>::from(&tacky);
+        assert_eq!(expected, actual);
     }
 }

@@ -85,6 +85,7 @@ impl<'a> AsmNode<'a> for Instruction {
                 if let Some(e) = expr {
                     let ops = match e {
                         ast::Expr::Literal(e) => Operand::consume(e)?,
+                        _ => todo!(),
                     };
                     ensure!(ops.len() == 1);
                     vec.push(Instruction::Mov {

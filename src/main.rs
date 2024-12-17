@@ -2,6 +2,7 @@ mod asm;
 mod ast;
 mod codegen;
 mod lexer;
+mod tacky;
 
 use std::{ffi::OsStr, io::Write, process::Command};
 
@@ -24,6 +25,9 @@ struct Args {
     codegen: bool,
 
     #[arg(long)]
+    tacky: bool,
+
+    #[arg(long)]
     asm: bool,
 }
 
@@ -34,7 +38,7 @@ fn main() -> Result<()> {
     let contents = preprocess(&args)?;
 
     // Step 2: Compile the preprocessed source file
-    let Some((_, _, asm_nodes)) = lex_parse_codegen(&args, contents)? else {
+    let Some((_, _, asm_nodes, _)) = lex_parse_codegen_tacky(&args, contents)? else {
         return Ok(());
     };
 
@@ -79,16 +83,15 @@ fn preprocess(args: &Args) -> Result<&'static str> {
     Ok(contents.leak())
 }
 
-fn lex_parse_codegen(
+type LexTokens = &'static [lexer::Token<'static>];
+type AstNodes = &'static ast::Program<'static>;
+type AsmNodes = &'static codegen::Program;
+type TackyNodes = &'static tacky::Program;
+
+fn lex_parse_codegen_tacky(
     args: &Args,
     contents: &'static str,
-) -> Result<
-    Option<(
-        &'static [lexer::Token<'static>],
-        &'static ast::Program<'static>,
-        &'static codegen::Program<'static>,
-    )>,
-> {
+) -> Result<Option<(LexTokens, AstNodes, AsmNodes, TackyNodes)>> {
     // Lex
     let tokens: &'static [lexer::Token<'static>] =
         Box::leak(Box::new(lexer::Lexer::lex(contents)?));
@@ -105,19 +108,26 @@ fn lex_parse_codegen(
         return Ok(None);
     }
 
+    // Tacky
+    let tacky: &'static tacky::Program = Box::leak(Box::new(tacky::Program::try_from(ast)?));
+    if args.tacky {
+        println!("Tacky Generation:\n{:#?}", tacky);
+        return Ok(None);
+    }
+
     // Codegen
-    let asm: &'static codegen::Program<'static> = Box::leak(Box::new(codegen::gen(ast)?));
+    let asm: &'static codegen::Program = Box::leak(Box::new(codegen::Program::try_from(tacky)?));
     if args.codegen {
         println!("Generated asm nodes:\n{:#?}", asm);
         return Ok(None);
     }
 
-    Ok(Some((tokens, ast, asm)))
+    Ok(Some((tokens, ast, asm, tacky)))
 }
 
-fn gen_asm<W: std::fmt::Write, T: AsmGen<'static, W>>(
+fn gen_asm<W: std::fmt::Write, T: AsmGen<W>>(
     args: &Args,
-    asm: &'static codegen::Program<'static>,
+    asm: &'static codegen::Program,
 ) -> Result<Option<String>> {
     let mut asm_txt = String::new();
 

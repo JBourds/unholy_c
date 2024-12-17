@@ -1,0 +1,29 @@
+#!/bin/bash
+
+# Run cargo fmt to format the code
+echo "Running cargo fmt..."
+cargo fmt -- --check
+if [ $? -ne 0 ]; then
+    echo "cargo fmt failed. Please format your code before committing."
+    exit 1
+fi
+
+# Run cargo clippy for linting
+echo "Running cargo clippy..."
+cargo clippy --all-targets --all-features -- -D warnings
+if [ $? -ne 0 ]; then
+    echo "cargo clippy failed. Please fix the issues before committing."
+    exit 1
+fi
+
+# Run tests with std feature
+echo "Running tests..."
+# Because some of the tests have fairly long input files it's faster to build
+# in release mode
+cargo test --release -- --nocapture
+if [ $? -ne 0 ]; then
+    echo "Tests failed. Please fix the issues before committing."
+    exit 1
+fi
+
+echo "All checks passed. Ready to commit!"

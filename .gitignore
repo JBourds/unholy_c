@@ -1,1 +1,9 @@
 /target
+
+# Only ignore executable files in the test directory
+
+# Mask out all files
+/tests/*/*
+
+# Unmask tests
+!/tests/*/*.c

@@ -41,7 +41,7 @@ pub struct Function<'a> {
     pub ret_t: Type,
     pub name: &'a str,
     pub signature: Vec<(Type, Option<&'a str>)>,
-    pub statements: Vec<Stmt<'a>>,
+    pub statements: Vec<Stmt>,
 }
 
 impl<'a> AstNode<'a> for Function<'a> {
@@ -110,16 +110,16 @@ impl<'a> AstNode<'a> for Function<'a> {
 }
 
 #[derive(Debug, PartialEq)]
-pub enum Stmt<'a> {
-    Return(Option<Expr<'a>>),
+pub enum Stmt {
+    Return(Option<Expr>),
     //If {
     //    condition: Expr<'a>,
     //    then_stmt: Box<Stmt<'a>>,
     //    else_stmt: Option<Box<Stmt<'a>>>,
     //},
 }
-impl<'a> AstNode<'a> for Stmt<'a> {
-    fn consume(tokens: &'a [Token<'a>]) -> Result<(Stmt<'a>, &'a [Token<'a>])> {
+impl<'a> AstNode<'a> for Stmt {
+    fn consume(tokens: &'a [Token<'a>]) -> Result<(Stmt, &'a [Token<'a>])> {
         match tokens {
             [Token::Return, Token::Semi, ..] => Ok((Self::Return(None), tokens)),
             [Token::Return, tokens @ ..] => {
@@ -138,15 +138,33 @@ impl<'a> AstNode<'a> for Stmt<'a> {
 }
 
 #[derive(Debug, PartialEq)]
-pub enum Expr<'a> {
-    Literal(Literal<'a>),
+pub enum Expr {
+    Literal(Literal),
+    Unary(UnaryOp, Box<Expr>),
 }
-impl<'a> AstNode<'a> for Expr<'a> {
-    fn consume(tokens: &'a [Token<'a>]) -> Result<(Expr<'a>, &'a [Token<'a>])> {
+impl<'a> AstNode<'a> for Expr {
+    fn consume(tokens: &'a [Token<'a>]) -> Result<(Expr, &'a [Token<'a>])> {
         if let Ok((literal, tokens)) = Literal::consume(tokens) {
             Ok((Expr::Literal(literal), tokens))
+        } else if let Ok((unary, tokens)) = UnaryOp::consume(tokens) {
+            // We have to parse an Expr here
+            let (expr, tokens) =
+                Expr::consume(tokens).context("Parsing grammer rule: <unop> <exp> failed")?;
+            Ok((Expr::Unary(unary, Box::new(expr)), tokens))
         } else {
-            bail!("Could not parse valid expression.");
+            // We have 1 more rule to try to parse here
+            // "(" <exp> ")"
+            match tokens {
+                [Token::LParen, tokens @ ..] => {
+                    let (expr, tokens) = Expr::consume(tokens)
+                        .context("Parsing grammer rule: \"(\" <exp> \")\" failed")?;
+                    match tokens {
+                        [Token::RParen, tokens @ ..] => Ok((expr, tokens)),
+                        _ => bail!("Could not find matching right parenthesis"),
+                    }
+                }
+                _ => bail!("Could not parse valid expression."),
+            }
         }
     }
 }
@@ -172,12 +190,10 @@ impl<'a> AstNode<'a> for Type {
 }
 
 #[derive(Debug, PartialEq)]
-pub enum Literal<'a> {
+pub enum Literal {
     Int(i32),
-    #[allow(dead_code)]
-    String(&'a str),
 }
-impl<'a> AstNode<'a> for Literal<'a> {
+impl<'a> AstNode<'a> for Literal {
     fn consume(tokens: &'a [Token<'a>]) -> Result<(Literal, &'a [Token<'a>])> {
         if let Some(token) = tokens.first() {
             match token {
@@ -192,6 +208,29 @@ impl<'a> AstNode<'a> for Literal<'a> {
             }
         } else {
             bail!("No remaining tokens.")
+        }
+    }
+}
+
+#[derive(Debug, PartialEq)]
+pub enum UnaryOp {
+    Complement,
+    Negate,
+}
+
+impl<'a> AstNode<'a> for UnaryOp {
+    fn consume(tokens: &'a [Token<'a>]) -> Result<(Self, &'a [Token<'a>])>
+    where
+        Self: Sized,
+    {
+        if let Some(token) = tokens.first() {
+            match token {
+                Token::Minus => Ok((Self::Negate, &tokens[1..])),
+                Token::BitNot => Ok((Self::Complement, &tokens[1..])),
+                _ => bail!("Expected '-' or '~', found '{}'", token),
+            }
+        } else {
+            bail!("No remaining tokens")
         }
     }
 }
@@ -298,5 +337,164 @@ mod tests {
             },
         };
         assert_eq!(expected, program);
+    }
+
+    #[test]
+    fn parse_unary_bitnot() {
+        let tokens = &[Token::BitNot, Token::Literal("1")];
+
+        let (expr, tokens) = Expr::consume(tokens).unwrap();
+
+        assert!(tokens.is_empty());
+        assert_eq!(
+            expr,
+            Expr::Unary(
+                UnaryOp::Complement,
+                Box::new(Expr::Literal(Literal::Int(1)))
+            )
+        );
+    }
+
+    #[test]
+    fn parse_unary_negate() {
+        let tokens = &[Token::Minus, Token::Literal("1")];
+
+        let (expr, tokens) = Expr::consume(tokens).unwrap();
+
+        assert!(tokens.is_empty());
+        assert_eq!(
+            expr,
+            Expr::Unary(UnaryOp::Negate, Box::new(Expr::Literal(Literal::Int(1))))
+        );
+    }
+
+    #[test]
+    fn parse_nested_expr() {
+        let tokens = &[
+            Token::LParen,
+            Token::LParen,
+            Token::LParen,
+            Token::Literal("1"),
+            Token::RParen,
+            Token::RParen,
+            Token::RParen,
+        ];
+
+        let (expr, tokens) = Expr::consume(tokens).unwrap();
+
+        assert!(tokens.is_empty());
+        assert_eq!(expr, Expr::Literal(Literal::Int(1)));
+    }
+
+    #[test]
+    fn parse_unary_complex() {
+        let tokens = &[
+            Token::LParen,
+            Token::BitNot,
+            Token::LParen,
+            Token::Minus,
+            Token::LParen,
+            Token::Literal("2"),
+            Token::RParen,
+            Token::RParen,
+            Token::RParen,
+        ];
+
+        let (expr, tokens) = Expr::consume(tokens).unwrap();
+
+        assert!(tokens.is_empty());
+
+        assert_eq!(
+            expr,
+            Expr::Unary(
+                UnaryOp::Complement,
+                Box::new(Expr::Unary(
+                    UnaryOp::Negate,
+                    Box::new(Expr::Literal(Literal::Int(2)))
+                ))
+            )
+        );
+    }
+
+    #[test]
+    fn return_2_unary_edition() {
+        let tokens = &[
+            Token::Int,
+            Token::Ident("main"),
+            Token::LParen,
+            Token::Void,
+            Token::RParen,
+            Token::LSquirly,
+            Token::Return,
+            Token::Minus,
+            Token::LParen,
+            Token::Minus,
+            Token::Literal("2"),
+            Token::RParen,
+            Token::Semi,
+            Token::RSquirly,
+        ];
+        let program = parse(tokens).unwrap();
+        let expected = Program {
+            function: Function {
+                ret_t: Type::Int,
+                name: "main",
+                signature: vec![],
+                statements: vec![Stmt::Return(Some(Expr::Unary(
+                    UnaryOp::Negate,
+                    Box::new(Expr::Unary(
+                        UnaryOp::Negate,
+                        Box::new(Expr::Literal(Literal::Int(2))),
+                    )),
+                )))],
+            },
+        };
+        assert_eq!(expected, program);
+    }
+
+    #[test]
+    fn parse_expr_thing() {
+        let tokens = &[
+            Token::Minus,
+            Token::LParen,
+            Token::Minus,
+            Token::Literal("2"),
+            Token::RParen,
+            Token::Semi,
+        ];
+
+        let (expr, tokens) = Expr::consume(tokens).unwrap();
+
+        assert_eq!(&tokens, &[Token::Semi]);
+
+        assert_eq!(
+            expr,
+            Expr::Unary(
+                UnaryOp::Negate,
+                Box::new(Expr::Unary(
+                    UnaryOp::Negate,
+                    Box::new(Expr::Literal(Literal::Int(2))),
+                ))
+            )
+        );
+    }
+
+    #[test]
+    fn parse_expr_stmt() {
+        let tokens = &[
+            Token::Return,
+            Token::Minus,
+            Token::LParen,
+            Token::Minus,
+            Token::Literal("2"),
+            Token::RParen,
+            Token::Semi,
+        ];
+
+        let (_stmt, tokens) = Stmt::consume(tokens).unwrap();
+
+        assert!(tokens.is_empty());
+
+        // println!("{:#?}", stmt);
     }
 }

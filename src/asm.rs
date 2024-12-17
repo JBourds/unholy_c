@@ -2,22 +2,22 @@ use crate::codegen;
 use anyhow::Result;
 use std::fmt::Write;
 
-pub trait AsmGen<'a, W> {
-    fn gen(writer: W, program: &'a codegen::Program<'a>) -> Result<()>
+pub trait AsmGen<W> {
+    fn gen(writer: W, program: &codegen::Program) -> Result<()>
     where
         W: Write;
 }
 
 pub mod x64 {
     use super::AsmGen;
-    use crate::codegen;
+    use crate::codegen::{self, Operand};
     use anyhow::Result;
     use std::fmt::Write;
 
     pub struct Generator;
 
-    impl<'a, W> AsmGen<'a, W> for Generator {
-        fn gen(mut writer: W, program: &'a crate::codegen::Program<'a>) -> Result<()>
+    impl<W> AsmGen<W> for Generator {
+        fn gen(mut writer: W, program: &crate::codegen::Program) -> Result<()>
         where
             W: std::fmt::Write,
         {
@@ -26,35 +26,61 @@ pub mod x64 {
         }
     }
 
-    fn gen_program(w: &mut impl Write, program: &codegen::Program<'_>) -> Result<()> {
-        w.write_str("\t.intel_syntax noprefix\n")?;
+    fn gen_program(w: &mut impl Write, program: &codegen::Program) -> Result<()> {
+        w.write_str("\t.intel_syntax noprefix\n\n")?;
 
         gen_function(w, &program.function)?;
 
-        w.write_str("\t.section .note.GNU-stack,\"\",@progbits\n")?;
+        w.write_str("\n\t.section .note.GNU-stack,\"\",@progbits\n")?;
         Ok(())
     }
 
-    fn gen_function(w: &mut impl Write, function: &codegen::Function<'_>) -> Result<()> {
+    fn gen_function(w: &mut impl Write, function: &codegen::Function) -> Result<()> {
         w.write_fmt(format_args!("\t.globl {}\n", function.name))?;
         w.write_fmt(format_args!("{}:\n", function.name))?;
 
         for instr in function.instructions.iter() {
-            w.write_char('\t')?;
-            gen_instruction(w, instr)?;
+            gen_instruction(w, &instr.op)?;
         }
 
         Ok(())
     }
 
-    fn gen_instruction(w: &mut impl Write, instr: &codegen::Instruction) -> Result<()> {
+    fn gen_instruction(w: &mut impl Write, instr: &codegen::InstructionType) -> Result<()> {
         match instr {
-            codegen::Instruction::Mov { src, dst } => {
+            codegen::InstructionType::Mov { src, dst } => {
+                let specifier = match dst {
+                    Operand::StackOffset(offset) => match offset {
+                        2 => "word ptr ",
+                        4 => "dword ptr ",
+                        8 => "qword ptr ",
+                        _ => "",
+                    },
+                    _ => "",
+                };
                 let src = gen_operand(src);
                 let dst = gen_operand(dst);
-                w.write_fmt(format_args!("mov {dst}, {src}\n"))?;
+                w.write_fmt(format_args!("\tmov {specifier}{dst}, {src}\n"))?;
             }
-            codegen::Instruction::Ret => w.write_str("ret\n")?,
+            codegen::InstructionType::Ret => {
+                w.write_str("\tmovq rsp, rbp\n")?;
+                w.write_str("\tpopq rbp\n")?;
+                w.write_str("\tret\n")?;
+            }
+            // TODO: Unhardcode size
+            codegen::InstructionType::Unary { op, dst } => match op {
+                codegen::UnaryOp::Complement => {
+                    w.write_fmt(format_args!("\tnot dword ptr {}\n", gen_operand(dst)))?;
+                }
+                codegen::UnaryOp::Negate => {
+                    w.write_fmt(format_args!("\tneg dword ptr {}\n", gen_operand(dst)))?;
+                }
+            },
+            codegen::InstructionType::AllocStack(size) => {
+                w.write_str("\tpushq rbp\n")?;
+                w.write_str("\tmovq rbp, rsp\n")?;
+                w.write_fmt(format_args!("\tsub rsp, {}\n", size))?;
+            }
         }
         Ok(())
     }
@@ -62,7 +88,9 @@ pub mod x64 {
     fn gen_operand(operand: &codegen::Operand) -> String {
         match operand {
             codegen::Operand::Imm(i) => format!("{i}"),
-            codegen::Operand::Register => "eax".to_string(),
+            codegen::Operand::Reg(r) => format!("{r}"),
+            codegen::Operand::StackOffset(offset) => format!("[rbp-{}]", offset),
+            _ => todo!(),
         }
     }
 }

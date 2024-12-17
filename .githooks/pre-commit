@@ -10,7 +10,6 @@ fi
 
 # Run cargo clippy for linting
 echo "Running cargo clippy..."
-cargo clippy --fix --allow-staged --allow-dirty
 cargo clippy --all-targets --all-features -- -D warnings
 if [ $? -ne 0 ]; then
     echo "cargo clippy failed. Please fix the issues before committing."

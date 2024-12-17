@@ -1,5 +1,7 @@
 use crate::tacky;
 use anyhow::{Context, Result};
+use std::collections::hash_map::Entry;
+use std::collections::HashMap;
 use std::fmt;
 use std::rc::Rc;
 
@@ -28,7 +30,7 @@ impl TryFrom<&tacky::Function> for Function {
     fn try_from(node: &tacky::Function) -> Result<Self> {
         // Mutable since we adjust the `AllocStack` instruction once we have
         // done compiler passes to determine actual required stack offset
-        let instructions: Vec<Instruction> = node
+        let mut instructions: Vec<Instruction> = node
             .instructions
             .iter()
             .map(Vec::<Instruction>::try_from)
@@ -40,26 +42,15 @@ impl TryFrom<&tacky::Function> for Function {
             })
             .context("Failed to generate function definition from statements.")?;
 
-        // Get stack offsets for each pseudoregister
-        //let mut offset = 0;
-        //let stack_sizes = instructions
-        //    .iter()
-        //    .skip(1)
-        //    .fold(HashMap::new(), |mut map, instr| {
-        //        instr.pseudoregisters().iter().for_each(|op| {
-        //            if let Some(Operand::Pseudo { name, size }) = op {
-        //                if let Entry::Vacant(e) = map.entry(&name) {
-        //                    offset -= size;
-        //                    e.insert(offset);
-        //                }
-        //            }
-        //        });
-        //        map
-        //    });
-
-        // TODO: Fixup instructions
-
-        // TODO: Unhardcode the assumption this is 4 size
+        // Get stack offsets for each pseudoregister as we fix them up
+        let mut stack_offsets = HashMap::new();
+        let mut stack_bound = 0;
+        let mut fixed_instructions: Vec<FixedInstruction> = instructions
+            .drain(..)
+            .map(|instr| instr.fix_stack(&mut stack_offsets, &mut stack_bound))
+            .collect();
+        // Function prologue and epilogue (allocate and teardown stack)
+        fixed_instructions[0].0 = Instruction::AllocStack(stack_bound);
 
         Ok(Function {
             name: Rc::clone(&node.name),
@@ -104,48 +95,43 @@ impl fmt::Display for Reg {
 pub enum Instruction {
     Mov { src: Operand, dst: Operand },
     Unary { op: UnaryOp, dst: Operand },
-    AllocStack(i32),
+    AllocStack(usize),
     Ret,
 }
 
+pub struct FixedInstruction(pub Instruction);
+
 impl Instruction {
-    // TODO: Is 3 the max number of args for an instruction?
     #[allow(dead_code)]
-    fn pseudoregisters(&self) -> [Option<Operand>; 3] {
-        match self {
-            Instruction::Mov { src, dst } => match (src, dst) {
-                (
-                    Operand::Pseudo { name: r1, size: s1 },
-                    Operand::Pseudo { name: r2, size: s2 },
-                ) => [
-                    Some(Operand::Pseudo {
-                        name: Rc::clone(r1),
-                        size: *s1,
-                    }),
-                    Some(Operand::Pseudo {
-                        name: Rc::clone(r2),
-                        size: *s2,
-                    }),
-                    None,
-                ],
-                _ => [None, None, None],
-            },
-            Instruction::Unary { op: _, dst } => {
-                if let Operand::Pseudo { name, size } = dst {
-                    [
-                        Some(Operand::Pseudo {
-                            name: Rc::clone(name),
-                            size: *size,
-                        }),
-                        None,
-                        None,
-                    ]
-                } else {
-                    [None, None, None]
+    fn fix_stack(
+        self,
+        stack_offsets: &mut HashMap<Rc<String>, usize>,
+        offset: &mut usize,
+    ) -> FixedInstruction {
+        let mut convert_operand_offset = |op| {
+            if let Operand::Pseudo { ref name, size } = op {
+                if let Entry::Vacant(e) = stack_offsets.entry(Rc::clone(name)) {
+                    *offset += size;
+                    e.insert(*offset);
                 }
+                // SAFETY: We just checked this condition
+                unsafe { Operand::StackOffset(*stack_offsets.get(name).unwrap_unchecked()) }
+            } else {
+                op
             }
-            _ => [None, None, None],
-        }
+        };
+
+        FixedInstruction(match self {
+            Instruction::Mov { src, dst } => Instruction::Mov {
+                src: convert_operand_offset(src),
+                dst: convert_operand_offset(dst),
+            },
+            Instruction::Unary { op, dst } => Instruction::Unary {
+                op,
+                dst: convert_operand_offset(dst),
+            },
+            instr => instr,
+        })
     }
 }
 
@@ -160,18 +146,16 @@ impl From<&tacky::Instruction> for Vec<Instruction> {
                 },
                 Instruction::Ret,
             ],
-            tacky::Instruction::Unary { op, src, dst } => {
-                vec![
-                    Instruction::Mov {
-                        src: src.into(),
-                        dst: dst.into(),
-                    },
-                    Instruction::Unary {
-                        op: op.into(),
-                        dst: dst.into(),
-                    },
-                ]
-            }
+            tacky::Instruction::Unary { op, src, dst } => vec![
+                Instruction::Mov {
+                    src: src.into(),
+                    dst: dst.into(),
+                },
+                Instruction::Unary {
+                    op: op.into(),
+                    dst: dst.into(),
+                },
+            ],
         }
     }
 }
@@ -181,7 +165,7 @@ pub enum Operand {
     Imm(i32),
     Reg(Reg),
     Pseudo { name: Rc<String>, size: usize },
-    Stack(i32),
+    StackOffset(usize),
 }
 
 // TODO: Unhardcode size of 4

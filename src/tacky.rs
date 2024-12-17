@@ -98,11 +98,11 @@ pub struct Expr {
 impl From<&ast::Expr> for Expr {
     fn from(node: &ast::Expr) -> Self {
         match node {
-            ast::Expr::Literal(v) => Self {
+            ast::Expr::Factor(ast::Factor::Literal(v)) => Self {
                 instructions: vec![],
                 val: Val::from(v),
             },
-            ast::Expr::Unary(op, e) => {
+            ast::Expr::Factor(ast::Factor::Unary(op, e)) => {
                 let Expr {
                     mut instructions,
                     val,
@@ -118,6 +118,7 @@ impl From<&ast::Expr> for Expr {
                     val: dst,
                 }
             }
+            ast::Expr::Binary(_, _, _) => todo!(),
         }
     }
 }

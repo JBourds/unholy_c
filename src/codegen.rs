@@ -451,4 +451,7 @@ mod tests {
         let actual = Vec::<Instruction<Initial>>::from(&tacky);
         assert_eq!(expected, actual);
     }
+
+    #[test]
+    fn test_binary_expressions() {}
 }

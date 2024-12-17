@@ -177,7 +177,7 @@ impl Expr {
             // Update tokens in outer scope
             tokens = tokens_inner;
         }
-        return Ok((left, tokens));
+        Ok((left, tokens))
     }
 }
 
@@ -437,12 +437,21 @@ mod tests {
     }
 
     #[test]
-    fn parse_unary_bitnot() {
+    fn parse_unary_bitnot_err() {
         let tokens = &[Token::BitNot, Token::Literal("1")];
 
-        let (expr, tokens) = Expr::parse(tokens, 0).unwrap();
+        let parse = Factor::parse(tokens);
 
-        assert!(tokens.is_empty());
+        assert!(parse.is_err())
+    }
+
+    #[test]
+    fn parse_unary_bitnot() {
+        let tokens = &[Token::BitNot, Token::Literal("1"), Token::Semi];
+
+        let (expr, tokens) = Factor::parse(tokens).unwrap();
+
+        assert_eq!(tokens, &[Token::Semi]);
         assert_eq!(
             expr,
             Expr::Unary {
@@ -453,12 +462,21 @@ mod tests {
     }
 
     #[test]
-    fn parse_unary_negate() {
+    fn parse_unary_negate_err() {
         let tokens = &[Token::Minus, Token::Literal("1")];
 
-        let (expr, tokens) = Expr::parse(tokens, 0).unwrap();
+        let parse = Factor::parse(tokens);
 
-        assert!(tokens.is_empty());
+        assert!(parse.is_err());
+    }
+
+    #[test]
+    fn parse_unary_negate() {
+        let tokens = &[Token::Minus, Token::Literal("1"), Token::Semi];
+
+        let (expr, tokens) = Factor::parse(tokens).unwrap();
+
+        assert_eq!(tokens, &[Token::Semi]);
         assert_eq!(
             expr,
             Expr::Unary {
@@ -480,7 +498,7 @@ mod tests {
             Token::RParen,
         ];
 
-        let (expr, tokens) = Expr::parse(tokens, 0).unwrap();
+        let (expr, tokens) = Factor::parse(tokens).unwrap();
 
         assert!(tokens.is_empty());
         assert_eq!(expr, Expr::Literal(Literal::Int(1)));
@@ -500,7 +518,7 @@ mod tests {
             Token::RParen,
         ];
 
-        let (expr, tokens) = Expr::parse(tokens, 0).unwrap();
+        let (expr, tokens) = Factor::parse(tokens).unwrap();
 
         assert!(tokens.is_empty());
 

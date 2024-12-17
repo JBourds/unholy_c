@@ -1,71 +1,70 @@
-use crate::ast;
 use crate::tacky;
-use anyhow::{ensure, Result};
+use anyhow::{Context, Result};
 use std::fmt;
 use std::rc::Rc;
 
-pub fn gen<'a>(program: &'a ast::Program<'a>) -> Result<Program<'a>> {
-    let prog = Program::consume(program)?;
-    assert!(prog.len() == 1);
-    Ok(prog.into_iter().next().unwrap())
-}
-
-pub trait AsmNode<'a> {
-    type T;
-
-    fn consume(node: &'a Self::T) -> Result<Vec<Self>>
-    where
-        Self: Sized;
-}
-
 #[derive(Debug, PartialEq)]
-pub struct Program<'a> {
-    pub function: Function<'a>,
+pub struct Program {
+    pub function: Function,
 }
 
-impl<'a> AsmNode<'a> for Program<'a> {
-    type T = ast::Program<'a>;
-
-    fn consume(node: &'a Self::T) -> Result<Vec<Self>>
-    where
-        Self: Sized,
-    {
-        let func = Function::consume(&node.function)?;
-
-        assert!(func.len() == 1);
-
-        Ok(vec![Program {
-            function: func.into_iter().next().unwrap(),
-        }])
+impl TryFrom<&tacky::Program> for Program {
+    type Error = anyhow::Error;
+    fn try_from(node: &tacky::Program) -> Result<Self> {
+        let function = Function::try_from(&node.function)
+            .context("Failed to compile intermediate representation into assembly nodes.")?;
+        Ok(Program { function })
     }
 }
 
 #[derive(Debug, PartialEq)]
-pub struct Function<'a> {
-    pub name: &'a str,
+pub struct Function {
+    pub name: Rc<String>,
     pub instructions: Vec<Instruction>,
 }
 
-impl<'a> AsmNode<'a> for Function<'a> {
-    type T = ast::Function<'a>;
-
-    fn consume(node: &'a Self::T) -> Result<Vec<Self>>
-    where
-        Self: Sized,
-    {
-        let instructions: Result<Vec<Instruction>> = node
-            .statements
+impl TryFrom<&tacky::Function> for Function {
+    type Error = anyhow::Error;
+    fn try_from(node: &tacky::Function) -> Result<Self> {
+        // Mutable since we adjust the `AllocStack` instruction once we have
+        // done compiler passes to determine actual required stack offset
+        let instructions: Vec<Instruction> = node
+            .instructions
             .iter()
-            .map(Instruction::consume)
-            .try_fold(vec![], |mut unrolled, result| {
-                unrolled.extend(result?);
-                Ok(unrolled)
-            });
+            .map(Vec::<Instruction>::try_from)
+            .try_fold(vec![Instruction::AllocStack(0)], |mut unrolled, result| {
+                unrolled.extend(result.context(
+                    "Failed to parse assembly function from intermediate representation.",
+                )?);
+                Ok::<Vec<Instruction>, Self::Error>(unrolled)
+            })
+            .context("Failed to generate function definition from statements.")?;
 
-        Ok(vec![Function {
-            name: node.name,
-            instructions: instructions?,
-        }])
+        // Get stack offsets for each pseudoregister
+        //let mut offset = 0;
+        //let stack_sizes = instructions
+        //    .iter()
+        //    .skip(1)
+        //    .fold(HashMap::new(), |mut map, instr| {
+        //        instr.pseudoregisters().iter().for_each(|op| {
+        //            if let Some(Operand::Pseudo { name, size }) = op {
+        //                if let Entry::Vacant(e) = map.entry(&name) {
+        //                    offset -= size;
+        //                    e.insert(offset);
+        //                }
+        //            }
+        //        });
+        //        map
+        //    });
+
+        // TODO: Fixup instructions
+
+        // TODO: Unhardcode the assumption this is 4 size
+
+        Ok(Function {
+            name: Rc::clone(&node.name),
+            instructions,
+        })
     }
 }
 
@@ -109,31 +108,43 @@ pub enum Instruction {
     Ret,
 }
 
-impl<'a> AsmNode<'a> for Instruction {
-    type T = ast::Stmt;
-
-    fn consume(node: &'a Self::T) -> Result<Vec<Self>>
-    where
-        Self: Sized,
-    {
-        match node {
-            ast::Stmt::Return(expr) => {
-                let mut vec = vec![];
-                if let Some(e) = expr {
-                    let ops = match e {
-                        ast::Expr::Literal(e) => Operand::consume(e)?,
-                        _ => todo!(),
-                    };
-                    ensure!(ops.len() == 1);
-                    // TODO: Is this the right register?
-                    vec.push(Instruction::Mov {
-                        src: ops.into_iter().next().unwrap(),
-                        dst: Operand::Reg(Reg::Eax),
-                    });
+impl Instruction {
+    // TODO: Is 3 the max number of args for an instruction?
+    #[allow(dead_code)]
+    fn pseudoregisters(&self) -> [Option<Operand>; 3] {
+        match self {
+            Instruction::Mov { src, dst } => match (src, dst) {
+                (
+                    Operand::Pseudo { name: r1, size: s1 },
+                    Operand::Pseudo { name: r2, size: s2 },
+                ) => [
+                    Some(Operand::Pseudo {
+                        name: Rc::clone(r1),
+                        size: *s1,
+                    }),
+                    Some(Operand::Pseudo {
+                        name: Rc::clone(r2),
+                        size: *s2,
+                    }),
+                    None,
+                ],
+                _ => [None, None, None],
+            },
+            Instruction::Unary { op: _, dst } => {
+                if let Operand::Pseudo { name, size } = dst {
+                    [
+                        Some(Operand::Pseudo {
+                            name: Rc::clone(name),
+                            size: *size,
+                        }),
+                        None,
+                        None,
+                    ]
+                } else {
+                    [None, None, None]
                 }
-                vec.push(Instruction::Ret);
-                Ok(vec)
             }
+            _ => [None, None, None],
         }
     }
 }
@@ -169,28 +180,19 @@ impl From<&tacky::Instruction> for Vec<Instruction> {
 pub enum Operand {
     Imm(i32),
     Reg(Reg),
-    Pseudo(Rc<String>),
+    Pseudo { name: Rc<String>, size: usize },
     Stack(i32),
 }
 
-impl<'a> AsmNode<'a> for Operand {
-    type T = ast::Literal;
-
-    fn consume(node: &'a Self::T) -> Result<Vec<Self>>
-    where
-        Self: Sized,
-    {
-        match *node {
-            ast::Literal::Int(i) => Ok(vec![Operand::Imm(i)]),
-        }
-    }
-}
-
+// TODO: Unhardcode size of 4
 impl From<&tacky::Val> for Operand {
     fn from(val: &tacky::Val) -> Self {
         match val {
             tacky::Val::Constant(i) => Self::Imm(*i),
-            tacky::Val::Var(r) => Self::Pseudo(r.clone()),
+            tacky::Val::Var(r) => Self::Pseudo {
+                name: Rc::clone(r),
+                size: 4,
+            },
         }
     }
 }
@@ -224,11 +226,74 @@ mod tests {
         let expected = vec![
             Instruction::Mov {
                 src: Operand::Imm(2),
-                dst: Operand::Pseudo(Rc::clone(&pseudo)),
+                dst: Operand::Pseudo {
+                    name: Rc::clone(&pseudo),
+                    size: 4,
+                },
             },
             Instruction::Unary {
                 op: UnaryOp::Not,
-                dst: Operand::Pseudo(Rc::clone(&pseudo)),
+                dst: Operand::Pseudo {
+                    name: Rc::clone(&pseudo),
+                    size: 4,
+                },
+            },
+        ];
+        let actual = Vec::<Instruction>::from(&tacky);
+        assert_eq!(expected, actual);
+    }
+
+    #[test]
+    fn test_stack_pass() {
+        let pseudo = Rc::new("pseudoreg".to_string());
+        let tacky = tacky::Instruction::Unary {
+            op: tacky::UnaryOp::Not,
+            src: tacky::Val::Constant(2),
+            dst: tacky::Val::Var(Rc::clone(&pseudo)),
+        };
+        let expected = vec![
+            Instruction::Mov {
+                src: Operand::Imm(2),
+                dst: Operand::Pseudo {
+                    name: Rc::clone(&pseudo),
+                    size: 4,
+                },
+            },
+            Instruction::Unary {
+                op: UnaryOp::Not,
+                dst: Operand::Pseudo {
+                    name: Rc::clone(&pseudo),
+                    size: 4,
+                },
+            },
+        ];
+        let actual = Vec::<Instruction>::from(&tacky);
+
+        assert_eq!(expected, actual);
+    }
+
+    #[test]
+    fn test_instruction_fixup() {
+        let pseudo = Rc::new("pseudoreg".to_string());
+        let tacky = tacky::Instruction::Unary {
+            op: tacky::UnaryOp::Not,
+            src: tacky::Val::Constant(2),
+            dst: tacky::Val::Var(Rc::clone(&pseudo)),
+        };
+        let expected = vec![
+            Instruction::Mov {
+                src: Operand::Imm(2),
+                dst: Operand::Pseudo {
+                    name: Rc::clone(&pseudo),
+                    size: 4,
+                },
+            },
+            Instruction::Unary {
+                op: UnaryOp::Not,
+                dst: Operand::Pseudo {
+                    name: Rc::clone(&pseudo),
+                    size: 4,
+                },
             },
         ];
         let actual = Vec::<Instruction>::from(&tacky);

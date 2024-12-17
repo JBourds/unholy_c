@@ -2,8 +2,8 @@ use crate::codegen;
 use anyhow::Result;
 use std::fmt::Write;
 
-pub trait AsmGen<'a, W> {
-    fn gen(writer: W, program: &'a codegen::Program<'a>) -> Result<()>
+pub trait AsmGen<W> {
+    fn gen(writer: W, program: &codegen::Program) -> Result<()>
     where
         W: Write;
 }
@@ -16,8 +16,8 @@ pub mod x64 {
 
     pub struct Generator;
 
-    impl<'a, W> AsmGen<'a, W> for Generator {
-        fn gen(mut writer: W, program: &'a crate::codegen::Program<'a>) -> Result<()>
+    impl<W> AsmGen<W> for Generator {
+        fn gen(mut writer: W, program: &crate::codegen::Program) -> Result<()>
         where
             W: std::fmt::Write,
         {
@@ -26,7 +26,7 @@ pub mod x64 {
         }
     }
 
-    fn gen_program(w: &mut impl Write, program: &codegen::Program<'_>) -> Result<()> {
+    fn gen_program(w: &mut impl Write, program: &codegen::Program) -> Result<()> {
         w.write_str("\t.intel_syntax noprefix\n")?;
 
         gen_function(w, &program.function)?;
@@ -35,7 +35,7 @@ pub mod x64 {
         Ok(())
     }
 
-    fn gen_function(w: &mut impl Write, function: &codegen::Function<'_>) -> Result<()> {
+    fn gen_function(w: &mut impl Write, function: &codegen::Function) -> Result<()> {
         w.write_fmt(format_args!("\t.globl {}\n", function.name))?;
         w.write_fmt(format_args!("{}:\n", function.name))?;
 

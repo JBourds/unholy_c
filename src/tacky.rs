@@ -25,7 +25,7 @@ fn make_temp_var() -> Result<String> {
 
 #[derive(Debug, PartialEq)]
 pub struct Program {
-    function: Function,
+    pub function: Function,
 }
 
 impl TryFrom<&ast::Program<'_>> for Program {
@@ -40,8 +40,8 @@ impl TryFrom<&ast::Program<'_>> for Program {
 
 #[derive(Debug, PartialEq)]
 pub struct Function {
-    name: String,
-    instructions: Vec<Instruction>,
+    pub name: Rc<String>,
+    pub instructions: Vec<Instruction>,
 }
 impl TryFrom<&ast::Function<'_>> for Function {
     type Error = anyhow::Error;
@@ -60,7 +60,7 @@ impl TryFrom<&ast::Function<'_>> for Function {
                 instructions
             });
         Ok(Self {
-            name: name.to_string(),
+            name: Rc::new(name.to_string()),
             instructions,
         })
     }

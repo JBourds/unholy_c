@@ -85,7 +85,7 @@ fn preprocess(args: &Args) -> Result<&'static str> {
 
 type LexTokens = &'static [lexer::Token<'static>];
 type AstNodes = &'static ast::Program<'static>;
-type AsmNodes = &'static codegen::Program<'static>;
+type AsmNodes = &'static codegen::Program;
 type TackyNodes = &'static tacky::Program;
 
 fn lex_parse_codegen_tacky(
@@ -116,7 +116,7 @@ fn lex_parse_codegen_tacky(
     }
 
     // Codegen
-    let asm: &'static codegen::Program<'static> = Box::leak(Box::new(codegen::gen(ast)?));
+    let asm: &'static codegen::Program = Box::leak(Box::new(codegen::Program::try_from(tacky)?));
     if args.codegen {
         println!("Generated asm nodes:\n{:#?}", asm);
         return Ok(None);
@@ -125,9 +125,9 @@ fn lex_parse_codegen_tacky(
     Ok(Some((tokens, ast, asm, tacky)))
 }
 
-fn gen_asm<W: std::fmt::Write, T: AsmGen<'static, W>>(
+fn gen_asm<W: std::fmt::Write, T: AsmGen<W>>(
     args: &Args,
-    asm: &'static codegen::Program<'static>,
+    asm: &'static codegen::Program,
 ) -> Result<Option<String>> {
     let mut asm_txt = String::new();
 

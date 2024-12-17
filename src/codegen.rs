@@ -28,8 +28,6 @@ pub struct Function {
 impl TryFrom<&tacky::Function> for Function {
     type Error = anyhow::Error;
     fn try_from(node: &tacky::Function) -> Result<Self> {
-        // Mutable since we adjust the `AllocStack` instruction once we have
-        // done compiler passes to determine actual required stack offset
         let mut instructions: Vec<Instruction> = node
             .instructions
             .iter()
@@ -49,7 +47,6 @@ impl TryFrom<&tacky::Function> for Function {
             .drain(..)
             .map(|instr| instr.fix_stack(&mut stack_offsets, &mut stack_bound))
             .collect();
-        // Function prologue and epilogue (allocate and teardown stack)
         fixed_instructions[0].0 = Instruction::AllocStack(stack_bound);
 
         Ok(Function {
@@ -106,13 +103,13 @@ impl Instruction {
     fn fix_stack(
         self,
         stack_offsets: &mut HashMap<Rc<String>, usize>,
-        offset: &mut usize,
+        stack_bound: &mut usize,
     ) -> FixedInstruction {
         let mut convert_operand_offset = |op| {
             if let Operand::Pseudo { ref name, size } = op {
                 if let Entry::Vacant(e) = stack_offsets.entry(Rc::clone(name)) {
-                    *offset += size;
-                    e.insert(*offset);
+                    *stack_bound += size;
+                    e.insert(*stack_bound);
                 }
                 // SAFETY: We just checked this condition
                 unsafe { Operand::StackOffset(*stack_offsets.get(name).unwrap_unchecked()) }

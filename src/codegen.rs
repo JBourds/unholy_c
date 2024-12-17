@@ -45,7 +45,7 @@ impl TryFrom<&tacky::Function> for Function {
         let mut stack_bound = 0;
         let mut fixed_instructions: Vec<FixedInstruction> = instructions
             .drain(..)
-            .map(|instr| instr.fix_stack(&mut stack_offsets, &mut stack_bound))
+            .map(|instr| FixedInstruction::new(instr, &mut stack_offsets, &mut stack_bound))
             .collect();
         fixed_instructions[0].0 = Instruction::AllocStack(stack_bound);
 
@@ -97,14 +97,12 @@ pub enum Instruction {
 }
 
 pub struct FixedInstruction(pub Instruction);
-
-impl Instruction {
-    #[allow(dead_code)]
-    fn fix_stack(
-        self,
+impl FixedInstruction {
+    fn new(
+        instruction: Instruction,
         stack_offsets: &mut HashMap<Rc<String>, usize>,
         stack_bound: &mut usize,
-    ) -> FixedInstruction {
+    ) -> Self {
         let mut convert_operand_offset = |op| {
             if let Operand::Pseudo { ref name, size } = op {
                 if let Entry::Vacant(e) = stack_offsets.entry(Rc::clone(name)) {
@@ -118,7 +116,7 @@ impl Instruction {
             }
         };
 
-        FixedInstruction(match self {
+        FixedInstruction(match instruction {
             Instruction::Mov { src, dst } => Instruction::Mov {
                 src: convert_operand_offset(src),
                 dst: convert_operand_offset(dst),

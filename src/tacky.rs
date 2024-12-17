@@ -138,9 +138,8 @@ impl From<&ast::Literal> for Val {
 
 #[derive(Debug, PartialEq)]
 pub enum UnaryOp {
-    Complement,
     Negate,
-    Not,
+    Complement,
 }
 
 // TODO: I created a separated version of this struct to prevent different
@@ -150,7 +149,6 @@ impl From<&ast::UnaryOp> for UnaryOp {
         match node {
             ast::UnaryOp::Complement => Self::Complement,
             ast::UnaryOp::Negate => Self::Negate,
-            ast::UnaryOp::Not => Self::Not,
         }
     }
 }

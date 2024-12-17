@@ -216,7 +216,6 @@ impl<'a> AstNode<'a> for Literal {
 pub enum UnaryOp {
     Complement,
     Negate,
-    Not,
 }
 
 impl<'a> AstNode<'a> for UnaryOp {

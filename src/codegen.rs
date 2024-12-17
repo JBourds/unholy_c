@@ -72,17 +72,15 @@ impl TryFrom<&tacky::Function> for Function {
 
 #[derive(Debug, PartialEq)]
 pub enum UnaryOp {
-    Complement,
     Negate,
-    Not,
+    Complement,
 }
 
 impl From<&tacky::UnaryOp> for UnaryOp {
     fn from(node: &tacky::UnaryOp) -> Self {
         match node {
-            tacky::UnaryOp::Complement => Self::Complement,
             tacky::UnaryOp::Negate => Self::Negate,
-            tacky::UnaryOp::Not => Self::Not,
+            tacky::UnaryOp::Complement => Self::Complement,
         }
     }
 }
@@ -271,7 +269,7 @@ mod tests {
     fn test_tacky_unary_to_asm() {
         let pseudo = Rc::new("pseudoreg".to_string());
         let tacky = tacky::Instruction::Unary {
-            op: tacky::UnaryOp::Not,
+            op: tacky::UnaryOp::Complement,
             src: tacky::Val::Constant(2),
             dst: tacky::Val::Var(Rc::clone(&pseudo)),
         };
@@ -284,7 +282,7 @@ mod tests {
                 },
             },
             InstructionType::Unary {
-                op: UnaryOp::Not,
+                op: UnaryOp::Complement,
                 dst: Operand::Pseudo {
                     name: Rc::clone(&pseudo),
                     size: 4,
@@ -302,7 +300,7 @@ mod tests {
     fn test_stack_pass() {
         let pseudo = Rc::new("pseudoreg".to_string());
         let tacky = tacky::Instruction::Unary {
-            op: tacky::UnaryOp::Not,
+            op: tacky::UnaryOp::Complement,
             src: tacky::Val::Constant(2),
             dst: tacky::Val::Var(Rc::clone(&pseudo)),
         };
@@ -315,7 +313,7 @@ mod tests {
                 },
             },
             InstructionType::Unary {
-                op: UnaryOp::Not,
+                op: UnaryOp::Complement,
                 dst: Operand::Pseudo {
                     name: Rc::clone(&pseudo),
                     size: 4,
@@ -334,7 +332,7 @@ mod tests {
     fn test_instruction_fixup() {
         let pseudo = Rc::new("pseudoreg".to_string());
         let tacky = tacky::Instruction::Unary {
-            op: tacky::UnaryOp::Not,
+            op: tacky::UnaryOp::Complement,
             src: tacky::Val::Constant(2),
             dst: tacky::Val::Var(Rc::clone(&pseudo)),
         };
@@ -347,7 +345,7 @@ mod tests {
                 },
             },
             InstructionType::Unary {
-                op: UnaryOp::Not,
+                op: UnaryOp::Complement,
                 dst: Operand::Pseudo {
                     name: Rc::clone(&pseudo),
                     size: 4,

@@ -10,7 +10,7 @@ pub trait AsmGen<W> {
 
 pub mod x64 {
     use super::AsmGen;
-    use crate::codegen;
+    use crate::codegen::{self, Operand};
     use anyhow::Result;
     use std::fmt::Write;
 
@@ -27,20 +27,19 @@ pub mod x64 {
     }
 
     fn gen_program(w: &mut impl Write, program: &codegen::Program) -> Result<()> {
-        w.write_str("\t.intel_syntax noprefix\n")?;
+        w.write_str(".intel_syntax noprefix\n\n")?;
 
         gen_function(w, &program.function)?;
 
-        w.write_str("\t.section .note.GNU-stack,\"\",@progbits\n")?;
+        w.write_str("\n.section .note.GNU-stack,\"\",@progbits\n")?;
         Ok(())
     }
 
     fn gen_function(w: &mut impl Write, function: &codegen::Function) -> Result<()> {
-        w.write_fmt(format_args!("\t.globl {}\n", function.name))?;
+        w.write_fmt(format_args!(".globl {}\n", function.name))?;
         w.write_fmt(format_args!("{}:\n", function.name))?;
 
         for instr in function.instructions.iter() {
-            w.write_char('\t')?;
             gen_instruction(w, &instr.op)?;
         }
 
@@ -50,12 +49,36 @@ pub mod x64 {
     fn gen_instruction(w: &mut impl Write, instr: &codegen::InstructionType) -> Result<()> {
         match instr {
             codegen::InstructionType::Mov { src, dst } => {
+                let specifier = match dst {
+                    Operand::StackOffset(offset) => match offset {
+                        2 => "word ptr ",
+                        4 => "dword ptr ",
+                        8 => "qword ptr ",
+                        _ => "",
+                    },
+                    _ => "",
+                };
                 let src = gen_operand(src);
                 let dst = gen_operand(dst);
-                w.write_fmt(format_args!("mov {dst}, {src}\n"))?;
+                w.write_fmt(format_args!("\tmov {specifier}{dst}, {src}\n"))?;
             }
-            codegen::InstructionType::Ret => w.write_str("ret\n")?,
-            _ => todo!(),
+            codegen::InstructionType::Ret => {
+                w.write_str("\tmovq rsp, rbp\n")?;
+                w.write_str("\tpopq rbp\n")?;
+                w.write_str("\tret\n")?;
+            }
+            // TODO: Unhardcode size
+            codegen::InstructionType::Unary { op, dst } => match op {
+                codegen::UnaryOp::Complement => {
+                    w.write_fmt(format_args!("\tnot dword ptr {}\n", gen_operand(dst)))?;
+                }
+                codegen::UnaryOp::Negate => {
+                    w.write_fmt(format_args!("\tneg dword ptr {}\n", gen_operand(dst)))?;
+                }
+            },
+            codegen::InstructionType::AllocStack(size) => {
+                w.write_fmt(format_args!("\tsub rbp, {}\n", size))?;
+            }
         }
         Ok(())
     }
@@ -64,6 +87,7 @@ pub mod x64 {
         match operand {
             codegen::Operand::Imm(i) => format!("{i}"),
             codegen::Operand::Reg(r) => format!("{r}"),
+            codegen::Operand::StackOffset(offset) => format!("[rbp-{}]", offset),
             _ => todo!(),
         }
     }

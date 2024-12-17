@@ -123,7 +123,7 @@ impl<'a> AstNode<'a> for Stmt {
         match tokens {
             [Token::Return, Token::Semi, ..] => Ok((Self::Return(None), tokens)),
             [Token::Return, tokens @ ..] => {
-                let (expr, tokens) = Expr::consume(tokens).context(
+                let (expr, tokens) = Expr::parse(tokens, 0).context(
                     "Expected return statement to return an expression but could not parse one.",
                 )?;
                 if let Some(Token::Semi) = tokens.first() {
@@ -146,14 +146,73 @@ pub enum Expr {
     },
     Binary {
         op: BinaryOp,
-        src1: Box<Expr>,
-        src2: Box<Expr>,
+        left: Box<Expr>,
+        right: Box<Expr>,
     },
 }
 
-impl<'a> AstNode<'a> for Expr {
-    fn consume(_tokens: &'a [Token<'a>]) -> Result<(Expr, &'a [Token<'a>])> {
-        todo!()
+impl Expr {
+    pub fn parse<'a>(
+        tokens: &'a [Token<'a>],
+        min_precedence: u32,
+    ) -> Result<(Expr, &'a [Token<'a>])> {
+        let (mut left, mut tokens) = Factor::parse(tokens)?;
+        loop {
+            let Some((operator, tokens_inner)) = BinaryOp::parse(tokens)? else {
+                break;
+            };
+
+            if operator.precedence() < min_precedence {
+                break;
+            }
+
+            let (right, tokens_inner) = Expr::parse(tokens_inner, operator.precedence() + 1)?;
+
+            left = Expr::Binary {
+                op: operator,
+                left: Box::new(left),
+                right: Box::new(right),
+            };
+
+            // Update tokens in outer scope
+            tokens = tokens_inner;
+        }
+        return Ok((left, tokens));
+    }
+}
+
+struct Factor;
+
+impl Factor {
+    pub fn parse<'a>(tokens: &'a [Token<'a>]) -> Result<(Expr, &'a [Token<'a>])> {
+        if let Ok((literal, tokens)) = Literal::consume(tokens) {
+            Ok((Expr::Literal(literal), tokens))
+        } else if let Ok((unary, tokens)) = UnaryOp::consume(tokens) {
+            // We have to parse an Expr here
+            let (expr, tokens) =
+                Expr::parse(tokens, 0).context("Parsing grammer rule: <unop> <factor> failed")?;
+            Ok((
+                Expr::Unary {
+                    op: unary,
+                    expr: Box::new(expr),
+                },
+                tokens,
+            ))
+        } else {
+            // We have 1 more rule to try to parse here
+            // "(" <exp> ")"
+            match tokens {
+                [Token::LParen, tokens @ ..] => {
+                    let (expr, tokens) = Expr::parse(tokens, 0)
+                        .context("Parsing grammer rule: \"(\" <exp> \")\" failed")?;
+                    match tokens {
+                        [Token::RParen, tokens @ ..] => Ok((expr, tokens)),
+                        _ => bail!("Could not find matching right parenthesis"),
+                    }
+                }
+                _ => bail!("Could not parse valid expression."),
+            }
+        }
     }
 }
 
@@ -212,6 +271,42 @@ pub enum BinaryOp {
     Xor,
     LShift,
     RShift,
+}
+
+impl BinaryOp {
+    pub fn precedence(&self) -> u32 {
+        match *self {
+            BinaryOp::Add => 45,
+            BinaryOp::Subtract => 45,
+            BinaryOp::Multiply => 50,
+            BinaryOp::Divide => 50,
+            BinaryOp::Remainder => 50,
+            BinaryOp::BitAnd => todo!(),
+            BinaryOp::BitOr => todo!(),
+            BinaryOp::Xor => todo!(),
+            BinaryOp::LShift => todo!(),
+            BinaryOp::RShift => todo!(),
+        }
+    }
+
+    fn parse<'a>(tokens: &'a [Token<'a>]) -> Result<Option<(BinaryOp, &'a [Token<'a>])>> {
+        let token = tokens.first().context("No remaining tokens")?;
+        let tokens = &tokens[1..];
+
+        match token {
+            Token::Plus => Ok(Some((BinaryOp::Add, tokens))),
+            Token::Minus => Ok(Some((BinaryOp::Subtract, tokens))),
+            Token::Star => Ok(Some((BinaryOp::Multiply, tokens))),
+            Token::Divide => Ok(Some((BinaryOp::Divide, tokens))),
+            Token::Mod => Ok(Some((BinaryOp::Remainder, tokens))),
+            Token::Ampersand => Ok(Some((BinaryOp::BitAnd, tokens))),
+            Token::BitOr => Ok(Some((BinaryOp::BitOr, tokens))),
+            Token::BitXor => Ok(Some((BinaryOp::Xor, tokens))),
+            Token::LShift => Ok(Some((BinaryOp::LShift, tokens))),
+            Token::RShift => Ok(Some((BinaryOp::RShift, tokens))),
+            _ => Ok(None),
+        }
+    }
 }
 
 #[derive(Debug, PartialEq)]
@@ -345,7 +440,7 @@ mod tests {
     fn parse_unary_bitnot() {
         let tokens = &[Token::BitNot, Token::Literal("1")];
 
-        let (expr, tokens) = Expr::consume(tokens).unwrap();
+        let (expr, tokens) = Expr::parse(tokens, 0).unwrap();
 
         assert!(tokens.is_empty());
         assert_eq!(
@@ -361,7 +456,7 @@ mod tests {
     fn parse_unary_negate() {
         let tokens = &[Token::Minus, Token::Literal("1")];
 
-        let (expr, tokens) = Expr::consume(tokens).unwrap();
+        let (expr, tokens) = Expr::parse(tokens, 0).unwrap();
 
         assert!(tokens.is_empty());
         assert_eq!(
@@ -385,7 +480,7 @@ mod tests {
             Token::RParen,
         ];
 
-        let (expr, tokens) = Expr::consume(tokens).unwrap();
+        let (expr, tokens) = Expr::parse(tokens, 0).unwrap();
 
         assert!(tokens.is_empty());
         assert_eq!(expr, Expr::Literal(Literal::Int(1)));
@@ -405,7 +500,7 @@ mod tests {
             Token::RParen,
         ];
 
-        let (expr, tokens) = Expr::consume(tokens).unwrap();
+        let (expr, tokens) = Expr::parse(tokens, 0).unwrap();
 
         assert!(tokens.is_empty());
 
@@ -468,7 +563,7 @@ mod tests {
             Token::Semi,
         ];
 
-        let (expr, tokens) = Expr::consume(tokens).unwrap();
+        let (expr, tokens) = Expr::parse(tokens, 0).unwrap();
 
         assert_eq!(&tokens, &[Token::Semi]);
 

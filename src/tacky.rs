@@ -130,8 +130,8 @@ impl From<&ast::Expr> for Expr {
             }
             ast::Expr::Binary {
                 op: _,
-                src1: _,
-                src2: _,
+                left: _,
+                right: _,
             } => todo!(),
         }
     }

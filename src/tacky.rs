@@ -169,7 +169,9 @@ mod tests {
     #[test]
     fn test_return_literal() {
         test_and_reset(|| {
-            let ast = ast::Stmt::Return(Some(ast::Expr::Literal(ast::Literal::Int(2))));
+            let ast = ast::Stmt::Return(Some(ast::Expr::Factor(ast::Factor::Literal(
+                ast::Literal::Int(2),
+            ))));
             let actual = Vec::<Instruction>::from(&ast);
             let expected = vec![Instruction::Return(Some(Val::Constant(2)))];
             assert_eq!(actual, expected);
@@ -179,10 +181,12 @@ mod tests {
     #[test]
     fn test_return_unary() {
         test_and_reset(|| {
-            let ast = ast::Stmt::Return(Some(ast::Expr::Unary(
+            let ast = ast::Stmt::Return(Some(ast::Expr::Factor(ast::Factor::Unary(
                 ast::UnaryOp::Complement,
-                Box::new(ast::Expr::Literal(ast::Literal::Int(2))),
-            )));
+                Box::new(ast::Expr::Factor(ast::Factor::Literal(ast::Literal::Int(
+                    2,
+                )))),
+            ))));
             let actual = Vec::<Instruction>::from(&ast);
             let expected = vec![
                 Instruction::Unary {
@@ -198,16 +202,18 @@ mod tests {
     #[test]
     fn test_return_nested_unary() {
         test_and_reset(|| {
-            let ast = ast::Stmt::Return(Some(ast::Expr::Unary(
+            let ast = ast::Stmt::Return(Some(ast::Expr::Factor(ast::Factor::Unary(
                 ast::UnaryOp::Negate,
-                Box::new(ast::Expr::Unary(
+                Box::new(ast::Expr::Factor(ast::Factor::Unary(
                     ast::UnaryOp::Complement,
-                    Box::new(ast::Expr::Unary(
+                    Box::new(ast::Expr::Factor(ast::Factor::Unary(
                         ast::UnaryOp::Negate,
-                        Box::new(ast::Expr::Literal(ast::Literal::Int(2))),
-                    )),
-                )),
-            )));
+                        Box::new(ast::Expr::Factor(ast::Factor::Literal(ast::Literal::Int(
+                            2,
+                        )))),
+                    ))),
+                ))),
+            ))));
             let actual = Vec::<Instruction>::from(&ast);
             let expected = vec![
                 Instruction::Unary {

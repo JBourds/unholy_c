@@ -259,7 +259,9 @@ mod tests {
                 ret_t: Type::Int,
                 name: "main",
                 signature: vec![],
-                statements: vec![Stmt::Return(Some(Expr::Literal(Literal::Int(2))))],
+                statements: vec![Stmt::Return(Some(Expr::Factor(Factor::Literal(
+                    Literal::Int(2),
+                ))))],
             },
         };
         assert_eq!(expected, program);
@@ -294,7 +296,9 @@ mod tests {
                 (Type::Int, None),
                 (Type::Int, Some("z")),
             ],
-            statements: vec![Stmt::Return(Some(Expr::Literal(Literal::Int(2))))],
+            statements: vec![Stmt::Return(Some(Expr::Factor(Factor::Literal(
+                Literal::Int(2),
+            ))))],
         };
         assert_eq!(expected, function);
     }

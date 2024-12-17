@@ -1,26 +1,13 @@
 use crate::ast;
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result};
 use std::rc::Rc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
-static mut TEMP_VAR_COUNTER: usize = 0;
+static TEMP_VAR_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
-#[allow(dead_code)]
-fn reset_temp_counter() {
-    unsafe {
-        TEMP_VAR_COUNTER = 0;
-    }
-}
-
-fn make_temp_var() -> Result<String> {
-    unsafe {
-        let n = TEMP_VAR_COUNTER;
-        TEMP_VAR_COUNTER += 1;
-        if TEMP_VAR_COUNTER < n {
-            bail!("Integer overflow while creating temp variable name.")
-        } else {
-            Ok(format!("tmp.{}", n))
-        }
-    }
+fn make_temp_var() -> String {
+    let n = TEMP_VAR_COUNTER.fetch_add(1, Ordering::Relaxed);
+    format!("tmp.{}", n)
 }
 
 #[derive(Debug, PartialEq)]
@@ -113,11 +100,11 @@ impl From<&ast::Expr> for Expr {
                 val: Val::from(v),
             },
             ast::Expr::Unary { op, expr } => {
-                let Expr {
+                let Self {
                     mut instructions,
                     val,
                 } = Expr::from(expr.as_ref());
-                let dst = Val::Var(make_temp_var().unwrap().into());
+                let dst = Val::Var(make_temp_var().into());
                 instructions.push(Instruction::Unary {
                     op: UnaryOp::from(op),
                     src: val,
@@ -128,11 +115,30 @@ impl From<&ast::Expr> for Expr {
                     val: dst,
                 }
             }
-            ast::Expr::Binary {
-                op: _,
-                left: _,
-                right: _,
-            } => todo!(),
+            ast::Expr::Binary { op, left, right } => {
+                let Self {
+                    mut instructions,
+                    val: left_val,
+                } = Self::from(left.as_ref());
+                let Self {
+                    instructions: right_instructions,
+                    val: right_val,
+                } = Self::from(right.as_ref());
+                instructions.extend(right_instructions);
+
+                let dst = Val::Var(make_temp_var().into());
+
+                instructions.push(Instruction::Binary {
+                    op: op.into(),
+                    src1: left_val,
+                    src2: right_val,
+                    dst: dst.clone(),
+                });
+                Self {
+                    instructions,
+                    val: dst,
+                }
+            }
         }
     }
 }
@@ -206,7 +212,7 @@ mod tests {
         F: Fn(),
     {
         f();
-        reset_temp_counter();
+        TEMP_VAR_COUNTER.store(0, Ordering::Relaxed);
     }
 
     #[test]
@@ -271,6 +277,60 @@ mod tests {
                 Instruction::Return(Some(Val::Var("tmp.2".to_string().into()))),
             ];
             assert_eq!(actual, expected);
+        });
+    }
+
+    #[test]
+    fn test_binary_expr() {
+        test_and_reset(|| {
+            let ast_binary_expr = ast::Expr::Binary {
+                op: ast::BinaryOp::Subtract,
+                left: Box::new(ast::Expr::Binary {
+                    op: ast::BinaryOp::Multiply,
+                    left: Box::new(ast::Expr::Literal(ast::Literal::Int(1))),
+                    right: Box::new(ast::Expr::Literal(ast::Literal::Int(2))),
+                }),
+                right: Box::new(ast::Expr::Binary {
+                    op: ast::BinaryOp::Multiply,
+                    left: Box::new(ast::Expr::Literal(ast::Literal::Int(3))),
+                    right: Box::new(ast::Expr::Binary {
+                        op: ast::BinaryOp::Add,
+                        left: Box::new(ast::Expr::Literal(ast::Literal::Int(4))),
+                        right: Box::new(ast::Expr::Literal(ast::Literal::Int(5))),
+                    }),
+                }),
+            };
+            let tacky_expr = Expr::from(&ast_binary_expr);
+            let expected = Expr {
+                instructions: vec![
+                    Instruction::Binary {
+                        op: BinaryOp::Multiply,
+                        src1: Val::Constant(1),
+                        src2: Val::Constant(2),
+                        dst: Val::Var(Rc::new("tmp.0".to_string())),
+                    },
+                    Instruction::Binary {
+                        op: BinaryOp::Add,
+                        src1: Val::Constant(4),
+                        src2: Val::Constant(5),
+                        dst: Val::Var(Rc::new("tmp.1".to_string())),
+                    },
+                    Instruction::Binary {
+                        op: BinaryOp::Multiply,
+                        src1: Val::Constant(3),
+                        src2: Val::Var(Rc::new("tmp.1".to_string())),
+                        dst: Val::Var(Rc::new("tmp.2".to_string())),
+                    },
+                    Instruction::Binary {
+                        op: BinaryOp::Subtract,
+                        src1: Val::Var(Rc::new("tmp.0".to_string())),
+                        src2: Val::Var(Rc::new("tmp.2".to_string())),
+                        dst: Val::Var(Rc::new("tmp.3".to_string())),
+                    },
+                ],
+                val: Val::Var(Rc::new("tmp.3".to_string())),
+            };
+            assert_eq!(expected, tacky_expr);
         });
     }
 }

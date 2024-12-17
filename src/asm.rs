@@ -81,6 +81,35 @@ pub mod x64 {
                 w.write_str("\tmovq rbp, rsp\n")?;
                 w.write_fmt(format_args!("\tsub rsp, {}\n", size))?;
             }
+            // TODO: Unhardcode sizes
+            codegen::InstructionType::Binary { op, src1, src2 } => {
+                let op_str = match op {
+                    codegen::BinaryOp::Add => "addl",
+                    codegen::BinaryOp::Subtract => "subl",
+                    codegen::BinaryOp::Multiply => "imull",
+                    codegen::BinaryOp::BitAnd => todo!(),
+                    codegen::BinaryOp::BitOr => todo!(),
+                    codegen::BinaryOp::Xor => todo!(),
+                    codegen::BinaryOp::LShift => todo!(),
+                    codegen::BinaryOp::RShift => todo!(),
+                    _ => unreachable!(),
+                };
+                w.write_fmt(format_args!(
+                    "{op_str} {}, {}",
+                    gen_operand(src1),
+                    gen_operand(src2)
+                ))?
+            }
+            codegen::InstructionType::Cdq => {
+                w.write_str("\tcdq\n")?;
+            }
+            codegen::InstructionType::Idiv(operand) => match operand {
+                codegen::Operand::Reg(r) => w.write_fmt(format_args!("\tidiv {r}"))?,
+                codegen::Operand::StackOffset(offset) => {
+                    w.write_fmt(format_args!("\tidiv {offset}"))?
+                }
+                _ => unreachable!(),
+            },
         }
         Ok(())
     }

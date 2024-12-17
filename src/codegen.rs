@@ -85,17 +85,52 @@ impl From<&tacky::UnaryOp> for UnaryOp {
     }
 }
 
+#[derive(Debug, PartialEq)]
+pub enum BinaryOp {
+    Add,
+    Subtract,
+    Multiply,
+    Divide,
+    Remainder,
+    BitAnd,
+    BitOr,
+    Xor,
+    LShift,
+    RShift,
+}
+
+impl From<&tacky::BinaryOp> for BinaryOp {
+    fn from(node: &tacky::BinaryOp) -> Self {
+        match node {
+            tacky::BinaryOp::Add => Self::Add,
+            tacky::BinaryOp::Subtract => Self::Subtract,
+            tacky::BinaryOp::Multiply => Self::Multiply,
+            tacky::BinaryOp::Divide => Self::Divide,
+            tacky::BinaryOp::Remainder => Self::Remainder,
+            tacky::BinaryOp::BitAnd => Self::BitAnd,
+            tacky::BinaryOp::BitOr => Self::BitOr,
+            tacky::BinaryOp::Xor => Self::Xor,
+            tacky::BinaryOp::LShift => Self::LShift,
+            tacky::BinaryOp::RShift => Self::RShift,
+        }
+    }
+}
+
 #[derive(Debug, PartialEq, Clone, Copy)]
 pub enum Reg {
     Eax,
+    Edx,
     R10,
+    R11,
 }
 
 impl fmt::Display for Reg {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Eax => write!(f, "eax"),
+            Self::Edx => write!(f, "edx"),
             Self::R10 => write!(f, "r10"),
+            Self::R11 => write!(f, "r11"),
         }
     }
 }
@@ -111,8 +146,21 @@ pub struct Final;
 
 #[derive(Debug, PartialEq)]
 pub enum InstructionType {
-    Mov { src: Operand, dst: Operand },
-    Unary { op: UnaryOp, dst: Operand },
+    Mov {
+        src: Operand,
+        dst: Operand,
+    },
+    Unary {
+        op: UnaryOp,
+        dst: Operand,
+    },
+    Binary {
+        op: BinaryOp,
+        src1: Operand,
+        src2: Operand,
+    },
+    Idiv(Operand),
+    Cdq,
     AllocStack(usize),
     Ret,
 }
@@ -219,7 +267,51 @@ impl From<&tacky::Instruction> for Vec<Instruction<Initial>> {
                     dst: dst.into(),
                 }),
             ],
-            tacky::Instruction::Binary { .. } => todo!(),
+            tacky::Instruction::Binary {
+                op,
+                src1,
+                src2,
+                dst,
+            } => match op {
+                tacky::BinaryOp::Add | tacky::BinaryOp::Subtract | tacky::BinaryOp::Multiply => {
+                    vec![
+                        Instruction::<Initial>::new(InstructionType::Mov {
+                            src: src1.into(),
+                            dst: dst.into(),
+                        }),
+                        Instruction::<Initial>::new(InstructionType::Binary {
+                            op: op.into(),
+                            src1: src2.into(),
+                            src2: dst.into(),
+                        }),
+                    ]
+                }
+                tacky::BinaryOp::Divide => vec![
+                    Instruction::<Initial>::new(InstructionType::Mov {
+                        src: src1.into(),
+                        dst: Operand::Reg(Reg::Eax),
+                    }),
+                    Instruction::<Initial>::new(InstructionType::Cdq),
+                    Instruction::<Initial>::new(InstructionType::Idiv(src2.into())),
+                    Instruction::<Initial>::new(InstructionType::Mov {
+                        src: Operand::Reg(Reg::Eax),
+                        dst: dst.into(),
+                    }),
+                ],
+                tacky::BinaryOp::Remainder => vec![
+                    Instruction::<Initial>::new(InstructionType::Mov {
+                        src: src1.into(),
+                        dst: Operand::Reg(Reg::Eax),
+                    }),
+                    Instruction::<Initial>::new(InstructionType::Cdq),
+                    Instruction::<Initial>::new(InstructionType::Idiv(src2.into())),
+                    Instruction::<Initial>::new(InstructionType::Mov {
+                        src: Operand::Reg(Reg::Edx),
+                        dst: dst.into(),
+                    }),
+                ],
+                _ => todo!(),
+            },
         }
     }
 }

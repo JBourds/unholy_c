@@ -3,6 +3,7 @@ use anyhow::{Context, Result};
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::fmt;
+use std::marker::PhantomData;
 use std::rc::Rc;
 
 #[derive(Debug, PartialEq)]
@@ -22,36 +23,49 @@ impl TryFrom<&tacky::Program> for Program {
 #[derive(Debug, PartialEq)]
 pub struct Function {
     pub name: Rc<String>,
-    pub instructions: Vec<Instruction>,
+    pub instructions: Vec<Instruction<Final>>,
 }
 
 impl TryFrom<&tacky::Function> for Function {
     type Error = anyhow::Error;
     fn try_from(node: &tacky::Function) -> Result<Self> {
-        let mut instructions: Vec<Instruction> = node
+        let mut instructions: Vec<Instruction<Initial>> = node
             .instructions
             .iter()
-            .map(Vec::<Instruction>::try_from)
-            .try_fold(vec![Instruction::AllocStack(0)], |mut unrolled, result| {
-                unrolled.extend(result.context(
-                    "Failed to parse assembly function from intermediate representation.",
-                )?);
-                Ok::<Vec<Instruction>, Self::Error>(unrolled)
-            })
+            .map(Vec::<Instruction<Initial>>::try_from)
+            .try_fold(
+                vec![Instruction::<Initial>::new(InstructionType::AllocStack(0))],
+                |mut unrolled, result| {
+                    unrolled.extend(result.context(
+                        "Failed to parse assembly function from intermediate representation.",
+                    )?);
+                    Ok::<Vec<Instruction<Initial>>, Self::Error>(unrolled)
+                },
+            )
             .context("Failed to generate function definition from statements.")?;
 
         // Get stack offsets for each pseudoregister as we fix them up
         let mut stack_offsets = HashMap::new();
         let mut stack_bound = 0;
-        let mut fixed_instructions: Vec<FixedInstruction> = instructions
+        let mut fixed_instructions: Vec<Instruction<Offset>> = instructions
             .drain(..)
-            .map(|instr| FixedInstruction::new(instr, &mut stack_offsets, &mut stack_bound))
+            .map(|instr| Instruction::<Offset>::new(instr, &mut stack_offsets, &mut stack_bound))
             .collect();
-        fixed_instructions[0].0 = Instruction::AllocStack(stack_bound);
+
+        // Setup stack prologue
+        fixed_instructions[0].op = InstructionType::AllocStack(stack_bound);
+
+        let final_instructions: Vec<Instruction<Final>> = fixed_instructions
+            .drain(..)
+            .map(Vec::<Instruction<Final>>::from)
+            .fold(Vec::new(), |mut v, instr| {
+                v.extend(instr);
+                v
+            });
 
         Ok(Function {
             name: Rc::clone(&node.name),
-            instructions,
+            instructions: final_instructions,
         })
     }
 }
@@ -89,17 +103,40 @@ impl fmt::Display for Reg {
 }
 
 #[derive(Debug, PartialEq)]
-pub enum Instruction {
+struct Initial;
+
+#[derive(Debug, PartialEq)]
+struct Offset;
+
+#[derive(Debug, PartialEq)]
+pub struct Final;
+
+#[derive(Debug, PartialEq)]
+pub enum InstructionType {
     Mov { src: Operand, dst: Operand },
     Unary { op: UnaryOp, dst: Operand },
     AllocStack(usize),
     Ret,
 }
 
-pub struct FixedInstruction(pub Instruction);
-impl FixedInstruction {
+#[derive(Debug, PartialEq)]
+pub struct Instruction<T> {
+    pub op: InstructionType,
+    phantom: PhantomData<T>,
+}
+
+impl Instruction<Initial> {
+    fn new(op: InstructionType) -> Self {
+        Self {
+            op,
+            phantom: PhantomData::<Initial>,
+        }
+    }
+}
+
+impl Instruction<Offset> {
     fn new(
-        instruction: Instruction,
+        instruction: Instruction<Initial>,
         stack_offsets: &mut HashMap<Rc<String>, usize>,
         stack_bound: &mut usize,
     ) -> Self {
@@ -116,40 +153,73 @@ impl FixedInstruction {
             }
         };
 
-        FixedInstruction(match instruction {
-            Instruction::Mov { src, dst } => Instruction::Mov {
-                src: convert_operand_offset(src),
-                dst: convert_operand_offset(dst),
+        Self {
+            op: match instruction.op {
+                InstructionType::Mov { src, dst } => InstructionType::Mov {
+                    src: convert_operand_offset(src),
+                    dst: convert_operand_offset(dst),
+                },
+                InstructionType::Unary { op, dst } => InstructionType::Unary {
+                    op,
+                    dst: convert_operand_offset(dst),
+                },
+                instr => instr,
             },
-            Instruction::Unary { op, dst } => Instruction::Unary {
-                op,
-                dst: convert_operand_offset(dst),
-            },
-            instr => instr,
-        })
+            phantom: PhantomData::<Offset>,
+        }
     }
 }
 
-impl From<&tacky::Instruction> for Vec<Instruction> {
-    fn from(instruction: &tacky::Instruction) -> Vec<Instruction> {
+// Necessary for instructions which have multiple stack offsets as operands
+impl From<Instruction<Offset>> for Vec<Instruction<Final>> {
+    fn from(instr: Instruction<Offset>) -> Vec<Instruction<Final>> {
+        let new_instr = |op| Instruction::<Final> {
+            op,
+            phantom: PhantomData::<Final>,
+        };
+        match instr.op {
+            InstructionType::Mov {
+                src: Operand::StackOffset(src_offset),
+                dst: Operand::StackOffset(dst_offset),
+            } => {
+                vec![
+                    new_instr(InstructionType::Mov {
+                        src: Operand::StackOffset(src_offset),
+                        dst: Operand::Reg(Reg::R10),
+                    }),
+                    new_instr(InstructionType::Mov {
+                        src: Operand::Reg(Reg::R10),
+                        dst: Operand::StackOffset(dst_offset),
+                    }),
+                ]
+            }
+            op => vec![new_instr(op)],
+        }
+    }
+}
+
+impl From<&tacky::Instruction> for Vec<Instruction<Initial>> {
+    fn from(instruction: &tacky::Instruction) -> Vec<Instruction<Initial>> {
         match instruction {
-            tacky::Instruction::Return(None) => vec![Instruction::Ret],
+            tacky::Instruction::Return(None) => {
+                vec![Instruction::<Initial>::new(InstructionType::Ret)]
+            }
             tacky::Instruction::Return(Some(ref val)) => vec![
-                Instruction::Mov {
+                Instruction::<Initial>::new(InstructionType::Mov {
                     src: Operand::from(val),
                     dst: Operand::Reg(Reg::Eax),
-                },
-                Instruction::Ret,
+                }),
+                Instruction::<Initial>::new(InstructionType::Ret),
             ],
             tacky::Instruction::Unary { op, src, dst } => vec![
-                Instruction::Mov {
+                Instruction::<Initial>::new(InstructionType::Mov {
                     src: src.into(),
                     dst: dst.into(),
-                },
-                Instruction::Unary {
+                }),
+                Instruction::<Initial>::new(InstructionType::Unary {
                     op: op.into(),
                     dst: dst.into(),
-                },
+                }),
             ],
         }
     }
@@ -183,14 +253,17 @@ mod tests {
     #[test]
     fn test_tacky_ret_to_asm() {
         let tacky = tacky::Instruction::Return(Some(tacky::Val::Constant(2)));
-        let expected = vec![
-            Instruction::Mov {
+        let expected: Vec<Instruction<Initial>> = vec![
+            InstructionType::Mov {
                 src: Operand::Imm(2),
                 dst: Operand::Reg(Reg::Eax),
             },
-            Instruction::Ret,
-        ];
-        let actual = Vec::<Instruction>::from(&tacky);
+            InstructionType::Ret,
+        ]
+        .into_iter()
+        .map(Instruction::<Initial>::new)
+        .collect();
+        let actual = Vec::<Instruction<Initial>>::from(&tacky);
         assert_eq!(expected, actual);
     }
 
@@ -202,23 +275,26 @@ mod tests {
             src: tacky::Val::Constant(2),
             dst: tacky::Val::Var(Rc::clone(&pseudo)),
         };
-        let expected = vec![
-            Instruction::Mov {
+        let expected: Vec<Instruction<Initial>> = vec![
+            InstructionType::Mov {
                 src: Operand::Imm(2),
                 dst: Operand::Pseudo {
                     name: Rc::clone(&pseudo),
                     size: 4,
                 },
             },
-            Instruction::Unary {
+            InstructionType::Unary {
                 op: UnaryOp::Not,
                 dst: Operand::Pseudo {
                     name: Rc::clone(&pseudo),
                     size: 4,
                 },
             },
-        ];
-        let actual = Vec::<Instruction>::from(&tacky);
+        ]
+        .into_iter()
+        .map(Instruction::<Initial>::new)
+        .collect();
+        let actual = Vec::<Instruction<Initial>>::from(&tacky);
         assert_eq!(expected, actual);
     }
 
@@ -230,23 +306,26 @@ mod tests {
             src: tacky::Val::Constant(2),
             dst: tacky::Val::Var(Rc::clone(&pseudo)),
         };
-        let expected = vec![
-            Instruction::Mov {
+        let expected: Vec<Instruction<Initial>> = vec![
+            InstructionType::Mov {
                 src: Operand::Imm(2),
                 dst: Operand::Pseudo {
                     name: Rc::clone(&pseudo),
                     size: 4,
                 },
             },
-            Instruction::Unary {
+            InstructionType::Unary {
                 op: UnaryOp::Not,
                 dst: Operand::Pseudo {
                     name: Rc::clone(&pseudo),
                     size: 4,
                 },
             },
-        ];
-        let actual = Vec::<Instruction>::from(&tacky);
+        ]
+        .into_iter()
+        .map(Instruction::<Initial>::new)
+        .collect();
+        let actual = Vec::<Instruction<Initial>>::from(&tacky);
 
         assert_eq!(expected, actual);
     }
@@ -259,23 +338,26 @@ mod tests {
             src: tacky::Val::Constant(2),
             dst: tacky::Val::Var(Rc::clone(&pseudo)),
         };
-        let expected = vec![
-            Instruction::Mov {
+        let expected: Vec<Instruction<Initial>> = vec![
+            InstructionType::Mov {
                 src: Operand::Imm(2),
                 dst: Operand::Pseudo {
                     name: Rc::clone(&pseudo),
                     size: 4,
                 },
             },
-            Instruction::Unary {
+            InstructionType::Unary {
                 op: UnaryOp::Not,
                 dst: Operand::Pseudo {
                     name: Rc::clone(&pseudo),
                     size: 4,
                 },
             },
-        ];
-        let actual = Vec::<Instruction>::from(&tacky);
+        ]
+        .into_iter()
+        .map(Instruction::<Initial>::new)
+        .collect();
+        let actual = Vec::<Instruction<Initial>>::from(&tacky);
         assert_eq!(expected, actual);
     }
 }

@@ -41,20 +41,20 @@ pub mod x64 {
 
         for instr in function.instructions.iter() {
             w.write_char('\t')?;
-            gen_instruction(w, instr)?;
+            gen_instruction(w, &instr.op)?;
         }
 
         Ok(())
     }
 
-    fn gen_instruction(w: &mut impl Write, instr: &codegen::Instruction) -> Result<()> {
+    fn gen_instruction(w: &mut impl Write, instr: &codegen::InstructionType) -> Result<()> {
         match instr {
-            codegen::Instruction::Mov { src, dst } => {
+            codegen::InstructionType::Mov { src, dst } => {
                 let src = gen_operand(src);
                 let dst = gen_operand(dst);
                 w.write_fmt(format_args!("mov {dst}, {src}\n"))?;
             }
-            codegen::Instruction::Ret => w.write_str("ret\n")?,
+            codegen::InstructionType::Ret => w.write_str("ret\n")?,
             _ => todo!(),
         }
         Ok(())

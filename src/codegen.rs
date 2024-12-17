@@ -219,6 +219,7 @@ impl From<&tacky::Instruction> for Vec<Instruction<Initial>> {
                     dst: dst.into(),
                 }),
             ],
+            tacky::Instruction::Binary { .. } => todo!(),
         }
     }
 }

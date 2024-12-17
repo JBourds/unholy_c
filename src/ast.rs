@@ -138,15 +138,17 @@ impl<'a> AstNode<'a> for Stmt {
 }
 
 #[derive(Debug, PartialEq)]
-pub enum Factor {
-    Literal(Literal),
-    Unary(UnaryOp, Box<Expr>),
-}
-
-#[derive(Debug, PartialEq)]
 pub enum Expr {
-    Factor(Factor),
-    Binary(BinaryOp, Box<Expr>, Box<Expr>),
+    Literal(Literal),
+    Unary {
+        op: UnaryOp,
+        expr: Box<Expr>,
+    },
+    Binary {
+        op: BinaryOp,
+        src1: Box<Expr>,
+        src2: Box<Expr>,
+    },
 }
 
 impl<'a> AstNode<'a> for Expr {
@@ -259,9 +261,7 @@ mod tests {
                 ret_t: Type::Int,
                 name: "main",
                 signature: vec![],
-                statements: vec![Stmt::Return(Some(Expr::Factor(Factor::Literal(
-                    Literal::Int(2),
-                ))))],
+                statements: vec![Stmt::Return(Some(Expr::Literal(Literal::Int(2))))],
             },
         };
         assert_eq!(expected, program);
@@ -296,9 +296,7 @@ mod tests {
                 (Type::Int, None),
                 (Type::Int, Some("z")),
             ],
-            statements: vec![Stmt::Return(Some(Expr::Factor(Factor::Literal(
-                Literal::Int(2),
-            ))))],
+            statements: vec![Stmt::Return(Some(Expr::Literal(Literal::Int(2))))],
         };
         assert_eq!(expected, function);
     }
@@ -352,10 +350,10 @@ mod tests {
         assert!(tokens.is_empty());
         assert_eq!(
             expr,
-            Expr::Factor(Factor::Unary(
-                UnaryOp::Complement,
-                Box::new(Expr::Factor(Factor::Literal(Literal::Int(1))))
-            ))
+            Expr::Unary {
+                op: UnaryOp::Complement,
+                expr: Box::new(Expr::Literal(Literal::Int(1)))
+            }
         );
     }
 
@@ -368,10 +366,10 @@ mod tests {
         assert!(tokens.is_empty());
         assert_eq!(
             expr,
-            Expr::Factor(Factor::Unary(
-                UnaryOp::Negate,
-                Box::new(Expr::Factor(Factor::Literal(Literal::Int(1))))
-            ))
+            Expr::Unary {
+                op: UnaryOp::Negate,
+                expr: Box::new(Expr::Literal(Literal::Int(1)))
+            }
         );
     }
 
@@ -390,7 +388,7 @@ mod tests {
         let (expr, tokens) = Expr::consume(tokens).unwrap();
 
         assert!(tokens.is_empty());
-        assert_eq!(expr, Expr::Factor(Factor::Literal(Literal::Int(1))));
+        assert_eq!(expr, Expr::Literal(Literal::Int(1)));
     }
 
     #[test]
@@ -413,13 +411,13 @@ mod tests {
 
         assert_eq!(
             expr,
-            Expr::Factor(Factor::Unary(
-                UnaryOp::Complement,
-                Box::new(Expr::Factor(Factor::Unary(
-                    UnaryOp::Negate,
-                    Box::new(Expr::Factor(Factor::Literal(Literal::Int(2))))
-                )))
-            ))
+            Expr::Unary {
+                op: UnaryOp::Complement,
+                expr: Box::new(Expr::Unary {
+                    op: UnaryOp::Negate,
+                    expr: Box::new(Expr::Literal(Literal::Int(2)))
+                })
+            }
         );
     }
 
@@ -447,13 +445,13 @@ mod tests {
                 ret_t: Type::Int,
                 name: "main",
                 signature: vec![],
-                statements: vec![Stmt::Return(Some(Expr::Factor(Factor::Unary(
-                    UnaryOp::Negate,
-                    Box::new(Expr::Factor(Factor::Unary(
-                        UnaryOp::Negate,
-                        Box::new(Expr::Factor(Factor::Literal(Literal::Int(2)))),
-                    ))),
-                ))))],
+                statements: vec![Stmt::Return(Some(Expr::Unary {
+                    op: UnaryOp::Negate,
+                    expr: Box::new(Expr::Unary {
+                        op: UnaryOp::Negate,
+                        expr: Box::new(Expr::Literal(Literal::Int(2))),
+                    }),
+                }))],
             },
         };
         assert_eq!(expected, program);
@@ -476,13 +474,13 @@ mod tests {
 
         assert_eq!(
             expr,
-            Expr::Factor(Factor::Unary(
-                UnaryOp::Negate,
-                Box::new(Expr::Factor(Factor::Unary(
-                    UnaryOp::Negate,
-                    Box::new(Expr::Factor(Factor::Literal(Literal::Int(2)))),
-                )))
-            ))
+            Expr::Unary {
+                op: UnaryOp::Negate,
+                expr: Box::new(Expr::Unary {
+                    op: UnaryOp::Negate,
+                    expr: Box::new(Expr::Literal(Literal::Int(2)))
+                }),
+            }
         );
     }
 
@@ -501,7 +499,5 @@ mod tests {
         let (_stmt, tokens) = Stmt::consume(tokens).unwrap();
 
         assert!(tokens.is_empty());
-
-        // println!("{:#?}", stmt);
     }
 }

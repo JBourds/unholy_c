@@ -69,7 +69,17 @@ impl TryFrom<&ast::Function<'_>> for Function {
 #[derive(Debug, PartialEq)]
 pub enum Instruction {
     Return(Option<Val>),
-    Unary { op: UnaryOp, src: Val, dst: Val },
+    Unary {
+        op: UnaryOp,
+        src: Val,
+        dst: Val,
+    },
+    Binary {
+        op: BinaryOp,
+        src1: Val,
+        src2: Val,
+        dst: Val,
+    },
 }
 impl From<&ast::Stmt> for Vec<Instruction> {
     fn from(node: &ast::Stmt) -> Self {
@@ -98,15 +108,15 @@ pub struct Expr {
 impl From<&ast::Expr> for Expr {
     fn from(node: &ast::Expr) -> Self {
         match node {
-            ast::Expr::Factor(ast::Factor::Literal(v)) => Self {
+            ast::Expr::Literal(v) => Self {
                 instructions: vec![],
                 val: Val::from(v),
             },
-            ast::Expr::Factor(ast::Factor::Unary(op, e)) => {
+            ast::Expr::Unary { op, expr } => {
                 let Expr {
                     mut instructions,
                     val,
-                } = Expr::from(e.as_ref());
+                } = Expr::from(expr.as_ref());
                 let dst = Val::Var(make_temp_var().unwrap().into());
                 instructions.push(Instruction::Unary {
                     op: UnaryOp::from(op),
@@ -118,7 +128,11 @@ impl From<&ast::Expr> for Expr {
                     val: dst,
                 }
             }
-            ast::Expr::Binary(_, _, _) => todo!(),
+            ast::Expr::Binary {
+                op: _,
+                src1: _,
+                src2: _,
+            } => todo!(),
         }
     }
 }
@@ -143,13 +157,42 @@ pub enum UnaryOp {
     Complement,
 }
 
-// TODO: I created a separated version of this struct to prevent different
-// modules from leaking into each other but these structs are identical
 impl From<&ast::UnaryOp> for UnaryOp {
     fn from(node: &ast::UnaryOp) -> Self {
         match node {
             ast::UnaryOp::Complement => Self::Complement,
             ast::UnaryOp::Negate => Self::Negate,
+        }
+    }
+}
+
+#[derive(Debug, PartialEq)]
+pub enum BinaryOp {
+    Add,
+    Subtract,
+    Multiply,
+    Divide,
+    Remainder,
+    BitAnd,
+    BitOr,
+    Xor,
+    LShift,
+    RShift,
+}
+
+impl From<&ast::BinaryOp> for BinaryOp {
+    fn from(node: &ast::BinaryOp) -> Self {
+        match node {
+            ast::BinaryOp::Add => Self::Add,
+            ast::BinaryOp::Subtract => Self::Subtract,
+            ast::BinaryOp::Multiply => Self::Multiply,
+            ast::BinaryOp::Divide => Self::Divide,
+            ast::BinaryOp::Remainder => Self::Remainder,
+            ast::BinaryOp::BitAnd => Self::BitAnd,
+            ast::BinaryOp::BitOr => Self::BitOr,
+            ast::BinaryOp::Xor => Self::Xor,
+            ast::BinaryOp::LShift => Self::LShift,
+            ast::BinaryOp::RShift => Self::RShift,
         }
     }
 }
@@ -169,9 +212,7 @@ mod tests {
     #[test]
     fn test_return_literal() {
         test_and_reset(|| {
-            let ast = ast::Stmt::Return(Some(ast::Expr::Factor(ast::Factor::Literal(
-                ast::Literal::Int(2),
-            ))));
+            let ast = ast::Stmt::Return(Some(ast::Expr::Literal(ast::Literal::Int(2))));
             let actual = Vec::<Instruction>::from(&ast);
             let expected = vec![Instruction::Return(Some(Val::Constant(2)))];
             assert_eq!(actual, expected);
@@ -181,12 +222,10 @@ mod tests {
     #[test]
     fn test_return_unary() {
         test_and_reset(|| {
-            let ast = ast::Stmt::Return(Some(ast::Expr::Factor(ast::Factor::Unary(
-                ast::UnaryOp::Complement,
-                Box::new(ast::Expr::Factor(ast::Factor::Literal(ast::Literal::Int(
-                    2,
-                )))),
-            ))));
+            let ast = ast::Stmt::Return(Some(ast::Expr::Unary {
+                op: ast::UnaryOp::Complement,
+                expr: Box::new(ast::Expr::Literal(ast::Literal::Int(2))),
+            }));
             let actual = Vec::<Instruction>::from(&ast);
             let expected = vec![
                 Instruction::Unary {
@@ -202,18 +241,16 @@ mod tests {
     #[test]
     fn test_return_nested_unary() {
         test_and_reset(|| {
-            let ast = ast::Stmt::Return(Some(ast::Expr::Factor(ast::Factor::Unary(
-                ast::UnaryOp::Negate,
-                Box::new(ast::Expr::Factor(ast::Factor::Unary(
-                    ast::UnaryOp::Complement,
-                    Box::new(ast::Expr::Factor(ast::Factor::Unary(
-                        ast::UnaryOp::Negate,
-                        Box::new(ast::Expr::Factor(ast::Factor::Literal(ast::Literal::Int(
-                            2,
-                        )))),
-                    ))),
-                ))),
-            ))));
+            let ast = ast::Stmt::Return(Some(ast::Expr::Unary {
+                op: ast::UnaryOp::Negate,
+                expr: Box::new(ast::Expr::Unary {
+                    op: ast::UnaryOp::Complement,
+                    expr: Box::new(ast::Expr::Unary {
+                        op: ast::UnaryOp::Negate,
+                        expr: Box::new(ast::Expr::Literal(ast::Literal::Int(2))),
+                    }),
+                }),
+            }));
             let actual = Vec::<Instruction>::from(&ast);
             let expected = vec![
                 Instruction::Unary {

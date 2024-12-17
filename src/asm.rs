@@ -27,16 +27,16 @@ pub mod x64 {
     }
 
     fn gen_program(w: &mut impl Write, program: &codegen::Program) -> Result<()> {
-        w.write_str(".intel_syntax noprefix\n\n")?;
+        w.write_str("\t.intel_syntax noprefix\n\n")?;
 
         gen_function(w, &program.function)?;
 
-        w.write_str("\n.section .note.GNU-stack,\"\",@progbits\n")?;
+        w.write_str("\n\t.section .note.GNU-stack,\"\",@progbits\n")?;
         Ok(())
     }
 
     fn gen_function(w: &mut impl Write, function: &codegen::Function) -> Result<()> {
-        w.write_fmt(format_args!(".globl {}\n", function.name))?;
+        w.write_fmt(format_args!("\t.globl {}\n", function.name))?;
         w.write_fmt(format_args!("{}:\n", function.name))?;
 
         for instr in function.instructions.iter() {
@@ -77,7 +77,9 @@ pub mod x64 {
                 }
             },
             codegen::InstructionType::AllocStack(size) => {
-                w.write_fmt(format_args!("\tsub rbp, {}\n", size))?;
+                w.write_str("\tpushq rbp\n")?;
+                w.write_str("\tmovq rbp, rsp\n")?;
+                w.write_fmt(format_args!("\tsub rsp, {}\n", size))?;
             }
         }
         Ok(())

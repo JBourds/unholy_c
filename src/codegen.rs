@@ -76,6 +76,15 @@ pub enum UnaryOp {
     Complement,
 }
 
+impl fmt::Display for UnaryOp {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Negate => write!(f, "net"),
+            Self::Complement => write!(f, "not"),
+        }
+    }
+}
+
 impl From<&tacky::UnaryOp> for UnaryOp {
     fn from(node: &tacky::UnaryOp) -> Self {
         match node {
@@ -116,6 +125,23 @@ impl From<&tacky::BinaryOp> for BinaryOp {
     }
 }
 
+impl fmt::Display for BinaryOp {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Add => write!(f, "add"),
+            Self::Subtract => write!(f, "sub"),
+            Self::Multiply => write!(f, "imul"),
+            Self::BitAnd => write!(f, "and"),
+            Self::BitOr => write!(f, "or"),
+            Self::Xor => write!(f, "xor"),
+            Self::LShift => write!(f, "shl"),
+            Self::RShift => write!(f, "shr"),
+            Self::Divide => unreachable!("Division has no direct binary instruction."),
+            Self::Remainder => unreachable!("Remainder has no direct binary instruction"),
+        }
+    }
+}
+
 #[derive(Debug, PartialEq, Clone, Copy)]
 pub enum RegSection {
     LowByte,
@@ -125,9 +151,9 @@ pub enum RegSection {
     Qword,
 }
 
-impl From<&RegSection> for usize {
-    fn from(value: &RegSection) -> Self {
-        match value {
+impl RegSection {
+    pub fn size(&self) -> usize {
+        match self {
             RegSection::LowByte => 1,
             RegSection::HighByte => 1,
             RegSection::Word => 2,
@@ -196,6 +222,15 @@ impl From<&X64Reg> for usize {
 pub enum Reg {
     X86 { reg: X86Reg, section: RegSection },
     X64 { reg: X64Reg, section: RegSection },
+}
+
+impl Reg {
+    pub fn size(&self) -> usize {
+        match self {
+            Self::X86 { reg: _, section } => section.size(),
+            Self::X64 { reg: _, section } => section.size(),
+        }
+    }
 }
 
 impl fmt::Display for Reg {
@@ -283,7 +318,12 @@ impl Instruction<Offset> {
                     e.insert(*stack_bound);
                 }
                 // SAFETY: We just checked this condition
-                unsafe { Operand::StackOffset(*stack_offsets.get(name).unwrap_unchecked()) }
+                unsafe {
+                    Operand::StackOffset {
+                        offset: *stack_offsets.get(name).unwrap_unchecked(),
+                        size,
+                    }
+                }
             } else {
                 op
             }
@@ -320,12 +360,23 @@ impl From<Instruction<Offset>> for Vec<Instruction<Final>> {
         };
         match instr.op {
             InstructionType::Mov {
-                src: Operand::StackOffset(src_offset),
-                dst: Operand::StackOffset(dst_offset),
+                src:
+                    Operand::StackOffset {
+                        offset: src_offset,
+                        size: src_size,
+                    },
+                dst:
+                    Operand::StackOffset {
+                        offset: dst_offset,
+                        size: dst_size,
+                    },
             } => {
                 vec![
                     new_instr(InstructionType::Mov {
-                        src: Operand::StackOffset(src_offset),
+                        src: Operand::StackOffset {
+                            offset: src_offset,
+                            size: src_size,
+                        },
                         dst: Operand::Reg(Reg::X64 {
                             reg: X64Reg::R10,
                             section: RegSection::Qword,
@@ -336,18 +387,32 @@ impl From<Instruction<Offset>> for Vec<Instruction<Final>> {
                             reg: X64Reg::R10,
                             section: RegSection::Qword,
                         }),
-                        dst: Operand::StackOffset(dst_offset),
+                        dst: Operand::StackOffset {
+                            offset: dst_offset,
+                            size: dst_size,
+                        },
                     }),
                 ]
             }
             InstructionType::Binary {
                 op,
-                src1: Operand::StackOffset(src1_offset),
-                src2: Operand::StackOffset(src2_offset),
+                src1:
+                    Operand::StackOffset {
+                        offset: src1_offset,
+                        size: src1_size,
+                    },
+                src2:
+                    Operand::StackOffset {
+                        offset: src2_offset,
+                        size: src2_size,
+                    },
             } => {
                 vec![
                     new_instr(InstructionType::Mov {
-                        src: Operand::StackOffset(src1_offset),
+                        src: Operand::StackOffset {
+                            offset: src1_offset,
+                            size: src1_size,
+                        },
                         dst: Operand::Reg(Reg::X64 {
                             reg: X64Reg::R10,
                             section: RegSection::Qword,
@@ -359,7 +424,10 @@ impl From<Instruction<Offset>> for Vec<Instruction<Final>> {
                             reg: X64Reg::R10,
                             section: RegSection::Qword,
                         }),
-                        src2: Operand::StackOffset(src2_offset),
+                        src2: Operand::StackOffset {
+                            offset: src2_offset,
+                            size: src2_size,
+                        },
                     }),
                 ]
             }
@@ -504,7 +572,19 @@ pub enum Operand {
     Imm(i32),
     Reg(Reg),
     Pseudo { name: Rc<String>, size: usize },
-    StackOffset(usize),
+    StackOffset { offset: usize, size: usize },
+}
+
+// TODO: Unhardcode immediate size
+impl Operand {
+    pub fn size(&self) -> usize {
+        match self {
+            Self::Imm(_) => 4,
+            Self::Reg(r) => r.size(),
+            Self::Pseudo { size, .. } => *size,
+            Self::StackOffset { size, .. } => *size,
+        }
+    }
 }
 
 // TODO: Unhardcode size of 4
@@ -516,6 +596,17 @@ impl From<&tacky::Val> for Operand {
                 name: Rc::clone(r),
                 size: 4,
             },
+        }
+    }
+}
+
+impl fmt::Display for Operand {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Imm(v) => write!(f, "{v}"),
+            Self::Reg(r) => write!(f, "{r}"),
+            Self::StackOffset { offset, .. } => write!(f, "[rbp-{offset}]"),
+            Self::Pseudo { .. } => unreachable!(),
         }
     }
 }

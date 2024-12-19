@@ -47,16 +47,29 @@ pub mod x64 {
     }
 
     fn gen_instruction(w: &mut impl Write, instr: &codegen::InstructionType) -> Result<()> {
-        let get_specifier = |dst: &Operand| match dst.size() {
-            1 => "byte ptr ",
-            2 => "word ptr ",
-            4 => "dword ptr ",
-            8 => "qword ptr ",
-            _ => unreachable!("Cannot have a destination size other than 1, 2, 4, or 8."),
+        let get_specifier = |src: Option<&Operand>, dst: &Operand| {
+            let size = match (src, dst) {
+                (None, Operand::StackOffset { size, .. })
+                | (Some(Operand::Imm(_)), Operand::StackOffset { size, .. }) => Some(*size),
+                (Some(Operand::StackOffset { size, .. }), Operand::Imm(_)) => Some(*size),
+                _ => None,
+            };
+            match size {
+                None => "",
+                Some(1) => "byte ptr ",
+                Some(2) => "word ptr ",
+                Some(4) => "dword ptr ",
+                Some(8) => "qword ptr ",
+                _ => unreachable!("Cannot have a destination size other than 1, 2, 4, or 8."),
+            }
         };
+
         match instr {
             codegen::InstructionType::Mov { src, dst } => {
-                w.write_fmt(format_args!("\tmov {}{dst}, {src}\n", get_specifier(dst)))?;
+                w.write_fmt(format_args!(
+                    "\tmov {}{dst}, {src}\n",
+                    get_specifier(Some(src), dst)
+                ))?;
             }
             codegen::InstructionType::Ret => {
                 w.write_str("\tmov rsp, rbp\n")?;
@@ -64,7 +77,7 @@ pub mod x64 {
                 w.write_str("\tret\n")?;
             }
             codegen::InstructionType::Unary { op, dst } => {
-                w.write_fmt(format_args!("\t{op} {}{dst}\n", get_specifier(dst)))?
+                w.write_fmt(format_args!("\t{op} {}{dst}\n", get_specifier(None, dst)))?
             }
             codegen::InstructionType::AllocStack(size) => {
                 w.write_str("\tpush rbp\n")?;
@@ -82,7 +95,10 @@ pub mod x64 {
                     }
                     _ => {}
                 }
-                w.write_fmt(format_args!("\t{op} {dst}, {src}\n",))?
+                w.write_fmt(format_args!(
+                    "\t{op} {}{dst}, {src}\n",
+                    get_specifier(Some(src), dst)
+                ))?
             }
             codegen::InstructionType::Cdq => {
                 w.write_str("\tcdq\n")?;

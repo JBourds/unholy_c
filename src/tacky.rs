@@ -24,7 +24,7 @@ pub struct Function {
 }
 
 impl Function {
-    fn make_temp_var(name: Rc<String>, counter: &'_ mut usize) -> impl FnMut() -> String + use <'_> {
+    fn make_temp_var(name: Rc<String>, counter: &'_ mut usize) -> impl FnMut() -> String + use<'_> {
         move || {
             let n = *counter;
             *counter += 1;
@@ -44,7 +44,8 @@ impl TryFrom<&ast::Function<'_>> for Function {
             name, statements, ..
         } = node;
         let mut temp_var_counter = 0;
-        let mut make_temp_var = Function::make_temp_var(Rc::new(name.to_string()), &mut temp_var_counter);
+        let mut make_temp_var =
+            Function::make_temp_var(Rc::new(name.to_string()), &mut temp_var_counter);
         let instructions = statements
             .iter()
             .fold(Vec::new(), |mut instructions, stmt| {

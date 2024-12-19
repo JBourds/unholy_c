@@ -117,20 +117,110 @@ impl From<&tacky::BinaryOp> for BinaryOp {
 }
 
 #[derive(Debug, PartialEq, Clone, Copy)]
-pub enum Reg {
-    Eax,
-    Edx,
+pub enum RegSection {
+    LowByte,
+    HighByte,
+    Word,
+    Dword,
+    Qword,
+}
+
+impl From<&RegSection> for usize {
+    fn from(value: &RegSection) -> Self {
+        match value {
+            RegSection::LowByte => 1,
+            RegSection::HighByte => 1,
+            RegSection::Word => 2,
+            RegSection::Dword => 4,
+            RegSection::Qword => 8,
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Clone, Copy)]
+pub enum X86Reg {
+    // Generic registers
+    Ax,
+    Bx,
+    Cx,
+    Dx,
+    // Base and stack pointer
+    Bp,
+    Sp,
+    // Source and destination index
+    Si,
+    Di,
+}
+impl From<&X86Reg> for &str {
+    fn from(value: &X86Reg) -> Self {
+        match value {
+            X86Reg::Ax => "ax",
+            X86Reg::Bx => "bx",
+            X86Reg::Cx => "cx",
+            X86Reg::Dx => "dx",
+            X86Reg::Bp => "bp",
+            X86Reg::Sp => "sp",
+            X86Reg::Si => "si",
+            X86Reg::Di => "di",
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Clone, Copy)]
+pub enum X64Reg {
+    R8,
+    R9,
     R10,
     R11,
+    R12,
+    R13,
+    R14,
+    R15,
+}
+impl From<&X64Reg> for usize {
+    fn from(value: &X64Reg) -> Self {
+        match value {
+            X64Reg::R8 => 8,
+            X64Reg::R9 => 9,
+            X64Reg::R10 => 11,
+            X64Reg::R11 => 11,
+            X64Reg::R12 => 12,
+            X64Reg::R13 => 13,
+            X64Reg::R14 => 14,
+            X64Reg::R15 => 15,
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Clone, Copy)]
+pub enum Reg {
+    X86 { reg: X86Reg, section: RegSection },
+    X64 { reg: X64Reg, section: RegSection },
 }
 
 impl fmt::Display for Reg {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Eax => write!(f, "eax"),
-            Self::Edx => write!(f, "edx"),
-            Self::R10 => write!(f, "r10"),
-            Self::R11 => write!(f, "r11"),
+            Self::X86 { reg, section } => {
+                let prefix = match section {
+                    RegSection::LowByte => "h",
+                    RegSection::HighByte => "h",
+                    RegSection::Word => "",
+                    RegSection::Dword => "e",
+                    RegSection::Qword => "r",
+                };
+                write!(f, "{}{}", prefix, <&str>::from(reg))
+            }
+            Self::X64 { reg, section } => {
+                let suffix = match section {
+                    RegSection::LowByte => "b",
+                    RegSection::HighByte => "h",
+                    RegSection::Word => "w",
+                    RegSection::Dword => "d",
+                    RegSection::Qword => "",
+                };
+                write!(f, "r{}{}", usize::from(reg), suffix)
+            }
         }
     }
 }
@@ -236,10 +326,16 @@ impl From<Instruction<Offset>> for Vec<Instruction<Final>> {
                 vec![
                     new_instr(InstructionType::Mov {
                         src: Operand::StackOffset(src_offset),
-                        dst: Operand::Reg(Reg::R10),
+                        dst: Operand::Reg(Reg::X64 {
+                            reg: X64Reg::R10,
+                            section: RegSection::Qword,
+                        }),
                     }),
                     new_instr(InstructionType::Mov {
-                        src: Operand::Reg(Reg::R10),
+                        src: Operand::Reg(Reg::X64 {
+                            reg: X64Reg::R10,
+                            section: RegSection::Qword,
+                        }),
                         dst: Operand::StackOffset(dst_offset),
                     }),
                 ]
@@ -252,11 +348,17 @@ impl From<Instruction<Offset>> for Vec<Instruction<Final>> {
                 vec![
                     new_instr(InstructionType::Mov {
                         src: Operand::StackOffset(src1_offset),
-                        dst: Operand::Reg(Reg::R10),
+                        dst: Operand::Reg(Reg::X64 {
+                            reg: X64Reg::R10,
+                            section: RegSection::Qword,
+                        }),
                     }),
                     new_instr(InstructionType::Binary {
                         op,
-                        src1: Operand::Reg(Reg::R10),
+                        src1: Operand::Reg(Reg::X64 {
+                            reg: X64Reg::R10,
+                            section: RegSection::Qword,
+                        }),
                         src2: Operand::StackOffset(src2_offset),
                     }),
                 ]
@@ -264,9 +366,15 @@ impl From<Instruction<Offset>> for Vec<Instruction<Final>> {
             InstructionType::Idiv(Operand::Imm(v)) => vec![
                 new_instr(InstructionType::Mov {
                     src: Operand::Imm(v),
-                    dst: Operand::Reg(Reg::R10),
+                    dst: Operand::Reg(Reg::X64 {
+                        reg: X64Reg::R10,
+                        section: RegSection::Qword,
+                    }),
                 }),
-                new_instr(InstructionType::Idiv(Operand::Reg(Reg::R10))),
+                new_instr(InstructionType::Idiv(Operand::Reg(Reg::X64 {
+                    reg: X64Reg::R10,
+                    section: RegSection::Qword,
+                }))),
             ],
 
             instr => vec![new_instr(instr)],
@@ -287,7 +395,10 @@ impl From<&tacky::Instruction> for Vec<Instruction<Initial>> {
             tacky::Instruction::Return(Some(ref val)) => vec![
                 new_instr(InstructionType::Mov {
                     src: Operand::from(val),
-                    dst: Operand::Reg(Reg::Eax),
+                    dst: Operand::Reg(Reg::X86 {
+                        reg: X86Reg::Ax,
+                        section: RegSection::Dword,
+                    }),
                 }),
                 new_instr(InstructionType::Ret),
             ],
@@ -324,15 +435,24 @@ impl From<&tacky::Instruction> for Vec<Instruction<Initial>> {
                     vec![
                         new_instr(InstructionType::Mov {
                             src: src2.into(),
-                            dst: Operand::Reg(Reg::R11),
+                            dst: Operand::Reg(Reg::X64 {
+                                reg: X64Reg::R11,
+                                section: RegSection::Qword,
+                            }),
                         }),
                         new_instr(InstructionType::Binary {
                             op: BinaryOp::Multiply,
                             src1: src1.into(),
-                            src2: Operand::Reg(Reg::R11),
+                            src2: Operand::Reg(Reg::X64 {
+                                reg: X64Reg::R11,
+                                section: RegSection::Qword,
+                            }),
                         }),
                         new_instr(InstructionType::Mov {
-                            src: Operand::Reg(Reg::R11),
+                            src: Operand::Reg(Reg::X64 {
+                                reg: X64Reg::R11,
+                                section: RegSection::Qword,
+                            }),
                             dst: dst.into(),
                         }),
                     ]
@@ -340,24 +460,36 @@ impl From<&tacky::Instruction> for Vec<Instruction<Initial>> {
                 tacky::BinaryOp::Divide => vec![
                     new_instr(InstructionType::Mov {
                         src: src1.into(),
-                        dst: Operand::Reg(Reg::Eax),
+                        dst: Operand::Reg(Reg::X86 {
+                            reg: X86Reg::Ax,
+                            section: RegSection::Dword,
+                        }),
                     }),
                     new_instr(InstructionType::Cdq),
                     new_instr(InstructionType::Idiv(src2.into())),
                     new_instr(InstructionType::Mov {
-                        src: Operand::Reg(Reg::Eax),
+                        src: Operand::Reg(Reg::X86 {
+                            reg: X86Reg::Ax,
+                            section: RegSection::Dword,
+                        }),
                         dst: dst.into(),
                     }),
                 ],
                 tacky::BinaryOp::Remainder => vec![
                     new_instr(InstructionType::Mov {
                         src: src1.into(),
-                        dst: Operand::Reg(Reg::Eax),
+                        dst: Operand::Reg(Reg::X86 {
+                            reg: X86Reg::Ax,
+                            section: RegSection::Dword,
+                        }),
                     }),
                     new_instr(InstructionType::Cdq),
                     new_instr(InstructionType::Idiv(src2.into())),
                     new_instr(InstructionType::Mov {
-                        src: Operand::Reg(Reg::Edx),
+                        src: Operand::Reg(Reg::X86 {
+                            reg: X86Reg::Dx,
+                            section: RegSection::Dword,
+                        }),
                         dst: dst.into(),
                     }),
                 ],
@@ -398,7 +530,10 @@ mod tests {
         let expected: Vec<Instruction<Initial>> = vec![
             InstructionType::Mov {
                 src: Operand::Imm(2),
-                dst: Operand::Reg(Reg::Eax),
+                dst: Operand::Reg(Reg::X86 {
+                    reg: X86Reg::Ax,
+                    section: RegSection::Dword,
+                }),
             },
             InstructionType::Ret,
         ]

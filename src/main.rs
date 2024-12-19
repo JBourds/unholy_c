@@ -142,7 +142,7 @@ fn gen_asm<W: std::fmt::Write, T: AsmGen<W>>(
 }
 
 fn assemble_and_link(args: &Args, asm: &str) -> Result<()> {
-    let asm_path = std::path::Path::new(&args.file).with_extension(".S");
+    let asm_path = std::path::Path::new(&args.file).with_extension("s");
     // Ensure that the file is closed
     {
         let mut asm_file = std::fs::File::create(&asm_path).with_context(|| {

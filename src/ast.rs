@@ -437,12 +437,20 @@ mod tests {
     }
 
     #[test]
-    fn parse_unary_bitnot_err() {
+    fn parse_unary_bitnot_empty() {
         let tokens = &[Token::BitNot, Token::Literal("1")];
 
-        let parse = Factor::parse(tokens);
+        let (expr, tokens) = Factor::parse(tokens).unwrap();
 
-        assert!(parse.is_err())
+        assert!(tokens.is_empty());
+
+        assert_eq!(
+            expr,
+            Expr::Unary {
+                op: UnaryOp::Complement,
+                expr: Box::new(Expr::Literal(Literal::Int(1)))
+            }
+        );
     }
 
     #[test]
@@ -462,12 +470,20 @@ mod tests {
     }
 
     #[test]
-    fn parse_unary_negate_err() {
+    fn parse_unary_negate_empty() {
         let tokens = &[Token::Minus, Token::Literal("1")];
 
-        let parse = Factor::parse(tokens);
+        let (expr, tokens) = Factor::parse(tokens).unwrap();
 
-        assert!(parse.is_err());
+        assert!(tokens.is_empty());
+
+        assert_eq!(
+            expr,
+            Expr::Unary {
+                op: UnaryOp::Negate,
+                expr: Box::new(Expr::Literal(Literal::Int(1)))
+            }
+        );
     }
 
     #[test]

@@ -1,6 +1,5 @@
 use crate::tacky;
 use anyhow::{Context, Result};
-use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::fmt;
 use std::marker::PhantomData;
@@ -313,16 +312,14 @@ impl Instruction<Offset> {
     ) -> Self {
         let mut convert_operand_offset = |op| {
             if let Operand::Pseudo { ref name, size } = op {
-                if let Entry::Vacant(e) = stack_offsets.entry(Rc::clone(name)) {
+                let offset = stack_offsets.entry(Rc::clone(name)).or_insert_with(|| {
                     *stack_bound += size;
-                    e.insert(*stack_bound);
-                }
-                // SAFETY: We just checked this condition
-                unsafe {
-                    Operand::StackOffset {
-                        offset: *stack_offsets.get(name).unwrap_unchecked(),
-                        size,
-                    }
+                    *stack_bound
+                });
+
+                Operand::StackOffset {
+                    offset: *offset,
+                    size,
                 }
             } else {
                 op
@@ -344,6 +341,7 @@ impl Instruction<Offset> {
                     src1: convert_operand_offset(src1),
                     src2: convert_operand_offset(src2),
                 },
+                InstructionType::Idiv(op) => InstructionType::Idiv(convert_operand_offset(op)),
                 instr => instr,
             },
             phantom: PhantomData::<Offset>,
@@ -379,13 +377,13 @@ impl From<Instruction<Offset>> for Vec<Instruction<Final>> {
                         },
                         dst: Operand::Reg(Reg::X64 {
                             reg: X64Reg::R10,
-                            section: RegSection::Qword,
+                            section: RegSection::Dword,
                         }),
                     }),
                     new_instr(InstructionType::Mov {
                         src: Operand::Reg(Reg::X64 {
                             reg: X64Reg::R10,
-                            section: RegSection::Qword,
+                            section: RegSection::Dword,
                         }),
                         dst: Operand::StackOffset {
                             offset: dst_offset,
@@ -415,14 +413,14 @@ impl From<Instruction<Offset>> for Vec<Instruction<Final>> {
                         },
                         dst: Operand::Reg(Reg::X64 {
                             reg: X64Reg::R10,
-                            section: RegSection::Qword,
+                            section: RegSection::Dword,
                         }),
                     }),
                     new_instr(InstructionType::Binary {
                         op,
                         src1: Operand::Reg(Reg::X64 {
                             reg: X64Reg::R10,
-                            section: RegSection::Qword,
+                            section: RegSection::Dword,
                         }),
                         src2: Operand::StackOffset {
                             offset: src2_offset,
@@ -436,12 +434,12 @@ impl From<Instruction<Offset>> for Vec<Instruction<Final>> {
                     src: Operand::Imm(v),
                     dst: Operand::Reg(Reg::X64 {
                         reg: X64Reg::R10,
-                        section: RegSection::Qword,
+                        section: RegSection::Dword,
                     }),
                 }),
                 new_instr(InstructionType::Idiv(Operand::Reg(Reg::X64 {
                     reg: X64Reg::R10,
-                    section: RegSection::Qword,
+                    section: RegSection::Dword,
                 }))),
             ],
 
@@ -505,7 +503,7 @@ impl From<&tacky::Instruction> for Vec<Instruction<Initial>> {
                             src: src2.into(),
                             dst: Operand::Reg(Reg::X64 {
                                 reg: X64Reg::R11,
-                                section: RegSection::Qword,
+                                section: RegSection::Dword,
                             }),
                         }),
                         new_instr(InstructionType::Binary {
@@ -513,13 +511,13 @@ impl From<&tacky::Instruction> for Vec<Instruction<Initial>> {
                             src1: src1.into(),
                             src2: Operand::Reg(Reg::X64 {
                                 reg: X64Reg::R11,
-                                section: RegSection::Qword,
+                                section: RegSection::Dword,
                             }),
                         }),
                         new_instr(InstructionType::Mov {
                             src: Operand::Reg(Reg::X64 {
                                 reg: X64Reg::R11,
-                                section: RegSection::Qword,
+                                section: RegSection::Dword,
                             }),
                             dst: dst.into(),
                         }),
@@ -606,7 +604,9 @@ impl fmt::Display for Operand {
             Self::Imm(v) => write!(f, "{v}"),
             Self::Reg(r) => write!(f, "{r}"),
             Self::StackOffset { offset, .. } => write!(f, "[rbp-{offset}]"),
-            Self::Pseudo { .. } => unreachable!(),
+            Self::Pseudo { .. } => {
+                unreachable!("Cannot create asm representation for a pseudioregister.")
+            }
         }
     }
 }

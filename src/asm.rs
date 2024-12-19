@@ -103,9 +103,10 @@ pub mod x64 {
             codegen::InstructionType::Cdq => {
                 w.write_str("\tcdq\n")?;
             }
-            codegen::InstructionType::Idiv(operand) => {
-                w.write_fmt(format_args!("\tidiv {operand}\n"))?
-            }
+            codegen::InstructionType::Idiv(operand) => w.write_fmt(format_args!(
+                "\tidiv {}{operand}\n",
+                get_specifier(None, operand)
+            ))?,
         }
         Ok(())
     }

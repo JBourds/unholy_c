@@ -190,7 +190,7 @@ impl Factor {
         } else if let Ok((unary, tokens)) = UnaryOp::consume(tokens) {
             // We have to parse an Expr here
             let (expr, tokens) =
-                Expr::parse(tokens, 0).context("Parsing grammer rule: <unop> <factor> failed")?;
+                Factor::parse(tokens).context("Parsing grammer rule: <unop> <factor> failed")?;
             Ok((
                 Expr::Unary {
                     op: unary,

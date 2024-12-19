@@ -143,7 +143,6 @@ impl From<&ast::Expr> for Expr {
     }
 }
 
-// TODO: Other types
 #[derive(Clone, Debug, PartialEq)]
 pub enum Val {
     Constant(i32),

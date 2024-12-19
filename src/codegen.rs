@@ -209,6 +209,11 @@ impl Instruction<Offset> {
                     op,
                     dst: convert_operand_offset(dst),
                 },
+                InstructionType::Binary { op, src1, src2 } => InstructionType::Binary {
+                    op,
+                    src1: convert_operand_offset(src1),
+                    src2: convert_operand_offset(src2),
+                },
                 instr => instr,
             },
             phantom: PhantomData::<Offset>,
@@ -216,7 +221,7 @@ impl Instruction<Offset> {
     }
 }
 
-// Necessary for instructions which have multiple stack offsets as operands
+// Final stage of rewriting to follow semantics of assembly instructions
 impl From<Instruction<Offset>> for Vec<Instruction<Final>> {
     fn from(instr: Instruction<Offset>) -> Vec<Instruction<Final>> {
         let new_instr = |op| Instruction::<Final> {
@@ -239,30 +244,59 @@ impl From<Instruction<Offset>> for Vec<Instruction<Final>> {
                     }),
                 ]
             }
-            op => vec![new_instr(op)],
+            InstructionType::Binary {
+                op,
+                src1: Operand::StackOffset(src1_offset),
+                src2: Operand::StackOffset(src2_offset),
+            } => {
+                vec![
+                    new_instr(InstructionType::Mov {
+                        src: Operand::StackOffset(src1_offset),
+                        dst: Operand::Reg(Reg::R10),
+                    }),
+                    new_instr(InstructionType::Binary {
+                        op,
+                        src1: Operand::Reg(Reg::R10),
+                        src2: Operand::StackOffset(src2_offset),
+                    }),
+                ]
+            }
+            InstructionType::Idiv(Operand::Imm(v)) => vec![
+                new_instr(InstructionType::Mov {
+                    src: Operand::Imm(v),
+                    dst: Operand::Reg(Reg::R10),
+                }),
+                new_instr(InstructionType::Idiv(Operand::Reg(Reg::R10))),
+            ],
+
+            instr => vec![new_instr(instr)],
         }
     }
 }
 
 impl From<&tacky::Instruction> for Vec<Instruction<Initial>> {
     fn from(instruction: &tacky::Instruction) -> Vec<Instruction<Initial>> {
+        let new_instr = |op| Instruction::<Initial> {
+            op,
+            phantom: PhantomData::<Initial>,
+        };
         match instruction {
             tacky::Instruction::Return(None) => {
-                vec![Instruction::<Initial>::new(InstructionType::Ret)]
+                vec![new_instr(InstructionType::Ret)]
             }
             tacky::Instruction::Return(Some(ref val)) => vec![
-                Instruction::<Initial>::new(InstructionType::Mov {
+                new_instr(InstructionType::Mov {
                     src: Operand::from(val),
                     dst: Operand::Reg(Reg::Eax),
                 }),
-                Instruction::<Initial>::new(InstructionType::Ret),
+                new_instr(InstructionType::Ret),
             ],
             tacky::Instruction::Unary { op, src, dst } => vec![
-                Instruction::<Initial>::new(InstructionType::Mov {
+                new_instr(InstructionType::Mov {
                     src: src.into(),
                     dst: dst.into(),
                 }),
-                Instruction::<Initial>::new(InstructionType::Unary {
+                new_instr(InstructionType::Unary {
                     op: op.into(),
                     dst: dst.into(),
                 }),
@@ -273,39 +307,56 @@ impl From<&tacky::Instruction> for Vec<Instruction<Initial>> {
                 src2,
                 dst,
             } => match op {
-                tacky::BinaryOp::Add | tacky::BinaryOp::Subtract | tacky::BinaryOp::Multiply => {
+                tacky::BinaryOp::Add | tacky::BinaryOp::Subtract => {
                     vec![
-                        Instruction::<Initial>::new(InstructionType::Mov {
+                        new_instr(InstructionType::Mov {
                             src: src1.into(),
                             dst: dst.into(),
                         }),
-                        Instruction::<Initial>::new(InstructionType::Binary {
+                        new_instr(InstructionType::Binary {
                             op: op.into(),
                             src1: src2.into(),
                             src2: dst.into(),
                         }),
                     ]
                 }
+                tacky::BinaryOp::Multiply => {
+                    vec![
+                        new_instr(InstructionType::Mov {
+                            src: src2.into(),
+                            dst: Operand::Reg(Reg::R11),
+                        }),
+                        new_instr(InstructionType::Binary {
+                            op: BinaryOp::Multiply,
+                            src1: src1.into(),
+                            src2: Operand::Reg(Reg::R11),
+                        }),
+                        new_instr(InstructionType::Mov {
+                            src: Operand::Reg(Reg::R11),
+                            dst: dst.into(),
+                        }),
+                    ]
+                }
                 tacky::BinaryOp::Divide => vec![
-                    Instruction::<Initial>::new(InstructionType::Mov {
+                    new_instr(InstructionType::Mov {
                         src: src1.into(),
                         dst: Operand::Reg(Reg::Eax),
                     }),
-                    Instruction::<Initial>::new(InstructionType::Cdq),
-                    Instruction::<Initial>::new(InstructionType::Idiv(src2.into())),
-                    Instruction::<Initial>::new(InstructionType::Mov {
+                    new_instr(InstructionType::Cdq),
+                    new_instr(InstructionType::Idiv(src2.into())),
+                    new_instr(InstructionType::Mov {
                         src: Operand::Reg(Reg::Eax),
                         dst: dst.into(),
                     }),
                 ],
                 tacky::BinaryOp::Remainder => vec![
-                    Instruction::<Initial>::new(InstructionType::Mov {
+                    new_instr(InstructionType::Mov {
                         src: src1.into(),
                         dst: Operand::Reg(Reg::Eax),
                     }),
-                    Instruction::<Initial>::new(InstructionType::Cdq),
-                    Instruction::<Initial>::new(InstructionType::Idiv(src2.into())),
-                    Instruction::<Initial>::new(InstructionType::Mov {
+                    new_instr(InstructionType::Cdq),
+                    new_instr(InstructionType::Idiv(src2.into())),
+                    new_instr(InstructionType::Mov {
                         src: Operand::Reg(Reg::Edx),
                         dst: dst.into(),
                     }),
@@ -453,5 +504,37 @@ mod tests {
     }
 
     #[test]
-    fn test_binary_expressions() {}
+    fn test_binary_expressions() {
+        let tacky_fn = tacky::Function {
+            name: Rc::new("test_fn".to_string()),
+            instructions: vec![
+                tacky::Instruction::Binary {
+                    op: tacky::BinaryOp::Multiply,
+                    src1: tacky::Val::Constant(1),
+                    src2: tacky::Val::Constant(2),
+                    dst: tacky::Val::Var(Rc::new("tmp.0".to_string())),
+                },
+                tacky::Instruction::Binary {
+                    op: tacky::BinaryOp::Add,
+                    src1: tacky::Val::Constant(4),
+                    src2: tacky::Val::Constant(5),
+                    dst: tacky::Val::Var(Rc::new("tmp.1".to_string())),
+                },
+                tacky::Instruction::Binary {
+                    op: tacky::BinaryOp::Multiply,
+                    src1: tacky::Val::Constant(3),
+                    src2: tacky::Val::Var(Rc::new("tmp.1".to_string())),
+                    dst: tacky::Val::Var(Rc::new("tmp.2".to_string())),
+                },
+                tacky::Instruction::Binary {
+                    op: tacky::BinaryOp::Subtract,
+                    src1: tacky::Val::Var(Rc::new("tmp.0".to_string())),
+                    src2: tacky::Val::Var(Rc::new("tmp.2".to_string())),
+                    dst: tacky::Val::Var(Rc::new("tmp.3".to_string())),
+                },
+            ],
+        };
+        // Because the resulting AST is huge just check that it parses
+        let _ = Function::try_from(&tacky_fn).unwrap();
+    }
 }

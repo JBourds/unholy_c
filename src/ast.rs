@@ -281,11 +281,11 @@ impl BinaryOp {
             BinaryOp::Multiply => 50,
             BinaryOp::Divide => 50,
             BinaryOp::Remainder => 50,
-            BinaryOp::BitAnd => todo!(),
-            BinaryOp::BitOr => todo!(),
-            BinaryOp::Xor => todo!(),
-            BinaryOp::LShift => todo!(),
-            BinaryOp::RShift => todo!(),
+            BinaryOp::BitAnd => 25,
+            BinaryOp::BitOr => 15,
+            BinaryOp::Xor => 20,
+            BinaryOp::LShift => 40,
+            BinaryOp::RShift => 40,
         }
     }
 

@@ -484,7 +484,11 @@ impl From<&tacky::Instruction> for Vec<Instruction<Initial>> {
                 src2,
                 dst,
             } => match op {
-                tacky::BinaryOp::Add | tacky::BinaryOp::Subtract => {
+                tacky::BinaryOp::Add
+                | tacky::BinaryOp::Subtract
+                | tacky::BinaryOp::BitAnd
+                | tacky::BinaryOp::BitOr
+                | tacky::BinaryOp::Xor => {
                     vec![
                         new_instr(InstructionType::Mov {
                             src: src1.into(),

@@ -79,7 +79,7 @@ pub enum UnaryOp {
 impl fmt::Display for UnaryOp {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Negate => write!(f, "net"),
+            Self::Negate => write!(f, "neg"),
             Self::Complement => write!(f, "not"),
         }
     }

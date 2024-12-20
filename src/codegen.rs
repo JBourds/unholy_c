@@ -98,8 +98,6 @@ pub enum BinaryOp {
     Add,
     Subtract,
     Multiply,
-    Divide,
-    Remainder,
     BitAnd,
     BitOr,
     Xor,
@@ -113,13 +111,12 @@ impl From<&tacky::BinaryOp> for BinaryOp {
             tacky::BinaryOp::Add => Self::Add,
             tacky::BinaryOp::Subtract => Self::Subtract,
             tacky::BinaryOp::Multiply => Self::Multiply,
-            tacky::BinaryOp::Divide => Self::Divide,
-            tacky::BinaryOp::Remainder => Self::Remainder,
             tacky::BinaryOp::BitAnd => Self::BitAnd,
             tacky::BinaryOp::BitOr => Self::BitOr,
             tacky::BinaryOp::Xor => Self::Xor,
             tacky::BinaryOp::LShift => Self::LShift,
             tacky::BinaryOp::RShift => Self::RShift,
+            _ => unreachable!("No instruction conversion in binary op."),
         }
     }
 }
@@ -133,10 +130,8 @@ impl fmt::Display for BinaryOp {
             Self::BitAnd => write!(f, "and"),
             Self::BitOr => write!(f, "or"),
             Self::Xor => write!(f, "xor"),
-            Self::LShift => write!(f, "shl"),
-            Self::RShift => write!(f, "shr"),
-            Self::Divide => unreachable!("Division has no direct binary instruction."),
-            Self::Remainder => unreachable!("Remainder has no direct binary instruction"),
+            Self::LShift => write!(f, "sal"),
+            Self::RShift => write!(f, "sar"),
         }
     }
 }
@@ -207,7 +202,7 @@ impl From<&X64Reg> for usize {
         match value {
             X64Reg::R8 => 8,
             X64Reg::R9 => 9,
-            X64Reg::R10 => 11,
+            X64Reg::R10 => 10,
             X64Reg::R11 => 11,
             X64Reg::R12 => 12,
             X64Reg::R13 => 13,
@@ -237,13 +232,26 @@ impl fmt::Display for Reg {
         match self {
             Self::X86 { reg, section } => {
                 let prefix = match section {
-                    RegSection::LowByte => "h",
-                    RegSection::HighByte => "h",
                     RegSection::Word => "",
                     RegSection::Dword => "e",
                     RegSection::Qword => "r",
+                    _ => "",
                 };
-                write!(f, "{}{}", prefix, <&str>::from(reg))
+                let suffix = match section {
+                    RegSection::LowByte => "l",
+                    RegSection::HighByte => "h",
+                    _ => "",
+                };
+                let reg_str = match reg {
+                    reg @ X86Reg::Ax | reg @ X86Reg::Bx | reg @ X86Reg::Cx | reg @ X86Reg::Dx
+                        if !suffix.is_empty() =>
+                    {
+                        &<&str>::from(reg)[..1]
+                    }
+                    reg => <&str>::from(reg),
+                };
+
+                write!(f, "{prefix}{reg_str}{suffix}")
             }
             Self::X64 { reg, section } => {
                 let suffix = match section {
@@ -563,7 +571,33 @@ impl From<&tacky::Instruction> for Vec<Instruction<Initial>> {
                         dst: dst.into(),
                     }),
                 ],
-                _ => todo!(),
+                op @ tacky::BinaryOp::LShift | op @ tacky::BinaryOp::RShift => {
+                    let mut v = vec![];
+                    let src = match src2 {
+                        tacky::Val::Constant(v) => Operand::Imm(*v),
+                        _ => {
+                            let cl_reg = Operand::Reg(Reg::X86 {
+                                reg: X86Reg::Cx,
+                                section: RegSection::LowByte,
+                            });
+                            v.push(new_instr(InstructionType::Mov {
+                                src: src2.into(),
+                                dst: cl_reg.clone(),
+                            }));
+                            cl_reg
+                        }
+                    };
+                    v.push(new_instr(InstructionType::Mov {
+                        src: src1.into(),
+                        dst: dst.into(),
+                    }));
+                    v.push(new_instr(InstructionType::Binary {
+                        op: op.into(),
+                        src1: src,
+                        src2: dst.into(),
+                    }));
+                    v
+                }
             },
         }
     }

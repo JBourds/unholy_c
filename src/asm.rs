@@ -11,7 +11,7 @@ pub trait AsmGen<W> {
 pub mod x64 {
     use super::AsmGen;
     use crate::codegen::{self, Operand};
-    use anyhow::{bail, Result};
+    use anyhow::Result;
     use std::fmt::Write;
 
     pub struct Generator;
@@ -89,16 +89,16 @@ pub mod x64 {
                 src1: src,
                 src2: dst,
             } => {
-                match op {
-                    codegen::BinaryOp::Divide | codegen::BinaryOp::Remainder => {
-                        bail!("Divide and remainder don't have direct assembly translations as binary expressions.")
+                // Special case- if we are bitshifting then the "cl" register
+                // can be the src2 operand but says nothing about the size of
+                // the data it points to
+                let specifier = match op {
+                    codegen::BinaryOp::LShift | codegen::BinaryOp::RShift => {
+                        get_specifier(None, dst)
                     }
-                    _ => {}
-                }
-                w.write_fmt(format_args!(
-                    "\t{op} {}{dst}, {src}\n",
-                    get_specifier(Some(src), dst)
-                ))?
+                    _ => get_specifier(Some(src), dst),
+                };
+                w.write_fmt(format_args!("\t{op} {specifier}{dst}, {src}\n",))?
             }
             codegen::InstructionType::Cdq => {
                 w.write_str("\tcdq\n")?;

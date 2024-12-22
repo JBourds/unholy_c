@@ -47,50 +47,67 @@ pub mod x64 {
     }
 
     fn gen_instruction(w: &mut impl Write, instr: &codegen::InstructionType) -> Result<()> {
+        let get_specifier = |src: Option<&Operand>, dst: &Operand| {
+            let size = match (src, dst) {
+                (None, Operand::StackOffset { size, .. })
+                | (Some(Operand::Imm(_)), Operand::StackOffset { size, .. }) => Some(*size),
+                (Some(Operand::StackOffset { size, .. }), Operand::Imm(_)) => Some(*size),
+                _ => None,
+            };
+            match size {
+                None => "",
+                Some(1) => "byte ptr ",
+                Some(2) => "word ptr ",
+                Some(4) => "dword ptr ",
+                Some(8) => "qword ptr ",
+                _ => unreachable!("Cannot have a destination size other than 1, 2, 4, or 8."),
+            }
+        };
+
         match instr {
             codegen::InstructionType::Mov { src, dst } => {
-                let specifier = match dst {
-                    Operand::StackOffset(offset) => match offset {
-                        2 => "word ptr ",
-                        4 => "dword ptr ",
-                        8 => "qword ptr ",
-                        _ => "",
-                    },
-                    _ => "",
-                };
-                let src = gen_operand(src);
-                let dst = gen_operand(dst);
-                w.write_fmt(format_args!("\tmov {specifier}{dst}, {src}\n"))?;
+                w.write_fmt(format_args!(
+                    "\tmov {}{dst}, {src}\n",
+                    get_specifier(Some(src), dst)
+                ))?;
             }
             codegen::InstructionType::Ret => {
-                w.write_str("\tmovq rsp, rbp\n")?;
-                w.write_str("\tpopq rbp\n")?;
+                w.write_str("\tmov rsp, rbp\n")?;
+                w.write_str("\tpop rbp\n")?;
                 w.write_str("\tret\n")?;
             }
-            // TODO: Unhardcode size
-            codegen::InstructionType::Unary { op, dst } => match op {
-                codegen::UnaryOp::Complement => {
-                    w.write_fmt(format_args!("\tnot dword ptr {}\n", gen_operand(dst)))?;
-                }
-                codegen::UnaryOp::Negate => {
-                    w.write_fmt(format_args!("\tneg dword ptr {}\n", gen_operand(dst)))?;
-                }
-            },
+            codegen::InstructionType::Unary { op, dst } => {
+                w.write_fmt(format_args!("\t{op} {}{dst}\n", get_specifier(None, dst)))?
+            }
             codegen::InstructionType::AllocStack(size) => {
-                w.write_str("\tpushq rbp\n")?;
-                w.write_str("\tmovq rbp, rsp\n")?;
+                w.write_str("\tpush rbp\n")?;
+                w.write_str("\tmov rbp, rsp\n")?;
                 w.write_fmt(format_args!("\tsub rsp, {}\n", size))?;
             }
+            codegen::InstructionType::Binary {
+                op,
+                src1: src,
+                src2: dst,
+            } => {
+                // Special case- if we are bitshifting then the "cl" register
+                // can be the src2 operand but says nothing about the size of
+                // the data it points to
+                let specifier = match op {
+                    codegen::BinaryOp::LShift | codegen::BinaryOp::RShift => {
+                        get_specifier(None, dst)
+                    }
+                    _ => get_specifier(Some(src), dst),
+                };
+                w.write_fmt(format_args!("\t{op} {specifier}{dst}, {src}\n",))?
+            }
+            codegen::InstructionType::Cdq => {
+                w.write_str("\tcdq\n")?;
+            }
+            codegen::InstructionType::Idiv(operand) => w.write_fmt(format_args!(
+                "\tidiv {}{operand}\n",
+                get_specifier(None, operand)
+            ))?,
         }
         Ok(())
-    }
-
-    fn gen_operand(operand: &codegen::Operand) -> String {
-        match operand {
-            codegen::Operand::Imm(i) => format!("{i}"),
-            codegen::Operand::Reg(r) => format!("{r}"),
-            codegen::Operand::StackOffset(offset) => format!("[rbp-{}]", offset),
-            _ => todo!(),
-        }
     }
 }

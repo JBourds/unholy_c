@@ -6,7 +6,7 @@ mod tacky;
 
 use std::{ffi::OsStr, io::Write, process::Command};
 
-use anyhow::{bail, ensure, Context, Result};
+use anyhow::{anyhow, bail, ensure, Context, Result};
 use clap::Parser;
 
 use asm::AsmGen;
@@ -142,7 +142,7 @@ fn gen_asm<W: std::fmt::Write, T: AsmGen<W>>(
 }
 
 fn assemble_and_link(args: &Args, asm: &str) -> Result<()> {
-    let asm_path = std::path::Path::new(&args.file).with_extension(".S");
+    let asm_path = std::path::Path::new(&args.file).with_extension("s");
     // Ensure that the file is closed
     {
         let mut asm_file = std::fs::File::create(&asm_path).with_context(|| {
@@ -171,11 +171,14 @@ fn assemble_and_link(args: &Args, asm: &str) -> Result<()> {
         .output()
         .context("Failed to run gcc for assembly and linking")?;
 
-    ensure!(
-        output.status.success(),
-        "gcc exited with error code {}",
-        output.status,
-    );
+    if !output.status.success() {
+        return Err(anyhow!("gcc exited with error code: {}", output.status)).with_context(|| {
+            format!(
+                "gcc stdout output: \n{}",
+                String::from_utf8_lossy(&output.stderr)
+            )
+        });
+    }
 
     std::fs::remove_file(&asm_path).with_context(|| {
         format!(

@@ -123,7 +123,7 @@ impl<'a> AstNode<'a> for Stmt {
         match tokens {
             [Token::Return, Token::Semi, ..] => Ok((Self::Return(None), tokens)),
             [Token::Return, tokens @ ..] => {
-                let (expr, tokens) = Expr::consume(tokens).context(
+                let (expr, tokens) = Expr::parse(tokens, 0).context(
                     "Expected return statement to return an expression but could not parse one.",
                 )?;
                 if let Some(Token::Semi) = tokens.first() {
@@ -140,23 +140,70 @@ impl<'a> AstNode<'a> for Stmt {
 #[derive(Debug, PartialEq)]
 pub enum Expr {
     Literal(Literal),
-    Unary(UnaryOp, Box<Expr>),
+    Unary {
+        op: UnaryOp,
+        expr: Box<Expr>,
+    },
+    Binary {
+        op: BinaryOp,
+        left: Box<Expr>,
+        right: Box<Expr>,
+    },
 }
-impl<'a> AstNode<'a> for Expr {
-    fn consume(tokens: &'a [Token<'a>]) -> Result<(Expr, &'a [Token<'a>])> {
+
+impl Expr {
+    pub fn parse<'a>(
+        tokens: &'a [Token<'a>],
+        min_precedence: u32,
+    ) -> Result<(Expr, &'a [Token<'a>])> {
+        let (mut left, mut tokens) = Factor::parse(tokens)?;
+        loop {
+            let Some((operator, tokens_inner)) = BinaryOp::parse(tokens)? else {
+                break;
+            };
+
+            if operator.precedence() < min_precedence {
+                break;
+            }
+
+            let (right, tokens_inner) = Expr::parse(tokens_inner, operator.precedence() + 1)?;
+
+            left = Expr::Binary {
+                op: operator,
+                left: Box::new(left),
+                right: Box::new(right),
+            };
+
+            // Update tokens in outer scope
+            tokens = tokens_inner;
+        }
+        Ok((left, tokens))
+    }
+}
+
+struct Factor;
+
+impl Factor {
+    pub fn parse<'a>(tokens: &'a [Token<'a>]) -> Result<(Expr, &'a [Token<'a>])> {
         if let Ok((literal, tokens)) = Literal::consume(tokens) {
             Ok((Expr::Literal(literal), tokens))
         } else if let Ok((unary, tokens)) = UnaryOp::consume(tokens) {
             // We have to parse an Expr here
             let (expr, tokens) =
-                Expr::consume(tokens).context("Parsing grammer rule: <unop> <exp> failed")?;
-            Ok((Expr::Unary(unary, Box::new(expr)), tokens))
+                Factor::parse(tokens).context("Parsing grammer rule: <unop> <factor> failed")?;
+            Ok((
+                Expr::Unary {
+                    op: unary,
+                    expr: Box::new(expr),
+                },
+                tokens,
+            ))
         } else {
             // We have 1 more rule to try to parse here
             // "(" <exp> ")"
             match tokens {
                 [Token::LParen, tokens @ ..] => {
-                    let (expr, tokens) = Expr::consume(tokens)
+                    let (expr, tokens) = Expr::parse(tokens, 0)
                         .context("Parsing grammer rule: \"(\" <exp> \")\" failed")?;
                     match tokens {
                         [Token::RParen, tokens @ ..] => Ok((expr, tokens)),
@@ -208,6 +255,56 @@ impl<'a> AstNode<'a> for Literal {
             }
         } else {
             bail!("No remaining tokens.")
+        }
+    }
+}
+
+#[derive(Debug, PartialEq)]
+pub enum BinaryOp {
+    Add,
+    Subtract,
+    Multiply,
+    Divide,
+    Remainder,
+    BitAnd,
+    BitOr,
+    Xor,
+    LShift,
+    RShift,
+}
+
+impl BinaryOp {
+    pub fn precedence(&self) -> u32 {
+        match *self {
+            BinaryOp::Add => 45,
+            BinaryOp::Subtract => 45,
+            BinaryOp::Multiply => 50,
+            BinaryOp::Divide => 50,
+            BinaryOp::Remainder => 50,
+            BinaryOp::BitAnd => 25,
+            BinaryOp::BitOr => 15,
+            BinaryOp::Xor => 20,
+            BinaryOp::LShift => 40,
+            BinaryOp::RShift => 40,
+        }
+    }
+
+    fn parse<'a>(tokens: &'a [Token<'a>]) -> Result<Option<(BinaryOp, &'a [Token<'a>])>> {
+        let token = tokens.first().context("No remaining tokens")?;
+        let tokens = &tokens[1..];
+
+        match token {
+            Token::Plus => Ok(Some((BinaryOp::Add, tokens))),
+            Token::Minus => Ok(Some((BinaryOp::Subtract, tokens))),
+            Token::Star => Ok(Some((BinaryOp::Multiply, tokens))),
+            Token::Divide => Ok(Some((BinaryOp::Divide, tokens))),
+            Token::Mod => Ok(Some((BinaryOp::Remainder, tokens))),
+            Token::Ampersand => Ok(Some((BinaryOp::BitAnd, tokens))),
+            Token::BitOr => Ok(Some((BinaryOp::BitOr, tokens))),
+            Token::BitXor => Ok(Some((BinaryOp::Xor, tokens))),
+            Token::LShift => Ok(Some((BinaryOp::LShift, tokens))),
+            Token::RShift => Ok(Some((BinaryOp::RShift, tokens))),
+            _ => Ok(None),
         }
     }
 }
@@ -340,31 +437,68 @@ mod tests {
     }
 
     #[test]
-    fn parse_unary_bitnot() {
+    fn parse_unary_bitnot_empty() {
         let tokens = &[Token::BitNot, Token::Literal("1")];
 
-        let (expr, tokens) = Expr::consume(tokens).unwrap();
+        let (expr, tokens) = Factor::parse(tokens).unwrap();
 
         assert!(tokens.is_empty());
+
         assert_eq!(
             expr,
-            Expr::Unary(
-                UnaryOp::Complement,
-                Box::new(Expr::Literal(Literal::Int(1)))
-            )
+            Expr::Unary {
+                op: UnaryOp::Complement,
+                expr: Box::new(Expr::Literal(Literal::Int(1)))
+            }
+        );
+    }
+
+    #[test]
+    fn parse_unary_bitnot() {
+        let tokens = &[Token::BitNot, Token::Literal("1"), Token::Semi];
+
+        let (expr, tokens) = Factor::parse(tokens).unwrap();
+
+        assert_eq!(tokens, &[Token::Semi]);
+        assert_eq!(
+            expr,
+            Expr::Unary {
+                op: UnaryOp::Complement,
+                expr: Box::new(Expr::Literal(Literal::Int(1)))
+            }
+        );
+    }
+
+    #[test]
+    fn parse_unary_negate_empty() {
+        let tokens = &[Token::Minus, Token::Literal("1")];
+
+        let (expr, tokens) = Factor::parse(tokens).unwrap();
+
+        assert!(tokens.is_empty());
+
+        assert_eq!(
+            expr,
+            Expr::Unary {
+                op: UnaryOp::Negate,
+                expr: Box::new(Expr::Literal(Literal::Int(1)))
+            }
         );
     }
 
     #[test]
     fn parse_unary_negate() {
-        let tokens = &[Token::Minus, Token::Literal("1")];
+        let tokens = &[Token::Minus, Token::Literal("1"), Token::Semi];
 
-        let (expr, tokens) = Expr::consume(tokens).unwrap();
+        let (expr, tokens) = Factor::parse(tokens).unwrap();
 
-        assert!(tokens.is_empty());
+        assert_eq!(tokens, &[Token::Semi]);
         assert_eq!(
             expr,
-            Expr::Unary(UnaryOp::Negate, Box::new(Expr::Literal(Literal::Int(1))))
+            Expr::Unary {
+                op: UnaryOp::Negate,
+                expr: Box::new(Expr::Literal(Literal::Int(1)))
+            }
         );
     }
 
@@ -380,7 +514,7 @@ mod tests {
             Token::RParen,
         ];
 
-        let (expr, tokens) = Expr::consume(tokens).unwrap();
+        let (expr, tokens) = Factor::parse(tokens).unwrap();
 
         assert!(tokens.is_empty());
         assert_eq!(expr, Expr::Literal(Literal::Int(1)));
@@ -400,19 +534,19 @@ mod tests {
             Token::RParen,
         ];
 
-        let (expr, tokens) = Expr::consume(tokens).unwrap();
+        let (expr, tokens) = Factor::parse(tokens).unwrap();
 
         assert!(tokens.is_empty());
 
         assert_eq!(
             expr,
-            Expr::Unary(
-                UnaryOp::Complement,
-                Box::new(Expr::Unary(
-                    UnaryOp::Negate,
-                    Box::new(Expr::Literal(Literal::Int(2)))
-                ))
-            )
+            Expr::Unary {
+                op: UnaryOp::Complement,
+                expr: Box::new(Expr::Unary {
+                    op: UnaryOp::Negate,
+                    expr: Box::new(Expr::Literal(Literal::Int(2)))
+                })
+            }
         );
     }
 
@@ -440,13 +574,13 @@ mod tests {
                 ret_t: Type::Int,
                 name: "main",
                 signature: vec![],
-                statements: vec![Stmt::Return(Some(Expr::Unary(
-                    UnaryOp::Negate,
-                    Box::new(Expr::Unary(
-                        UnaryOp::Negate,
-                        Box::new(Expr::Literal(Literal::Int(2))),
-                    )),
-                )))],
+                statements: vec![Stmt::Return(Some(Expr::Unary {
+                    op: UnaryOp::Negate,
+                    expr: Box::new(Expr::Unary {
+                        op: UnaryOp::Negate,
+                        expr: Box::new(Expr::Literal(Literal::Int(2))),
+                    }),
+                }))],
             },
         };
         assert_eq!(expected, program);
@@ -463,19 +597,19 @@ mod tests {
             Token::Semi,
         ];
 
-        let (expr, tokens) = Expr::consume(tokens).unwrap();
+        let (expr, tokens) = Expr::parse(tokens, 0).unwrap();
 
         assert_eq!(&tokens, &[Token::Semi]);
 
         assert_eq!(
             expr,
-            Expr::Unary(
-                UnaryOp::Negate,
-                Box::new(Expr::Unary(
-                    UnaryOp::Negate,
-                    Box::new(Expr::Literal(Literal::Int(2))),
-                ))
-            )
+            Expr::Unary {
+                op: UnaryOp::Negate,
+                expr: Box::new(Expr::Unary {
+                    op: UnaryOp::Negate,
+                    expr: Box::new(Expr::Literal(Literal::Int(2)))
+                }),
+            }
         );
     }
 
@@ -494,7 +628,5 @@ mod tests {
         let (_stmt, tokens) = Stmt::consume(tokens).unwrap();
 
         assert!(tokens.is_empty());
-
-        // println!("{:#?}", stmt);
     }
 }

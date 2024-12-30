@@ -175,6 +175,7 @@ impl From<&ast::UnaryOp> for UnaryOp {
         match node {
             ast::UnaryOp::Complement => Self::Complement,
             ast::UnaryOp::Negate => Self::Negate,
+            ast::UnaryOp::Not => todo!(),
         }
     }
 }
@@ -206,6 +207,7 @@ impl From<&ast::BinaryOp> for BinaryOp {
             ast::BinaryOp::Xor => Self::Xor,
             ast::BinaryOp::LShift => Self::LShift,
             ast::BinaryOp::RShift => Self::RShift,
+            _ => todo!(),
         }
     }
 }

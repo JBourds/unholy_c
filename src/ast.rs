@@ -271,6 +271,14 @@ pub enum BinaryOp {
     Xor,
     LShift,
     RShift,
+    And,
+    Or,
+    Equal,
+    NotEqual,
+    LessThan,
+    LessOrEqual,
+    GreaterThan,
+    GreaterOrEqual,
 }
 
 impl BinaryOp {
@@ -286,6 +294,14 @@ impl BinaryOp {
             BinaryOp::Xor => 20,
             BinaryOp::LShift => 40,
             BinaryOp::RShift => 40,
+            BinaryOp::And => 10,
+            BinaryOp::Or => 5,
+            BinaryOp::Equal => 30,
+            BinaryOp::NotEqual => 30,
+            BinaryOp::LessThan => 35,
+            BinaryOp::LessOrEqual => 35,
+            BinaryOp::GreaterThan => 35,
+            BinaryOp::GreaterOrEqual => 35,
         }
     }
 
@@ -304,6 +320,15 @@ impl BinaryOp {
             Token::BitXor => Ok(Some((BinaryOp::Xor, tokens))),
             Token::LShift => Ok(Some((BinaryOp::LShift, tokens))),
             Token::RShift => Ok(Some((BinaryOp::RShift, tokens))),
+            Token::And => Ok(Some((BinaryOp::And, tokens))),
+            Token::Or => Ok(Some((BinaryOp::Or, tokens))),
+            Token::Eq => Ok(Some((BinaryOp::Equal, tokens))),
+            Token::NotEq => Ok(Some((BinaryOp::NotEqual, tokens))),
+            Token::Less => Ok(Some((BinaryOp::LessThan, tokens))),
+            Token::LessEq => Ok(Some((BinaryOp::LessOrEqual, tokens))),
+            Token::Great => Ok(Some((BinaryOp::GreaterThan, tokens))),
+            Token::GreatEq => Ok(Some((BinaryOp::GreaterOrEqual, tokens))),
+
             _ => Ok(None),
         }
     }
@@ -313,6 +338,7 @@ impl BinaryOp {
 pub enum UnaryOp {
     Complement,
     Negate,
+    Not,
 }
 
 impl<'a> AstNode<'a> for UnaryOp {
@@ -324,7 +350,8 @@ impl<'a> AstNode<'a> for UnaryOp {
             match token {
                 Token::Minus => Ok((Self::Negate, &tokens[1..])),
                 Token::BitNot => Ok((Self::Complement, &tokens[1..])),
-                _ => bail!("Expected '-' or '~', found '{}'", token),
+                Token::Not => Ok((Self::Not, &tokens[1..])),
+                _ => bail!("Expected '-', '~', or '!', found '{}'", token),
             }
         } else {
             bail!("No remaining tokens")

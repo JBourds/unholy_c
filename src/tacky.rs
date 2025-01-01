@@ -287,8 +287,6 @@ pub enum BinaryOp {
     Xor,
     LShift,
     RShift,
-    And,
-    Or,
     Equal,
     NotEqual,
     LessThan,

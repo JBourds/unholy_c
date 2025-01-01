@@ -73,6 +73,7 @@ impl TryFrom<&tacky::Function> for Function {
 pub enum UnaryOp {
     Negate,
     Complement,
+    Not,
 }
 
 impl fmt::Display for UnaryOp {
@@ -80,6 +81,7 @@ impl fmt::Display for UnaryOp {
         match self {
             Self::Negate => write!(f, "neg"),
             Self::Complement => write!(f, "not"),
+            Self::Not => write!(f, "not_l"), // FIXME: No idea what the name should be
         }
     }
 }
@@ -89,7 +91,7 @@ impl From<&tacky::UnaryOp> for UnaryOp {
         match node {
             tacky::UnaryOp::Negate => Self::Negate,
             tacky::UnaryOp::Complement => Self::Complement,
-            _ => todo!(),
+            tacky::UnaryOp::Not => Self::Not,
         }
     }
 }
@@ -269,6 +271,30 @@ impl fmt::Display for Reg {
 }
 
 #[derive(Debug, PartialEq)]
+pub enum CondCode {
+    E,
+    NE,
+    G,
+    GE,
+    L,
+    LE,
+}
+
+impl From<&tacky::BinaryOp> for CondCode {
+    fn from(value: &tacky::BinaryOp) -> Self {
+        match value {
+            tacky::BinaryOp::Equal => Self::E,
+            tacky::BinaryOp::NotEqual => Self::NE,
+            tacky::BinaryOp::LessThan => Self::L,
+            tacky::BinaryOp::LessOrEqual => Self::LE,
+            tacky::BinaryOp::GreaterThan => Self::G,
+            tacky::BinaryOp::GreaterOrEqual => Self::GE,
+            _ => unreachable!("Only relational operands can convert to CondCode"),
+        }
+    }
+}
+
+#[derive(Debug, PartialEq)]
 struct Initial;
 
 #[derive(Debug, PartialEq)]
@@ -292,8 +318,22 @@ pub enum InstructionType {
         src1: Operand,
         src2: Operand,
     },
+    Cmp {
+        src1: Operand,
+        src2: Operand,
+    },
     Idiv(Operand),
     Cdq,
+    Jmp(Rc<String>),
+    JmpCC {
+        cond_code: CondCode,
+        identifier: Rc<String>,
+    },
+    SetCC {
+        cond_code: CondCode,
+        dst: Operand,
+    },
+    Label(Rc<String>),
     AllocStack(usize),
     Ret,
 }
@@ -477,16 +517,32 @@ impl From<&tacky::Instruction> for Vec<Instruction<Initial>> {
                 }),
                 new_instr(InstructionType::Ret),
             ],
-            tacky::Instruction::Unary { op, src, dst } => vec![
-                new_instr(InstructionType::Mov {
-                    src: src.into(),
-                    dst: dst.into(),
-                }),
-                new_instr(InstructionType::Unary {
-                    op: op.into(),
-                    dst: dst.into(),
-                }),
-            ],
+            tacky::Instruction::Unary { op, src, dst } => match op {
+                tacky::UnaryOp::Not => vec![
+                    new_instr(InstructionType::Cmp {
+                        src1: Operand::Imm(0),
+                        src2: src.into(),
+                    }),
+                    new_instr(InstructionType::Mov {
+                        src: Operand::Imm(0),
+                        dst: dst.into(),
+                    }),
+                    new_instr(InstructionType::SetCC {
+                        cond_code: CondCode::E,
+                        dst: dst.into(),
+                    }),
+                ],
+                _ => vec![
+                    new_instr(InstructionType::Mov {
+                        src: src.into(),
+                        dst: dst.into(),
+                    }),
+                    new_instr(InstructionType::Unary {
+                        op: op.into(),
+                        dst: dst.into(),
+                    }),
+                ],
+            },
             tacky::Instruction::Binary {
                 op,
                 src1,
@@ -599,9 +655,56 @@ impl From<&tacky::Instruction> for Vec<Instruction<Initial>> {
                     }));
                     v
                 }
-                _ => todo!(),
+                tacky::BinaryOp::Equal
+                | tacky::BinaryOp::NotEqual
+                | tacky::BinaryOp::LessThan
+                | tacky::BinaryOp::LessOrEqual
+                | tacky::BinaryOp::GreaterThan
+                | tacky::BinaryOp::GreaterOrEqual => vec![
+                    new_instr(InstructionType::Cmp {
+                        src1: src1.into(),
+                        src2: src2.into(),
+                    }),
+                    new_instr(InstructionType::Mov {
+                        src: Operand::Imm(1),
+                        dst: dst.into(),
+                    }),
+                    new_instr(InstructionType::SetCC {
+                        cond_code: op.into(),
+                        dst: dst.into(),
+                    }),
+                ],
             },
-            _ => todo!(),
+            tacky::Instruction::JumpIfZero { condition, target } => vec![
+                new_instr(InstructionType::Cmp {
+                    src1: Operand::Imm(0),
+                    src2: condition.into(),
+                }),
+                new_instr(InstructionType::JmpCC {
+                    cond_code: CondCode::E,
+                    identifier: Rc::clone(target),
+                }),
+            ],
+            tacky::Instruction::JumpIfNotZero { condition, target } => vec![
+                new_instr(InstructionType::Cmp {
+                    src1: Operand::Imm(0),
+                    src2: condition.into(),
+                }),
+                new_instr(InstructionType::JmpCC {
+                    cond_code: CondCode::NE,
+                    identifier: Rc::clone(target),
+                }),
+            ],
+            tacky::Instruction::Jump(label) => {
+                vec![new_instr(InstructionType::Jmp(Rc::clone(label)))]
+            }
+            tacky::Instruction::Copy { src, dst } => vec![new_instr(InstructionType::Mov {
+                src: src.into(),
+                dst: dst.into(),
+            })],
+            tacky::Instruction::Label(label) => {
+                vec![new_instr(InstructionType::Label(Rc::clone(label)))]
+            }
         }
     }
 }

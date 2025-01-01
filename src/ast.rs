@@ -282,6 +282,50 @@ pub enum BinaryOp {
 }
 
 impl BinaryOp {
+    pub fn is_logical(&self) -> bool {
+        match *self {
+            Self::Add => false,
+            Self::Subtract => false,
+            Self::Multiply => false,
+            Self::Divide => false,
+            Self::Remainder => false,
+            Self::BitAnd => false,
+            Self::BitOr => false,
+            Self::Xor => false,
+            Self::LShift => false,
+            Self::RShift => false,
+            Self::And => true,
+            Self::Or => true,
+            Self::Equal => false,
+            Self::NotEqual => false,
+            Self::LessThan => false,
+            Self::LessOrEqual => false,
+            Self::GreaterThan => false,
+            Self::GreaterOrEqual => false,
+        }
+    }
+    pub fn is_relational(&self) -> bool {
+        match *self {
+            Self::Add => false,
+            Self::Subtract => false,
+            Self::Multiply => false,
+            Self::Divide => false,
+            Self::Remainder => false,
+            Self::BitAnd => false,
+            Self::BitOr => false,
+            Self::Xor => false,
+            Self::LShift => false,
+            Self::RShift => false,
+            Self::And => false,
+            Self::Or => false,
+            Self::Equal => true,
+            Self::NotEqual => true,
+            Self::LessThan => true,
+            Self::LessOrEqual => true,
+            Self::GreaterThan => true,
+            Self::GreaterOrEqual => true,
+        }
+    }
     pub fn precedence(&self) -> u32 {
         match *self {
             BinaryOp::Add => 45,

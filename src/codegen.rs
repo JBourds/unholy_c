@@ -89,6 +89,7 @@ impl From<&tacky::UnaryOp> for UnaryOp {
         match node {
             tacky::UnaryOp::Negate => Self::Negate,
             tacky::UnaryOp::Complement => Self::Complement,
+            _ => todo!(),
         }
     }
 }
@@ -598,7 +599,9 @@ impl From<&tacky::Instruction> for Vec<Instruction<Initial>> {
                     }));
                     v
                 }
+                _ => todo!(),
             },
+            _ => todo!(),
         }
     }
 }

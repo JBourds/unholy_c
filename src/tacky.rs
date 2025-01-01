@@ -73,6 +73,20 @@ pub enum Instruction {
         src2: Val,
         dst: Val,
     },
+    Copy {
+        src: Val,
+        dst: Val,
+    },
+    Jump(Rc<String>),
+    JumpIfZero {
+        condition: Val,
+        target: Rc<String>,
+    },
+    JumpIfNotZero {
+        condition: Val,
+        target: Rc<String>,
+    },
+    Label(Rc<String>),
 }
 
 impl Instruction {
@@ -123,27 +137,107 @@ impl Expr {
                 }
             }
             ast::Expr::Binary { op, left, right } => {
-                let Self {
-                    mut instructions,
-                    val: left_val,
-                } = Self::parse_with(left.as_ref(), make_temp_var);
-                let Self {
-                    instructions: right_instructions,
-                    val: right_val,
-                } = Self::parse_with(right.as_ref(), make_temp_var);
-                instructions.extend(right_instructions);
+                if op.is_logical() {
+                    // <instructions for e1>
+                    // v1 = <result of e1>
+                    let Self {
+                        mut instructions,
+                        val: left_val,
+                    } = Self::parse_with(left.as_ref(), make_temp_var);
 
-                let dst = Val::Var(make_temp_var().into());
+                    let label = {
+                        let mut label = make_temp_var();
+                        // FIXME: make_temp_var() should support making label names
+                        label.push_str(match op {
+                            ast::BinaryOp::And => ".false_label",
+                            ast::BinaryOp::Or => ".true_label",
+                            _ => unreachable!(),
+                        });
+                        label.into()
+                    };
 
-                instructions.push(Instruction::Binary {
-                    op: op.into(),
-                    src1: left_val,
-                    src2: right_val,
-                    dst: dst.clone(),
-                });
-                Self {
-                    instructions,
-                    val: dst,
+                    let make_jmp_instruction = |val, target| match op {
+                        ast::BinaryOp::And => Instruction::JumpIfZero {
+                            condition: val,
+                            target,
+                        },
+                        ast::BinaryOp::Or => Instruction::JumpIfNotZero {
+                            condition: val,
+                            target,
+                        },
+                        _ => unreachable!(),
+                    };
+
+                    // JumpIfZero(v1, label)
+                    instructions.push(make_jmp_instruction(left_val.clone(), Rc::clone(&label)));
+
+                    // <instructions for e2>
+                    // v2 = <result of e2>
+                    let Self {
+                        instructions: right_instructions,
+                        val: right_val,
+                    } = Self::parse_with(right.as_ref(), make_temp_var);
+                    instructions.extend(right_instructions);
+
+                    let dst = Val::Var(make_temp_var().into());
+                    let end = {
+                        // FIXME: Support label use case
+                        let mut end = make_temp_var();
+                        end.push_str(".end");
+                        end.into()
+                    };
+
+                    // JumpIfZero(v2, false_label)
+                    instructions.push(make_jmp_instruction(right_val.clone(), Rc::clone(&label)));
+
+                    // result = 1
+                    instructions.push(Instruction::Copy {
+                        src: Val::Constant(1),
+                        dst: dst.clone(),
+                    });
+
+                    // Jump(end)
+                    instructions.push(Instruction::Jump(Rc::clone(&end)));
+
+                    // Label(false_label)
+                    instructions.push(Instruction::Label(Rc::clone(&label)));
+
+                    // result = 0
+                    instructions.push(Instruction::Copy {
+                        src: Val::Constant(0),
+                        dst: dst.clone(),
+                    });
+
+                    // Label(end)
+                    instructions.push(Instruction::Label(end));
+
+                    Self {
+                        instructions,
+                        val: dst,
+                    }
+                } else {
+                    let Self {
+                        mut instructions,
+                        val: left_val,
+                    } = Self::parse_with(left.as_ref(), make_temp_var);
+                    let Self {
+                        instructions: right_instructions,
+                        val: right_val,
+                    } = Self::parse_with(right.as_ref(), make_temp_var);
+                    instructions.extend(right_instructions);
+
+                    let dst = Val::Var(make_temp_var().into());
+
+                    instructions.push(Instruction::Binary {
+                        op: op.into(),
+                        src1: left_val,
+                        src2: right_val,
+                        dst: dst.clone(),
+                    });
+                    Self {
+                        instructions,
+                        val: dst,
+                    }
                 }
             }
         }
@@ -168,6 +262,7 @@ impl From<&ast::Literal> for Val {
 pub enum UnaryOp {
     Negate,
     Complement,
+    Not,
 }
 
 impl From<&ast::UnaryOp> for UnaryOp {
@@ -175,7 +270,7 @@ impl From<&ast::UnaryOp> for UnaryOp {
         match node {
             ast::UnaryOp::Complement => Self::Complement,
             ast::UnaryOp::Negate => Self::Negate,
-            ast::UnaryOp::Not => todo!(),
+            ast::UnaryOp::Not => Self::Not,
         }
     }
 }
@@ -192,6 +287,14 @@ pub enum BinaryOp {
     Xor,
     LShift,
     RShift,
+    And,
+    Or,
+    Equal,
+    NotEqual,
+    LessThan,
+    LessOrEqual,
+    GreaterThan,
+    GreaterOrEqual,
 }
 
 impl From<&ast::BinaryOp> for BinaryOp {
@@ -207,7 +310,14 @@ impl From<&ast::BinaryOp> for BinaryOp {
             ast::BinaryOp::Xor => Self::Xor,
             ast::BinaryOp::LShift => Self::LShift,
             ast::BinaryOp::RShift => Self::RShift,
-            _ => todo!(),
+            ast::BinaryOp::And => Self::And,
+            ast::BinaryOp::Or => Self::Or,
+            ast::BinaryOp::Equal => Self::Equal,
+            ast::BinaryOp::NotEqual => Self::NotEqual,
+            ast::BinaryOp::LessThan => Self::LessThan,
+            ast::BinaryOp::LessOrEqual => Self::LessOrEqual,
+            ast::BinaryOp::GreaterThan => Self::GreaterThan,
+            ast::BinaryOp::GreaterOrEqual => Self::GreaterOrEqual,
         }
     }
 }

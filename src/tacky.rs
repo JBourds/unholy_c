@@ -187,12 +187,18 @@ impl Expr {
                         end.into()
                     };
 
+                    let (result_nojmp, result_jmp) = match op {
+                        ast::BinaryOp::And => (1, 0),
+                        ast::BinaryOp::Or => (0, 1),
+                        _ => unreachable!(),
+                    };
+
                     // JumpIfZero(v2, false_label)
                     instructions.push(make_jmp_instruction(right_val.clone(), Rc::clone(&label)));
 
                     // result = 1
                     instructions.push(Instruction::Copy {
-                        src: Val::Constant(1),
+                        src: Val::Constant(result_nojmp),
                         dst: dst.clone(),
                     });
 
@@ -204,7 +210,7 @@ impl Expr {
 
                     // result = 0
                     instructions.push(Instruction::Copy {
-                        src: Val::Constant(0),
+                        src: Val::Constant(result_jmp),
                         dst: dst.clone(),
                     });
 

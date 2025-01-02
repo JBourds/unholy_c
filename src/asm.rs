@@ -107,7 +107,30 @@ pub mod x64 {
                 "\tidiv {}{operand}\n",
                 get_specifier(None, operand)
             ))?,
-            _ => todo!(),
+            codegen::InstructionType::Cmp { src, dst } => {
+                w.write_fmt(format_args!(
+                    "\tcmp {}{dst}, {src}\n",
+                    get_specifier(Some(src), dst)
+                ))?;
+            }
+            codegen::InstructionType::Jmp(label) => {
+                w.write_fmt(format_args!("\tjmp .L{label}\n",))?;
+            }
+            codegen::InstructionType::JmpCC {
+                cond_code,
+                identifier,
+            } => {
+                w.write_fmt(format_args!("\tj{cond_code} .L{identifier}\n",))?;
+            }
+            codegen::InstructionType::SetCC { cond_code, dst } => {
+                w.write_fmt(format_args!(
+                    "\tset{cond_code} {}{dst}\n",
+                    get_specifier(None, dst)
+                ))?;
+            }
+            codegen::InstructionType::Label(label) => {
+                w.write_fmt(format_args!(".L{label}:\n",))?;
+            }
         }
         Ok(())
     }

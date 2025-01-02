@@ -280,6 +280,19 @@ pub enum CondCode {
     LE,
 }
 
+impl fmt::Display for CondCode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match *self {
+            Self::E => write!(f, "e"),
+            Self::NE => write!(f, "ne"),
+            Self::G => write!(f, "g"),
+            Self::GE => write!(f, "ge"),
+            Self::L => write!(f, "l"),
+            Self::LE => write!(f, "le"),
+        }
+    }
+}
+
 impl From<&tacky::BinaryOp> for CondCode {
     fn from(value: &tacky::BinaryOp) -> Self {
         match value {
@@ -393,6 +406,10 @@ impl Instruction<Offset> {
                 InstructionType::Idiv(op) => InstructionType::Idiv(convert_operand_offset(op)),
                 InstructionType::Cmp { src, dst } => InstructionType::Cmp {
                     src: convert_operand_offset(src),
+                    dst: convert_operand_offset(dst),
+                },
+                InstructionType::SetCC { cond_code, dst } => InstructionType::SetCC {
+                    cond_code,
                     dst: convert_operand_offset(dst),
                 },
                 instr => instr,
@@ -531,11 +548,7 @@ impl From<Instruction<Offset>> for Vec<Instruction<Final>> {
                 ]
             }
             InstructionType::Cmp {
-                src:
-                    Operand::StackOffset {
-                        offset: src_offset,
-                        size: src_size,
-                    },
+                src,
                 dst: Operand::Imm(i),
             } => {
                 vec![
@@ -547,10 +560,7 @@ impl From<Instruction<Offset>> for Vec<Instruction<Final>> {
                         }),
                     }),
                     new_instr(InstructionType::Cmp {
-                        src: Operand::StackOffset {
-                            offset: src_offset,
-                            size: src_size,
-                        },
+                        src,
                         dst: Operand::Reg(Reg::X64 {
                             reg: X64Reg::R11,
                             section: RegSection::Dword,
@@ -596,7 +606,15 @@ impl From<&tacky::Instruction> for Vec<Instruction<Initial>> {
                     }),
                     new_instr(InstructionType::SetCC {
                         cond_code: CondCode::E,
-                        dst: dst.into(),
+                        dst: {
+                            // FIXME: Since SetCC takes a byte value we must manually
+                            // fixup the stack location size
+                            let dst: Operand = dst.into();
+                            match dst {
+                                Operand::Pseudo { name, .. } => Operand::Pseudo { name, size: 1 },
+                                _ => dst,
+                            }
+                        },
                     }),
                 ],
                 _ => vec![
@@ -738,7 +756,15 @@ impl From<&tacky::Instruction> for Vec<Instruction<Initial>> {
                     }),
                     new_instr(InstructionType::SetCC {
                         cond_code: op.into(),
-                        dst: dst.into(),
+                        dst: {
+                            // FIXME: Since SetCC takes a byte value we must manually
+                            // fixup the stack location size
+                            let dst: Operand = dst.into();
+                            match dst {
+                                Operand::Pseudo { name, .. } => Operand::Pseudo { name, size: 1 },
+                                _ => dst,
+                            }
+                        },
                     }),
                 ],
             },
@@ -796,7 +822,7 @@ impl Operand {
     }
 }
 
-// TODO: Unhardcode size of 4
+// FIXME: Unhardcode size of 4
 impl From<&tacky::Val> for Operand {
     fn from(val: &tacky::Val) -> Self {
         match val {

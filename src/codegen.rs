@@ -747,11 +747,11 @@ impl From<&tacky::Instruction> for Vec<Instruction<Initial>> {
                 | tacky::BinaryOp::GreaterThan
                 | tacky::BinaryOp::GreaterOrEqual => vec![
                     new_instr(InstructionType::Cmp {
-                        src: src1.into(),
-                        dst: src2.into(),
+                        src: src2.into(),
+                        dst: src1.into(),
                     }),
                     new_instr(InstructionType::Mov {
-                        src: Operand::Imm(1),
+                        src: Operand::Imm(0),
                         dst: dst.into(),
                     }),
                     new_instr(InstructionType::SetCC {

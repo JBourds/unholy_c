@@ -107,6 +107,7 @@ pub mod x64 {
                 "\tidiv {}{operand}\n",
                 get_specifier(None, operand)
             ))?,
+            _ => todo!(),
         }
         Ok(())
     }

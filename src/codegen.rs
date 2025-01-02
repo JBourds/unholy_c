@@ -319,8 +319,8 @@ pub enum InstructionType {
         src2: Operand,
     },
     Cmp {
-        src1: Operand,
-        src2: Operand,
+        src: Operand,
+        dst: Operand,
     },
     Idiv(Operand),
     Cdq,
@@ -391,6 +391,10 @@ impl Instruction<Offset> {
                     src2: convert_operand_offset(src2),
                 },
                 InstructionType::Idiv(op) => InstructionType::Idiv(convert_operand_offset(op)),
+                InstructionType::Cmp { src, dst } => InstructionType::Cmp {
+                    src: convert_operand_offset(src),
+                    dst: convert_operand_offset(dst),
+                },
                 instr => instr,
             },
             phantom: PhantomData::<Offset>,
@@ -491,6 +495,69 @@ impl From<Instruction<Offset>> for Vec<Instruction<Final>> {
                     section: RegSection::Dword,
                 }))),
             ],
+            InstructionType::Cmp {
+                src:
+                    Operand::StackOffset {
+                        offset: src_offset,
+                        size: src_size,
+                    },
+                dst:
+                    Operand::StackOffset {
+                        offset: dst_offset,
+                        size: dst_size,
+                    },
+            } => {
+                vec![
+                    new_instr(InstructionType::Mov {
+                        src: Operand::StackOffset {
+                            offset: src_offset,
+                            size: src_size,
+                        },
+                        dst: Operand::Reg(Reg::X64 {
+                            reg: X64Reg::R10,
+                            section: RegSection::Dword,
+                        }),
+                    }),
+                    new_instr(InstructionType::Cmp {
+                        src: Operand::Reg(Reg::X64 {
+                            reg: X64Reg::R10,
+                            section: RegSection::Dword,
+                        }),
+                        dst: Operand::StackOffset {
+                            offset: dst_offset,
+                            size: dst_size,
+                        },
+                    }),
+                ]
+            }
+            InstructionType::Cmp {
+                src:
+                    Operand::StackOffset {
+                        offset: src_offset,
+                        size: src_size,
+                    },
+                dst: Operand::Imm(i),
+            } => {
+                vec![
+                    new_instr(InstructionType::Mov {
+                        src: Operand::Imm(i),
+                        dst: Operand::Reg(Reg::X64 {
+                            reg: X64Reg::R11,
+                            section: RegSection::Dword,
+                        }),
+                    }),
+                    new_instr(InstructionType::Cmp {
+                        src: Operand::StackOffset {
+                            offset: src_offset,
+                            size: src_size,
+                        },
+                        dst: Operand::Reg(Reg::X64 {
+                            reg: X64Reg::R11,
+                            section: RegSection::Dword,
+                        }),
+                    }),
+                ]
+            }
 
             instr => vec![new_instr(instr)],
         }
@@ -520,8 +587,8 @@ impl From<&tacky::Instruction> for Vec<Instruction<Initial>> {
             tacky::Instruction::Unary { op, src, dst } => match op {
                 tacky::UnaryOp::Not => vec![
                     new_instr(InstructionType::Cmp {
-                        src1: Operand::Imm(0),
-                        src2: src.into(),
+                        src: Operand::Imm(0),
+                        dst: src.into(),
                     }),
                     new_instr(InstructionType::Mov {
                         src: Operand::Imm(0),
@@ -662,8 +729,8 @@ impl From<&tacky::Instruction> for Vec<Instruction<Initial>> {
                 | tacky::BinaryOp::GreaterThan
                 | tacky::BinaryOp::GreaterOrEqual => vec![
                     new_instr(InstructionType::Cmp {
-                        src1: src1.into(),
-                        src2: src2.into(),
+                        src: src1.into(),
+                        dst: src2.into(),
                     }),
                     new_instr(InstructionType::Mov {
                         src: Operand::Imm(1),
@@ -677,8 +744,8 @@ impl From<&tacky::Instruction> for Vec<Instruction<Initial>> {
             },
             tacky::Instruction::JumpIfZero { condition, target } => vec![
                 new_instr(InstructionType::Cmp {
-                    src1: Operand::Imm(0),
-                    src2: condition.into(),
+                    src: Operand::Imm(0),
+                    dst: condition.into(),
                 }),
                 new_instr(InstructionType::JmpCC {
                     cond_code: CondCode::E,
@@ -687,8 +754,8 @@ impl From<&tacky::Instruction> for Vec<Instruction<Initial>> {
             ],
             tacky::Instruction::JumpIfNotZero { condition, target } => vec![
                 new_instr(InstructionType::Cmp {
-                    src1: Operand::Imm(0),
-                    src2: condition.into(),
+                    src: Operand::Imm(0),
+                    dst: condition.into(),
                 }),
                 new_instr(InstructionType::JmpCC {
                     cond_code: CondCode::NE,

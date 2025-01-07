@@ -353,6 +353,16 @@ pub enum BinaryOp {
     GreaterThan,
     GreaterOrEqual,
     Assign,
+    AddAssign,
+    SubAssign,
+    MultAssign,
+    DivAssign,
+    ModAssign,
+    AndAssign,
+    OrAssign,
+    XorAssign,
+    LShiftAssign,
+    RShiftAssign,
 }
 
 impl From<&ast::BinaryOp> for BinaryOp {
@@ -377,7 +387,16 @@ impl From<&ast::BinaryOp> for BinaryOp {
             ast::BinaryOp::GreaterThan => Self::GreaterThan,
             ast::BinaryOp::GreaterOrEqual => Self::GreaterOrEqual,
             ast::BinaryOp::Assign => Self::Assign,
-            _ => unimplemented!(),
+            ast::BinaryOp::AddAssign => Self::AddAssign,
+            ast::BinaryOp::SubAssign => Self::SubAssign,
+            ast::BinaryOp::MultAssign => Self::MultAssign,
+            ast::BinaryOp::DivAssign => Self::DivAssign,
+            ast::BinaryOp::ModAssign => Self::ModAssign,
+            ast::BinaryOp::AndAssign => Self::AndAssign,
+            ast::BinaryOp::OrAssign => Self::OrAssign,
+            ast::BinaryOp::XorAssign => Self::XorAssign,
+            ast::BinaryOp::LShiftAssign => Self::LShiftAssign,
+            ast::BinaryOp::RShiftAssign => Self::RShiftAssign,
         }
     }
 }

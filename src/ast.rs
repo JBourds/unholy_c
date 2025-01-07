@@ -388,37 +388,7 @@ pub enum BinaryOp {
 
 impl BinaryOp {
     pub fn is_logical(&self) -> bool {
-        match *self {
-            Self::Add => false,
-            Self::Subtract => false,
-            Self::Multiply => false,
-            Self::Divide => false,
-            Self::Remainder => false,
-            Self::BitAnd => false,
-            Self::BitOr => false,
-            Self::Xor => false,
-            Self::LShift => false,
-            Self::RShift => false,
-            Self::And => true,
-            Self::Or => true,
-            Self::Equal => false,
-            Self::NotEqual => false,
-            Self::LessThan => false,
-            Self::LessOrEqual => false,
-            Self::GreaterThan => false,
-            Self::GreaterOrEqual => false,
-            Self::Assign => false,
-            Self::AddAssign => false,
-            Self::SubAssign => false,
-            Self::MultAssign => false,
-            Self::DivAssign => false,
-            Self::ModAssign => false,
-            Self::AndAssign => false,
-            Self::OrAssign => false,
-            Self::XorAssign => false,
-            Self::LShiftAssign => false,
-            Self::RShiftAssign => false,
-        }
+        matches!(*self, Self::And | Self::Or)
     }
 
     pub fn precedence(&self) -> u32 {

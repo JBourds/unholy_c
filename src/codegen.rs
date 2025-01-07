@@ -73,7 +73,6 @@ impl TryFrom<&tacky::Function> for Function {
 pub enum UnaryOp {
     Negate,
     Complement,
-    Not,
 }
 
 impl fmt::Display for UnaryOp {
@@ -81,7 +80,6 @@ impl fmt::Display for UnaryOp {
         match self {
             Self::Negate => write!(f, "neg"),
             Self::Complement => write!(f, "not"),
-            Self::Not => write!(f, "not_l"), // FIXME: No idea what the name should be
         }
     }
 }
@@ -91,7 +89,7 @@ impl From<&tacky::UnaryOp> for UnaryOp {
         match node {
             tacky::UnaryOp::Negate => Self::Negate,
             tacky::UnaryOp::Complement => Self::Complement,
-            tacky::UnaryOp::Not => Self::Not,
+            tacky::UnaryOp::Not => unreachable!(),
         }
     }
 }

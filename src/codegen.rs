@@ -765,6 +765,7 @@ impl From<&tacky::Instruction> for Vec<Instruction<Initial>> {
                         },
                     }),
                 ],
+                _ => unimplemented!(),
             },
             tacky::Instruction::JumpIfZero { condition, target } => vec![
                 new_instr(InstructionType::Cmp {

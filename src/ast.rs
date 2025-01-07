@@ -169,6 +169,8 @@ impl<'a> AstNode<'a> for Declaration {
 #[derive(Debug, PartialEq)]
 pub enum Stmt {
     Return(Option<Expr>),
+    Expr(Expr),
+    Null,
     //If {
     //    condition: Expr<'a>,
     //    then_stmt: Box<Stmt<'a>>,
@@ -177,19 +179,27 @@ pub enum Stmt {
 }
 impl<'a> AstNode<'a> for Stmt {
     fn consume(tokens: &'a [Token<'a>]) -> Result<(Stmt, &'a [Token<'a>])> {
-        match tokens {
-            [Token::Return, Token::Semi, ..] => Ok((Self::Return(None), tokens)),
-            [Token::Return, tokens @ ..] => {
-                let (expr, tokens) = Expr::parse(tokens, 0).context(
-                    "Expected return statement to return an expression but could not parse one.",
-                )?;
-                if let Some(Token::Semi) = tokens.first() {
-                    Ok((Self::Return(Some(expr)), &tokens[1..]))
-                } else {
-                    bail!("Missing semicolon after return expression.")
-                }
+        let comma_terminated_expr = |tokens| {
+            let (expr, tokens) = Expr::parse(tokens, 0).context(
+                "Expected return statement to return an expression but could not parse one.",
+            )?;
+            if let Some(Token::Semi) = tokens.first() {
+                Ok((expr, &tokens[1..]))
+            } else {
+                bail!("Missing semicolon after return expression.")
             }
-            _ => bail!("Unable to parse semantically valid statement."),
+        };
+        match tokens {
+            [Token::Semi, tokens @ ..] => Ok((Self::Null, tokens)),
+            [Token::Return, Token::Semi, tokens @ ..] => Ok((Self::Return(None), tokens)),
+            [Token::Return, tokens @ ..] => {
+                let (expr, tokens) = comma_terminated_expr(tokens)?;
+                Ok((Self::Return(Some(expr)), tokens))
+            }
+            _ => {
+                let (expr, tokens) = comma_terminated_expr(tokens)?;
+                Ok((Self::Expr(expr), tokens))
+            }
         }
     }
 }
@@ -228,7 +238,11 @@ impl Expr {
                 break;
             }
 
-            let (right, tokens_inner) = Expr::parse(tokens_inner, operator.precedence() + 1)?;
+            let (right, tokens_inner) = if operator == BinaryOp::Assign {
+                Expr::parse(tokens_inner, operator.precedence())?
+            } else {
+                Expr::parse(tokens_inner, operator.precedence() + 1)?
+            };
 
             left = Expr::Binary {
                 op: operator,
@@ -247,32 +261,41 @@ struct Factor;
 
 impl Factor {
     pub fn parse<'a>(tokens: &'a [Token<'a>]) -> Result<(Expr, &'a [Token<'a>])> {
-        if let Ok((literal, tokens)) = Literal::consume(tokens) {
-            Ok((Expr::Literal(literal), tokens))
-        } else if let Ok((unary, tokens)) = UnaryOp::consume(tokens) {
-            // We have to parse an Expr here
-            let (expr, tokens) =
-                Factor::parse(tokens).context("Parsing grammer rule: <unop> <factor> failed")?;
-            Ok((
-                Expr::Unary {
-                    op: unary,
-                    expr: Box::new(expr),
-                },
-                tokens,
-            ))
-        } else {
-            // We have 1 more rule to try to parse here
-            // "(" <exp> ")"
-            match tokens {
-                [Token::LParen, tokens @ ..] => {
-                    let (expr, tokens) = Expr::parse(tokens, 0)
-                        .context("Parsing grammer rule: \"(\" <exp> \")\" failed")?;
+        match tokens {
+            [lexer::Token::Literal(_), ..] => {
+                let (lit, tokens) = Literal::consume(tokens)?;
+                Ok((Expr::Literal(lit), tokens))
+            }
+            [lexer::Token::Ident(s), tokens @ ..] => {
+                Ok((Expr::Var(Rc::new(String::from(*s))), tokens))
+            }
+            _ => {
+                if let Ok((unary, tokens)) = UnaryOp::consume(tokens) {
+                    // We have to parse an Expr here
+                    let (expr, tokens) = Factor::parse(tokens)
+                        .context("Parsing grammer rule: <unop> <factor> failed")?;
+                    Ok((
+                        Expr::Unary {
+                            op: unary,
+                            expr: Box::new(expr),
+                        },
+                        tokens,
+                    ))
+                } else {
+                    // We have 1 more rule to try to parse here
+                    // "(" <exp> ")"
                     match tokens {
-                        [Token::RParen, tokens @ ..] => Ok((expr, tokens)),
-                        _ => bail!("Could not find matching right parenthesis"),
+                        [Token::LParen, tokens @ ..] => {
+                            let (expr, tokens) = Expr::parse(tokens, 0)
+                                .context("Parsing grammer rule: \"(\" <exp> \")\" failed")?;
+                            match tokens {
+                                [Token::RParen, tokens @ ..] => Ok((expr, tokens)),
+                                _ => bail!("Could not find matching right parenthesis"),
+                            }
+                        }
+                        _ => bail!("Could not parse valid expression."),
                     }
                 }
-                _ => bail!("Could not parse valid expression."),
             }
         }
     }
@@ -341,6 +364,7 @@ pub enum BinaryOp {
     LessOrEqual,
     GreaterThan,
     GreaterOrEqual,
+    Assign,
 }
 
 impl BinaryOp {
@@ -364,50 +388,31 @@ impl BinaryOp {
             Self::LessOrEqual => false,
             Self::GreaterThan => false,
             Self::GreaterOrEqual => false,
+            Self::Assign => false,
         }
     }
-    pub fn is_relational(&self) -> bool {
-        match *self {
-            Self::Add => false,
-            Self::Subtract => false,
-            Self::Multiply => false,
-            Self::Divide => false,
-            Self::Remainder => false,
-            Self::BitAnd => false,
-            Self::BitOr => false,
-            Self::Xor => false,
-            Self::LShift => false,
-            Self::RShift => false,
-            Self::And => false,
-            Self::Or => false,
-            Self::Equal => true,
-            Self::NotEqual => true,
-            Self::LessThan => true,
-            Self::LessOrEqual => true,
-            Self::GreaterThan => true,
-            Self::GreaterOrEqual => true,
-        }
-    }
+
     pub fn precedence(&self) -> u32 {
         match *self {
-            BinaryOp::Add => 45,
-            BinaryOp::Subtract => 45,
-            BinaryOp::Multiply => 50,
-            BinaryOp::Divide => 50,
-            BinaryOp::Remainder => 50,
-            BinaryOp::BitAnd => 25,
-            BinaryOp::BitOr => 15,
-            BinaryOp::Xor => 20,
-            BinaryOp::LShift => 40,
-            BinaryOp::RShift => 40,
-            BinaryOp::And => 10,
-            BinaryOp::Or => 5,
-            BinaryOp::Equal => 30,
-            BinaryOp::NotEqual => 30,
-            BinaryOp::LessThan => 35,
-            BinaryOp::LessOrEqual => 35,
-            BinaryOp::GreaterThan => 35,
-            BinaryOp::GreaterOrEqual => 35,
+            Self::Add => 45,
+            Self::Subtract => 45,
+            Self::Multiply => 50,
+            Self::Divide => 50,
+            Self::Remainder => 50,
+            Self::BitAnd => 25,
+            Self::BitOr => 15,
+            Self::Xor => 20,
+            Self::LShift => 40,
+            Self::RShift => 40,
+            Self::And => 10,
+            Self::Or => 5,
+            Self::Equal => 30,
+            Self::NotEqual => 30,
+            Self::LessThan => 35,
+            Self::LessOrEqual => 35,
+            Self::GreaterThan => 35,
+            Self::GreaterOrEqual => 35,
+            Self::Assign => 1,
         }
     }
 
@@ -434,7 +439,7 @@ impl BinaryOp {
             Token::LessEq => Ok(Some((BinaryOp::LessOrEqual, tokens))),
             Token::Great => Ok(Some((BinaryOp::GreaterThan, tokens))),
             Token::GreatEq => Ok(Some((BinaryOp::GreaterOrEqual, tokens))),
-
+            Token::Assign => Ok(Some((BinaryOp::Assign, tokens))),
             _ => Ok(None),
         }
     }
@@ -489,7 +494,9 @@ mod tests {
                 ret_t: Type::Int,
                 name: "main",
                 signature: vec![],
-                statements: vec![Stmt::Return(Some(Expr::Literal(Literal::Int(2))))],
+                items: vec![BlockItem::Stmt(Stmt::Return(Some(Expr::Literal(
+                    Literal::Int(2),
+                ))))],
             },
         };
         assert_eq!(expected, program);
@@ -524,7 +531,9 @@ mod tests {
                 (Type::Int, None),
                 (Type::Int, Some("z")),
             ],
-            statements: vec![Stmt::Return(Some(Expr::Literal(Literal::Int(2))))],
+            items: vec![BlockItem::Stmt(Stmt::Return(Some(Expr::Literal(
+                Literal::Int(2),
+            ))))],
         };
         assert_eq!(expected, function);
     }
@@ -561,7 +570,7 @@ mod tests {
         let expected = Program {
             function: Function {
                 name: "main",
-                statements: vec![],
+                items: vec![],
                 signature: vec![],
                 ret_t: Type::Int,
             },
@@ -707,13 +716,13 @@ mod tests {
                 ret_t: Type::Int,
                 name: "main",
                 signature: vec![],
-                statements: vec![Stmt::Return(Some(Expr::Unary {
+                items: vec![BlockItem::Stmt(Stmt::Return(Some(Expr::Unary {
                     op: UnaryOp::Negate,
                     expr: Box::new(Expr::Unary {
                         op: UnaryOp::Negate,
                         expr: Box::new(Expr::Literal(Literal::Int(2))),
                     }),
-                }))],
+                })))],
             },
         };
         assert_eq!(expected, program);

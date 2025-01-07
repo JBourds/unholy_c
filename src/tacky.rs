@@ -94,19 +94,26 @@ impl Instruction {
         match node {
             ast::BlockItem::Decl(_) => unimplemented!(),
             ast::BlockItem::Stmt(stmt) => match stmt {
-
-            ast::Stmt::Return(Some(expr)) => {
-                let Expr {
-                    mut instructions,
-                    val,
-                } = Expr::parse_with(expr, make_temp_var);
-                instructions.push(Instruction::Return(Some(val)));
-                instructions
+                ast::Stmt::Null => vec![],
+                ast::Stmt::Return(Some(expr)) => {
+                    let Expr {
+                        mut instructions,
+                        val,
+                    } = Expr::parse_with(expr, make_temp_var);
+                    instructions.push(Instruction::Return(Some(val)));
+                    instructions
+                }
+                ast::Stmt::Return(None) => {
+                    vec![Instruction::Return(None)]
+                }
+                ast::Stmt::Expr(expr) => {
+                    let Expr {
+                        instructions,
+                        ..
+                    } = Expr::parse_with(expr, make_temp_var);
+                    instructions
+                }
             }
-            ast::Stmt::Return(None) => {
-                vec![Instruction::Return(None)]
-            }
-        }
         }
 
     }
@@ -305,6 +312,7 @@ pub enum BinaryOp {
     LessOrEqual,
     GreaterThan,
     GreaterOrEqual,
+    Assign,
 }
 
 impl From<&ast::BinaryOp> for BinaryOp {
@@ -328,6 +336,7 @@ impl From<&ast::BinaryOp> for BinaryOp {
             ast::BinaryOp::LessOrEqual => Self::LessOrEqual,
             ast::BinaryOp::GreaterThan => Self::GreaterThan,
             ast::BinaryOp::GreaterOrEqual => Self::GreaterOrEqual,
+            ast::BinaryOp::Assign => Self::Assign,
         }
     }
 }
@@ -338,7 +347,7 @@ mod tests {
 
     #[test]
     fn test_return_literal() {
-        let ast = ast::Stmt::Return(Some(ast::Expr::Literal(ast::Literal::Int(2))));
+        let ast = ast::BlockItem::Stmt(ast::Stmt::Return(Some(ast::Expr::Literal(ast::Literal::Int(2)))));
         let mut counter = 0;
         let mut make_temp_var = Function::make_temp_var(Rc::new("test".to_string()), &mut counter);
         let actual = Instruction::parse_with(&ast, &mut make_temp_var);
@@ -348,10 +357,10 @@ mod tests {
 
     #[test]
     fn test_return_unary() {
-        let ast = ast::Stmt::Return(Some(ast::Expr::Unary {
+        let ast = ast::BlockItem::Stmt(ast::Stmt::Return(Some(ast::Expr::Unary {
             op: ast::UnaryOp::Complement,
             expr: Box::new(ast::Expr::Literal(ast::Literal::Int(2))),
-        }));
+        })));
         let mut counter = 0;
         let mut make_temp_var = Function::make_temp_var(Rc::new("test".to_string()), &mut counter);
         let actual = Instruction::parse_with(&ast, &mut make_temp_var);
@@ -367,7 +376,7 @@ mod tests {
     }
     #[test]
     fn test_return_nested_unary() {
-        let ast = ast::Stmt::Return(Some(ast::Expr::Unary {
+        let ast = ast::BlockItem::Stmt(ast::Stmt::Return(Some(ast::Expr::Unary {
             op: ast::UnaryOp::Negate,
             expr: Box::new(ast::Expr::Unary {
                 op: ast::UnaryOp::Complement,
@@ -376,7 +385,7 @@ mod tests {
                     expr: Box::new(ast::Expr::Literal(ast::Literal::Int(2))),
                 }),
             }),
-        }));
+        })));
         let mut counter = 0;
         let mut make_temp_var = Function::make_temp_var(Rc::new("test".to_string()), &mut counter);
         let actual = Instruction::parse_with(&ast, &mut make_temp_var);

@@ -32,7 +32,7 @@ fn validate_function<'a>(function: &ast::Function<'a>) -> Result<ast::Function<'
 
     Ok(ast::Function {
         ret_t: function.ret_t,
-        name: &function.name,
+        name: function.name,
         signature: function.signature.clone(),
         items: valid_items,
     })
@@ -45,14 +45,14 @@ fn validate_blockitem(
 ) -> Result<ast::BlockItem> {
     match instruction {
         ast::BlockItem::Stmt(stmt) => Ok(ast::BlockItem::Stmt(resolve_stmt(stmt, variable_map)?)),
-        ast::BlockItem::Decl(ast::Declaration { typ, name, expr }) => {
+        ast::BlockItem::Decl(ast::Declaration { typ, name, init }) => {
             if variable_map.contains_key(name) {
                 bail!("Duplicate variable declaration '{name}'");
             }
             let unique_name = Rc::new(make_temporary(name));
             variable_map.insert(Rc::clone(name), Rc::clone(&unique_name));
 
-            let expr = match expr {
+            let init = match init {
                 Some(expr) => Some(resolve_expr(expr, variable_map)?),
                 None => None,
             };
@@ -60,7 +60,7 @@ fn validate_blockitem(
             Ok(ast::BlockItem::Decl(ast::Declaration {
                 typ: *typ,
                 name: unique_name,
-                expr,
+                init,
             }))
         }
     }

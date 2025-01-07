@@ -89,7 +89,7 @@ impl From<&tacky::UnaryOp> for UnaryOp {
         match node {
             tacky::UnaryOp::Negate => Self::Negate,
             tacky::UnaryOp::Complement => Self::Complement,
-            tacky::UnaryOp::Not => unreachable!(),
+            _ => unreachable!(),
         }
     }
 }

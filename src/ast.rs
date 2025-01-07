@@ -273,9 +273,16 @@ impl Factor {
             }
             _ => {
                 if let Ok((unary, tokens)) = UnaryOp::consume(tokens) {
-                    // We have to parse an Expr here
-                    let (expr, tokens) = Factor::parse(tokens)
-                        .context("Parsing grammer rule: <unop> <factor> failed")?;
+                    // Handling for prefix/postfix unary operators
+                    let (expr, tokens) = if unary.is_prefix() {
+                        Factor::parse(tokens)
+                            .context("Parsing grammer rule: <unop> <factor> failed")?
+                    } else if let Some(lexer::Token::Ident(name)) = tokens.first() {
+                        let lvalue = Expr::Var(Rc::new(String::from(*name)));
+                        (lvalue, &tokens[2..])
+                    } else {
+                        unreachable!("Token stream should still contain lvalue and operator when parsing postfix operator. Logic error!")
+                    };
                     Ok((
                         Expr::Unary {
                             op: unary,
@@ -367,6 +374,16 @@ pub enum BinaryOp {
     GreaterThan,
     GreaterOrEqual,
     Assign,
+    AddAssign,
+    SubAssign,
+    MultAssign,
+    DivAssign,
+    ModAssign,
+    AndAssign,
+    OrAssign,
+    XorAssign,
+    LShiftAssign,
+    RShiftAssign,
 }
 
 impl BinaryOp {
@@ -391,6 +408,16 @@ impl BinaryOp {
             Self::GreaterThan => false,
             Self::GreaterOrEqual => false,
             Self::Assign => false,
+            Self::AddAssign => false,
+            Self::SubAssign => false,
+            Self::MultAssign => false,
+            Self::DivAssign => false,
+            Self::ModAssign => false,
+            Self::AndAssign => false,
+            Self::OrAssign => false,
+            Self::XorAssign => false,
+            Self::LShiftAssign => false,
+            Self::RShiftAssign => false,
         }
     }
 
@@ -415,6 +442,16 @@ impl BinaryOp {
             Self::GreaterThan => 35,
             Self::GreaterOrEqual => 35,
             Self::Assign => 1,
+            Self::AddAssign => 1,
+            Self::SubAssign => 1,
+            Self::MultAssign => 1,
+            Self::DivAssign => 1,
+            Self::ModAssign => 1,
+            Self::AndAssign => 1,
+            Self::OrAssign => 1,
+            Self::XorAssign => 1,
+            Self::LShiftAssign => 1,
+            Self::RShiftAssign => 1,
         }
     }
 
@@ -452,6 +489,26 @@ pub enum UnaryOp {
     Complement,
     Negate,
     Not,
+    PreInc,
+    PreDec,
+    PostInc,
+    PostDec,
+}
+
+impl UnaryOp {
+    fn is_postfix(&self) -> bool {
+        match self {
+            UnaryOp::PostInc | UnaryOp::PostDec => true,
+            _ => false,
+        }
+    }
+
+    fn is_prefix(&self) -> bool {
+        match self {
+            UnaryOp::PostInc | UnaryOp::PostDec => false,
+            _ => true,
+        }
+    }
 }
 
 impl<'a> AstNode<'a> for UnaryOp {
@@ -460,11 +517,16 @@ impl<'a> AstNode<'a> for UnaryOp {
         Self: Sized,
     {
         if let Some(token) = tokens.first() {
-            match token {
-                Token::Minus => Ok((Self::Negate, &tokens[1..])),
-                Token::BitNot => Ok((Self::Complement, &tokens[1..])),
-                Token::Not => Ok((Self::Not, &tokens[1..])),
-                _ => bail!("Expected '-', '~', or '!', found '{}'", token),
+            match tokens {
+                [Token::Minus, tokens @ ..] => Ok((Self::Negate, tokens)),
+                [Token::BitNot, tokens @ ..] => Ok((Self::Complement, tokens)),
+                [Token::Not, tokens @ ..] => Ok((Self::Not, tokens)),
+                [Token::Increment, tokens @ ..] => Ok((Self::PreInc, tokens)),
+                [Token::Decrement, tokens @ ..] => Ok((Self::PreDec, tokens)),
+                // Needs special handling because it requires lookahead
+                [Token::Ident(_), Token::Increment, ..] => Ok((Self::PostInc, tokens)),
+                [Token::Ident(_), Token::Decrement, ..] => Ok((Self::PostDec, tokens)),
+                _ => bail!("Expected '-', '~', `++`, `--`, or '!', found '{}'", token),
             }
         } else {
             bail!("No remaining tokens")

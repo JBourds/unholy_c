@@ -314,6 +314,10 @@ pub enum UnaryOp {
     Negate,
     Complement,
     Not,
+    PreInc,
+    PreDec,
+    PostInc,
+    PostDec,
 }
 
 impl From<&ast::UnaryOp> for UnaryOp {
@@ -322,6 +326,10 @@ impl From<&ast::UnaryOp> for UnaryOp {
             ast::UnaryOp::Complement => Self::Complement,
             ast::UnaryOp::Negate => Self::Negate,
             ast::UnaryOp::Not => Self::Not,
+            ast::UnaryOp::PreInc => Self::PreInc,
+            ast::UnaryOp::PreDec => Self::PreDec,
+            ast::UnaryOp::PostInc => Self::PostInc,
+            ast::UnaryOp::PostDec => Self::PostDec,
         }
     }
 }
@@ -369,6 +377,7 @@ impl From<&ast::BinaryOp> for BinaryOp {
             ast::BinaryOp::GreaterThan => Self::GreaterThan,
             ast::BinaryOp::GreaterOrEqual => Self::GreaterOrEqual,
             ast::BinaryOp::Assign => Self::Assign,
+            _ => unimplemented!(),
         }
     }
 }

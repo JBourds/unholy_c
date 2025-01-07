@@ -46,12 +46,15 @@ impl TryFrom<&ast::Function<'_>> for Function {
         let mut temp_var_counter = 0;
         let mut make_temp_var =
             Function::make_temp_var(Rc::new(name.to_string()), &mut temp_var_counter);
-        let instructions = items
+        let mut instructions = items
             .iter()
-            .fold(Vec::new(), |mut instructions, stmt| {
-                instructions.extend(Instruction::parse_with(stmt, &mut make_temp_var));
+            .fold(Vec::new(), |mut instructions, item| {
+                instructions.extend(Instruction::parse_with(item, &mut make_temp_var));
                 instructions
             });
+        // Temporary fix suggested by the book for the case where a function
+        // is supposed to return something but does not.
+        instructions.push(Instruction::Return(Some(Val::Constant(0))));
         Ok(Self {
             name: Rc::new(name.to_string()),
             instructions,

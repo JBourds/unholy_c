@@ -41,12 +41,12 @@ impl TryFrom<&ast::Function<'_>> for Function {
     //  function information.
     fn try_from(node: &ast::Function<'_>) -> Result<Self> {
         let ast::Function {
-            name, statements, ..
+            name, items, ..
         } = node;
         let mut temp_var_counter = 0;
         let mut make_temp_var =
             Function::make_temp_var(Rc::new(name.to_string()), &mut temp_var_counter);
-        let instructions = statements
+        let instructions = items
             .iter()
             .fold(Vec::new(), |mut instructions, stmt| {
                 instructions.extend(Instruction::parse_with(stmt, &mut make_temp_var));
@@ -90,8 +90,11 @@ pub enum Instruction {
 }
 
 impl Instruction {
-    fn parse_with(node: &ast::Stmt, make_temp_var: &mut impl FnMut() -> String) -> Vec<Self> {
+    fn parse_with(node: &ast::BlockItem, make_temp_var: &mut impl FnMut() -> String) -> Vec<Self> {
         match node {
+            ast::BlockItem::Decl(_) => unimplemented!(),
+            ast::BlockItem::Stmt(stmt) => match stmt {
+
             ast::Stmt::Return(Some(expr)) => {
                 let Expr {
                     mut instructions,
@@ -104,6 +107,8 @@ impl Instruction {
                 vec![Instruction::Return(None)]
             }
         }
+        }
+
     }
 }
 
@@ -245,7 +250,8 @@ impl Expr {
                         val: dst,
                     }
                 }
-            }
+            },
+            _ => unimplemented!()
         }
     }
 }

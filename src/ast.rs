@@ -1,5 +1,6 @@
-use crate::lexer::Token;
+use crate::lexer::{self, Token};
 use anyhow::{bail, Context, Result};
+use std::rc::Rc;
 
 pub fn parse<'a>(tokens: &'a [Token]) -> Result<Program<'a>> {
     let (program, tokens) = Program::consume(tokens)?;
@@ -41,7 +42,7 @@ pub struct Function<'a> {
     pub ret_t: Type,
     pub name: &'a str,
     pub signature: Vec<(Type, Option<&'a str>)>,
-    pub statements: Vec<Stmt>,
+    pub items: Vec<BlockItem>,
 }
 
 impl<'a> AstNode<'a> for Function<'a> {
@@ -85,10 +86,10 @@ impl<'a> AstNode<'a> for Function<'a> {
                 }
             };
 
-            let mut statements = vec![];
-            while let Ok((stmt, tokens)) = Stmt::consume(remaining) {
+            let mut items = vec![];
+            while let Ok((stmt, tokens)) = BlockItem::consume(remaining) {
                 remaining = tokens;
-                statements.push(stmt);
+                items.push(stmt);
             }
             if let Some(Token::RSquirly) = remaining.first() {
                 Ok((
@@ -96,7 +97,7 @@ impl<'a> AstNode<'a> for Function<'a> {
                         ret_t,
                         name,
                         signature,
-                        statements,
+                        items,
                     },
                     &remaining[1..],
                 ))
@@ -105,6 +106,62 @@ impl<'a> AstNode<'a> for Function<'a> {
             }
         } else {
             bail!("Failed to parse function.")
+        }
+    }
+}
+
+#[derive(Debug, PartialEq)]
+pub enum BlockItem {
+    Stmt(Stmt),
+    Decl(Declaration),
+}
+
+impl<'a> AstNode<'a> for BlockItem {
+    fn consume(tokens: &'a [Token<'a>]) -> Result<(BlockItem, &'a [Token<'a>])> {
+        if let Ok((decl, tokens)) = Declaration::consume(tokens) {
+            Ok((Self::Decl(decl), tokens))
+        } else {
+            let (stmt, tokens) = Stmt::consume(tokens)?;
+            Ok((Self::Stmt(stmt), tokens))
+        }
+    }
+}
+
+#[derive(Debug, PartialEq)]
+pub struct Declaration {
+    typ: Type,
+    name: Rc<String>,
+    expr: Option<Expr>,
+}
+
+impl<'a> AstNode<'a> for Declaration {
+    fn consume(tokens: &'a [Token<'a>]) -> Result<(Self, &'a [Token<'a>])> {
+        let (typ, tokens) = Type::consume(tokens)?;
+        match tokens {
+            [lexer::Token::Ident(s), lexer::Token::Assign, tokens @ ..] => {
+                let (expr, tokens) = Expr::parse(tokens, 0)?;
+                if tokens.first().is_some_and(|x| *x != lexer::Token::Semi) {
+                    bail!("Semicolon required after expression in variable declaration.")
+                } else {
+                    Ok((
+                        Self {
+                            typ,
+                            name: Rc::new(String::from(*s)),
+                            expr: Some(expr),
+                        },
+                        &tokens[1..],
+                    ))
+                }
+            }
+            [lexer::Token::Ident(s), lexer::Token::Semi, tokens @ ..] => Ok((
+                Self {
+                    typ,
+                    name: Rc::new(String::from(*s)),
+                    expr: None,
+                },
+                tokens,
+            )),
+            _ => bail!("Expected <type> <ident> in variable declaration."),
         }
     }
 }
@@ -139,6 +196,11 @@ impl<'a> AstNode<'a> for Stmt {
 
 #[derive(Debug, PartialEq)]
 pub enum Expr {
+    Var(Rc<String>),
+    Assignment {
+        lvalue: Box<Expr>,
+        rvalue: Box<Expr>,
+    },
     Literal(Literal),
     Unary {
         op: UnaryOp,

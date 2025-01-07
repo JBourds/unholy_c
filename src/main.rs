@@ -2,6 +2,7 @@ mod asm;
 mod ast;
 mod codegen;
 mod lexer;
+mod sema;
 mod tacky;
 
 use std::{ffi::OsStr, io::Write, process::Command};
@@ -20,6 +21,9 @@ struct Args {
 
     #[arg(long)]
     parse: bool,
+
+    #[arg(long)]
+    validate: bool,
 
     #[arg(long)]
     codegen: bool,
@@ -108,8 +112,15 @@ fn lex_parse_codegen_tacky(
         return Ok(None);
     }
 
+    // Semantical Analysis
+    let ast_valid: &'static ast::Program<'static> = Box::leak(Box::new(sema::validate(ast)?));
+    if args.validate {
+        println!("Post sema:\n{:#?}", ast_valid);
+        return Ok(None);
+    }
+
     // Tacky
-    let tacky: &'static tacky::Program = Box::leak(Box::new(tacky::Program::try_from(ast)?));
+    let tacky: &'static tacky::Program = Box::leak(Box::new(tacky::Program::try_from(ast_valid)?));
     if args.tacky {
         println!("Tacky Generation:\n{:#?}", tacky);
         return Ok(None);
@@ -122,7 +133,7 @@ fn lex_parse_codegen_tacky(
         return Ok(None);
     }
 
-    Ok(Some((tokens, ast, asm, tacky)))
+    Ok(Some((tokens, ast_valid, asm, tacky)))
 }
 
 fn gen_asm<W: std::fmt::Write, T: AsmGen<W>>(

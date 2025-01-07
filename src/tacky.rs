@@ -92,7 +92,17 @@ pub enum Instruction {
 impl Instruction {
     fn parse_with(node: &ast::BlockItem, make_temp_var: &mut impl FnMut() -> String) -> Vec<Self> {
         match node {
-            ast::BlockItem::Decl(_) => unimplemented!(),
+            ast::BlockItem::Decl(decl) => {
+                if let Some(init) = &decl.init {
+                    let Expr { 
+                        mut instructions, 
+                        val: src 
+                    } = Expr::parse_with(init, make_temp_var); 
+                    let dst = Val::Var(Rc::clone(&decl.name));
+                    instructions.push(Instruction::Copy { src, dst: dst.clone() });
+                    instructions
+                } else { vec![] }
+            },
             ast::BlockItem::Stmt(stmt) => match stmt {
                 ast::Stmt::Null => vec![],
                 ast::Stmt::Return(Some(expr)) => {

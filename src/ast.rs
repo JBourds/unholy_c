@@ -129,9 +129,9 @@ impl<'a> AstNode<'a> for BlockItem {
 
 #[derive(Debug, PartialEq)]
 pub struct Declaration {
-    typ: Type,
-    name: Rc<String>,
-    expr: Option<Expr>,
+    pub typ: Type,
+    pub name: Rc<String>,
+    pub init: Option<Expr>,
 }
 
 impl<'a> AstNode<'a> for Declaration {
@@ -147,7 +147,7 @@ impl<'a> AstNode<'a> for Declaration {
                         Self {
                             typ,
                             name: Rc::new(String::from(*s)),
-                            expr: Some(expr),
+                            init: Some(expr),
                         },
                         &tokens[1..],
                     ))
@@ -157,7 +157,7 @@ impl<'a> AstNode<'a> for Declaration {
                 Self {
                     typ,
                     name: Rc::new(String::from(*s)),
-                    expr: None,
+                    init: None,
                 },
                 tokens,
             )),

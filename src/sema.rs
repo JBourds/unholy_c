@@ -86,7 +86,7 @@ fn resolve_expr(
 ) -> Result<ast::Expr> {
     match expr {
         ast::Expr::Assignment { lvalue, rvalue } => {
-            match **dbg!(lvalue) {
+            match **lvalue {
                 ast::Expr::Var(_) => (),
                 _ => bail!("Invalid lvalue '{:?}'", expr),
             };

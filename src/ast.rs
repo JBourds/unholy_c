@@ -204,7 +204,7 @@ impl<'a> AstNode<'a> for Stmt {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum Expr {
     Var(Rc<String>),
     Assignment {
@@ -303,7 +303,7 @@ impl Factor {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone, Copy)]
 pub enum Type {
     Int,
     Void,
@@ -323,7 +323,7 @@ impl<'a> AstNode<'a> for Type {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone, Copy)]
 pub enum Literal {
     Int(i32),
 }
@@ -346,7 +346,7 @@ impl<'a> AstNode<'a> for Literal {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone, Copy)]
 pub enum BinaryOp {
     Add,
     Subtract,
@@ -447,7 +447,7 @@ impl BinaryOp {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone, Copy)]
 pub enum UnaryOp {
     Complement,
     Negate,

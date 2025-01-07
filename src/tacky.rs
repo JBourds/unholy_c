@@ -40,18 +40,14 @@ impl TryFrom<&ast::Function<'_>> for Function {
     //  there wil actually be a possibility of failure once we use all of the
     //  function information.
     fn try_from(node: &ast::Function<'_>) -> Result<Self> {
-        let ast::Function {
-            name, items, ..
-        } = node;
+        let ast::Function { name, items, .. } = node;
         let mut temp_var_counter = 0;
         let mut make_temp_var =
             Function::make_temp_var(Rc::new(name.to_string()), &mut temp_var_counter);
-        let mut instructions = items
-            .iter()
-            .fold(Vec::new(), |mut instructions, item| {
-                instructions.extend(Instruction::parse_with(item, &mut make_temp_var));
-                instructions
-            });
+        let mut instructions = items.iter().fold(Vec::new(), |mut instructions, item| {
+            instructions.extend(Instruction::parse_with(item, &mut make_temp_var));
+            instructions
+        });
         // Temporary fix suggested by the book for the case where a function
         // is supposed to return something but does not.
         instructions.push(Instruction::Return(Some(Val::Constant(0))));
@@ -97,15 +93,20 @@ impl Instruction {
         match node {
             ast::BlockItem::Decl(decl) => {
                 if let Some(init) = &decl.init {
-                    let Expr { 
-                        mut instructions, 
-                        val: src 
-                    } = Expr::parse_with(init, make_temp_var); 
+                    let Expr {
+                        mut instructions,
+                        val: src,
+                    } = Expr::parse_with(init, make_temp_var);
                     let dst = Val::Var(Rc::clone(&decl.name));
-                    instructions.push(Instruction::Copy { src, dst: dst.clone() });
+                    instructions.push(Instruction::Copy {
+                        src,
+                        dst: dst.clone(),
+                    });
                     instructions
-                } else { vec![] }
-            },
+                } else {
+                    vec![]
+                }
+            }
             ast::BlockItem::Stmt(stmt) => match stmt {
                 ast::Stmt::Null => vec![],
                 ast::Stmt::Return(Some(expr)) => {
@@ -120,15 +121,11 @@ impl Instruction {
                     vec![Instruction::Return(None)]
                 }
                 ast::Stmt::Expr(expr) => {
-                    let Expr {
-                        instructions,
-                        ..
-                    } = Expr::parse_with(expr, make_temp_var);
+                    let Expr { instructions, .. } = Expr::parse_with(expr, make_temp_var);
                     instructions
                 }
-            }
+            },
         }
-
     }
 }
 
@@ -270,16 +267,30 @@ impl Expr {
                         val: dst,
                     }
                 }
+            }
+            ast::Expr::Var(name) => Self {
+                instructions: vec![],
+                val: Val::Var(Rc::clone(name)),
             },
-            ast::Expr::Var(name) => Self { instructions: vec![], val: Val::Var(Rc::clone(name)) },
             ast::Expr::Assignment { lvalue, rvalue } => {
                 if let ast::Expr::Var(name) = lvalue.as_ref() {
-                    let Expr { mut instructions, val: src } = Expr::parse_with(rvalue, make_temp_var); 
+                    let Expr {
+                        mut instructions,
+                        val: src,
+                    } = Expr::parse_with(rvalue, make_temp_var);
                     let dst = Val::Var(Rc::clone(name));
-                    instructions.push(Instruction::Copy { src, dst: dst.clone() });
-                    Self { instructions, val: dst }
-                } else { panic!("Error: Cannot assign to rvalue.") }
-            },
+                    instructions.push(Instruction::Copy {
+                        src,
+                        dst: dst.clone(),
+                    });
+                    Self {
+                        instructions,
+                        val: dst,
+                    }
+                } else {
+                    panic!("Error: Cannot assign to rvalue.")
+                }
+            }
         }
     }
 }
@@ -368,7 +379,9 @@ mod tests {
 
     #[test]
     fn test_return_literal() {
-        let ast = ast::BlockItem::Stmt(ast::Stmt::Return(Some(ast::Expr::Literal(ast::Literal::Int(2)))));
+        let ast = ast::BlockItem::Stmt(ast::Stmt::Return(Some(ast::Expr::Literal(
+            ast::Literal::Int(2),
+        ))));
         let mut counter = 0;
         let mut make_temp_var = Function::make_temp_var(Rc::new("test".to_string()), &mut counter);
         let actual = Instruction::parse_with(&ast, &mut make_temp_var);

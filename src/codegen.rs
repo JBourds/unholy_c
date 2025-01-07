@@ -89,6 +89,7 @@ impl From<&tacky::UnaryOp> for UnaryOp {
         match node {
             tacky::UnaryOp::Negate => Self::Negate,
             tacky::UnaryOp::Complement => Self::Complement,
+            tacky::UnaryOp::Not => unreachable!(),
         }
     }
 }
@@ -268,6 +269,43 @@ impl fmt::Display for Reg {
 }
 
 #[derive(Debug, PartialEq)]
+pub enum CondCode {
+    E,
+    NE,
+    G,
+    GE,
+    L,
+    LE,
+}
+
+impl fmt::Display for CondCode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match *self {
+            Self::E => write!(f, "e"),
+            Self::NE => write!(f, "ne"),
+            Self::G => write!(f, "g"),
+            Self::GE => write!(f, "ge"),
+            Self::L => write!(f, "l"),
+            Self::LE => write!(f, "le"),
+        }
+    }
+}
+
+impl From<&tacky::BinaryOp> for CondCode {
+    fn from(value: &tacky::BinaryOp) -> Self {
+        match value {
+            tacky::BinaryOp::Equal => Self::E,
+            tacky::BinaryOp::NotEqual => Self::NE,
+            tacky::BinaryOp::LessThan => Self::L,
+            tacky::BinaryOp::LessOrEqual => Self::LE,
+            tacky::BinaryOp::GreaterThan => Self::G,
+            tacky::BinaryOp::GreaterOrEqual => Self::GE,
+            _ => unreachable!("Only relational operands can convert to CondCode"),
+        }
+    }
+}
+
+#[derive(Debug, PartialEq)]
 struct Initial;
 
 #[derive(Debug, PartialEq)]
@@ -291,8 +329,22 @@ pub enum InstructionType {
         src1: Operand,
         src2: Operand,
     },
+    Cmp {
+        src: Operand,
+        dst: Operand,
+    },
     Idiv(Operand),
     Cdq,
+    Jmp(Rc<String>),
+    JmpCC {
+        cond_code: CondCode,
+        identifier: Rc<String>,
+    },
+    SetCC {
+        cond_code: CondCode,
+        dst: Operand,
+    },
+    Label(Rc<String>),
     AllocStack(usize),
     Ret,
 }
@@ -350,6 +402,14 @@ impl Instruction<Offset> {
                     src2: convert_operand_offset(src2),
                 },
                 InstructionType::Idiv(op) => InstructionType::Idiv(convert_operand_offset(op)),
+                InstructionType::Cmp { src, dst } => InstructionType::Cmp {
+                    src: convert_operand_offset(src),
+                    dst: convert_operand_offset(dst),
+                },
+                InstructionType::SetCC { cond_code, dst } => InstructionType::SetCC {
+                    cond_code,
+                    dst: convert_operand_offset(dst),
+                },
                 instr => instr,
             },
             phantom: PhantomData::<Offset>,
@@ -450,6 +510,62 @@ impl From<Instruction<Offset>> for Vec<Instruction<Final>> {
                     section: RegSection::Dword,
                 }))),
             ],
+            InstructionType::Cmp {
+                src:
+                    Operand::StackOffset {
+                        offset: src_offset,
+                        size: src_size,
+                    },
+                dst:
+                    Operand::StackOffset {
+                        offset: dst_offset,
+                        size: dst_size,
+                    },
+            } => {
+                vec![
+                    new_instr(InstructionType::Mov {
+                        src: Operand::StackOffset {
+                            offset: src_offset,
+                            size: src_size,
+                        },
+                        dst: Operand::Reg(Reg::X64 {
+                            reg: X64Reg::R10,
+                            section: RegSection::Dword,
+                        }),
+                    }),
+                    new_instr(InstructionType::Cmp {
+                        src: Operand::Reg(Reg::X64 {
+                            reg: X64Reg::R10,
+                            section: RegSection::Dword,
+                        }),
+                        dst: Operand::StackOffset {
+                            offset: dst_offset,
+                            size: dst_size,
+                        },
+                    }),
+                ]
+            }
+            InstructionType::Cmp {
+                src,
+                dst: Operand::Imm(i),
+            } => {
+                vec![
+                    new_instr(InstructionType::Mov {
+                        src: Operand::Imm(i),
+                        dst: Operand::Reg(Reg::X64 {
+                            reg: X64Reg::R11,
+                            section: RegSection::Dword,
+                        }),
+                    }),
+                    new_instr(InstructionType::Cmp {
+                        src,
+                        dst: Operand::Reg(Reg::X64 {
+                            reg: X64Reg::R11,
+                            section: RegSection::Dword,
+                        }),
+                    }),
+                ]
+            }
 
             instr => vec![new_instr(instr)],
         }
@@ -476,16 +592,40 @@ impl From<&tacky::Instruction> for Vec<Instruction<Initial>> {
                 }),
                 new_instr(InstructionType::Ret),
             ],
-            tacky::Instruction::Unary { op, src, dst } => vec![
-                new_instr(InstructionType::Mov {
-                    src: src.into(),
-                    dst: dst.into(),
-                }),
-                new_instr(InstructionType::Unary {
-                    op: op.into(),
-                    dst: dst.into(),
-                }),
-            ],
+            tacky::Instruction::Unary { op, src, dst } => match op {
+                tacky::UnaryOp::Not => vec![
+                    new_instr(InstructionType::Cmp {
+                        src: Operand::Imm(0),
+                        dst: src.into(),
+                    }),
+                    new_instr(InstructionType::Mov {
+                        src: Operand::Imm(0),
+                        dst: dst.into(),
+                    }),
+                    new_instr(InstructionType::SetCC {
+                        cond_code: CondCode::E,
+                        dst: {
+                            // FIXME: Since SetCC takes a byte value we must manually
+                            // fixup the stack location size
+                            let dst: Operand = dst.into();
+                            match dst {
+                                Operand::Pseudo { name, .. } => Operand::Pseudo { name, size: 1 },
+                                _ => dst,
+                            }
+                        },
+                    }),
+                ],
+                _ => vec![
+                    new_instr(InstructionType::Mov {
+                        src: src.into(),
+                        dst: dst.into(),
+                    }),
+                    new_instr(InstructionType::Unary {
+                        op: op.into(),
+                        dst: dst.into(),
+                    }),
+                ],
+            },
             tacky::Instruction::Binary {
                 op,
                 src1,
@@ -598,7 +738,64 @@ impl From<&tacky::Instruction> for Vec<Instruction<Initial>> {
                     }));
                     v
                 }
+                tacky::BinaryOp::Equal
+                | tacky::BinaryOp::NotEqual
+                | tacky::BinaryOp::LessThan
+                | tacky::BinaryOp::LessOrEqual
+                | tacky::BinaryOp::GreaterThan
+                | tacky::BinaryOp::GreaterOrEqual => vec![
+                    new_instr(InstructionType::Cmp {
+                        src: src2.into(),
+                        dst: src1.into(),
+                    }),
+                    new_instr(InstructionType::Mov {
+                        src: Operand::Imm(0),
+                        dst: dst.into(),
+                    }),
+                    new_instr(InstructionType::SetCC {
+                        cond_code: op.into(),
+                        dst: {
+                            // FIXME: Since SetCC takes a byte value we must manually
+                            // fixup the stack location size
+                            let dst: Operand = dst.into();
+                            match dst {
+                                Operand::Pseudo { name, .. } => Operand::Pseudo { name, size: 1 },
+                                _ => dst,
+                            }
+                        },
+                    }),
+                ],
             },
+            tacky::Instruction::JumpIfZero { condition, target } => vec![
+                new_instr(InstructionType::Cmp {
+                    src: Operand::Imm(0),
+                    dst: condition.into(),
+                }),
+                new_instr(InstructionType::JmpCC {
+                    cond_code: CondCode::E,
+                    identifier: Rc::clone(target),
+                }),
+            ],
+            tacky::Instruction::JumpIfNotZero { condition, target } => vec![
+                new_instr(InstructionType::Cmp {
+                    src: Operand::Imm(0),
+                    dst: condition.into(),
+                }),
+                new_instr(InstructionType::JmpCC {
+                    cond_code: CondCode::NE,
+                    identifier: Rc::clone(target),
+                }),
+            ],
+            tacky::Instruction::Jump(label) => {
+                vec![new_instr(InstructionType::Jmp(Rc::clone(label)))]
+            }
+            tacky::Instruction::Copy { src, dst } => vec![new_instr(InstructionType::Mov {
+                src: src.into(),
+                dst: dst.into(),
+            })],
+            tacky::Instruction::Label(label) => {
+                vec![new_instr(InstructionType::Label(Rc::clone(label)))]
+            }
         }
     }
 }
@@ -623,7 +820,7 @@ impl Operand {
     }
 }
 
-// TODO: Unhardcode size of 4
+// FIXME: Unhardcode size of 4
 impl From<&tacky::Val> for Operand {
     fn from(val: &tacky::Val) -> Self {
         match val {

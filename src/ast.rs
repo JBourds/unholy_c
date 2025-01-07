@@ -204,7 +204,7 @@ impl<'a> AstNode<'a> for Stmt {
     }
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Expr {
     Var(Rc<String>),
     Assignment {
@@ -330,7 +330,7 @@ impl<'a> AstNode<'a> for Type {
     }
 }
 
-#[derive(Debug, PartialEq, Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Literal {
     Int(i32),
 }
@@ -353,7 +353,7 @@ impl<'a> AstNode<'a> for Literal {
     }
 }
 
-#[derive(Debug, PartialEq, Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum BinaryOp {
     Add,
     Subtract,
@@ -389,6 +389,22 @@ pub enum BinaryOp {
 impl BinaryOp {
     pub fn is_logical(&self) -> bool {
         matches!(*self, Self::And | Self::Or)
+    }
+
+    pub fn compound_binary(&self) -> Option<Self> {
+        match self {
+            Self::AddAssign => Some(Self::Add),
+            Self::SubAssign => Some(Self::Subtract),
+            Self::MultAssign => Some(Self::Multiply),
+            Self::DivAssign => Some(Self::Divide),
+            Self::ModAssign => Some(Self::Remainder),
+            Self::AndAssign => Some(Self::And),
+            Self::OrAssign => Some(Self::Or),
+            Self::XorAssign => Some(Self::Xor),
+            Self::LShiftAssign => Some(Self::LShift),
+            Self::RShiftAssign => Some(Self::RShift),
+            _ => None,
+        }
     }
 
     pub fn precedence(&self) -> u32 {
@@ -454,7 +470,7 @@ impl BinaryOp {
     }
 }
 
-#[derive(Debug, PartialEq, Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum UnaryOp {
     Complement,
     Negate,
@@ -467,17 +483,11 @@ pub enum UnaryOp {
 
 impl UnaryOp {
     fn is_postfix(&self) -> bool {
-        match self {
-            UnaryOp::PostInc | UnaryOp::PostDec => true,
-            _ => false,
-        }
+        matches!(self, UnaryOp::PostInc | UnaryOp::PostDec)
     }
 
     fn is_prefix(&self) -> bool {
-        match self {
-            UnaryOp::PostInc | UnaryOp::PostDec => false,
-            _ => true,
-        }
+        !matches!(self, UnaryOp::PostInc | UnaryOp::PostDec)
     }
 }
 

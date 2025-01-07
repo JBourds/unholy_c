@@ -243,6 +243,28 @@ impl Expr {
                         instructions,
                         val: dst,
                     }
+                } else if let Some(op) = op.compound_binary() {
+                    if let ast::Expr::Var(dst) = left.as_ref() {
+                        let binary = ast::Expr::Binary { 
+                            op, 
+                            left: left.clone(), 
+                            right: right.clone(), 
+                        };
+                        let Self {
+                            mut instructions,
+                            val: src,
+                        } = Self::parse_with(&binary, make_temp_var);
+                        
+                        instructions.push(Instruction::Copy { 
+                            src, 
+                            dst: Val::Var(Rc::clone(dst)) 
+                        });
+                        Self {
+                            instructions,
+                            val: Val::Var(Rc::clone(dst))
+                        }
+                    } else { panic!("Cannot use compound assignment on non-variable value.") }
+
                 } else {
                     let Self {
                         mut instructions,
@@ -266,6 +288,7 @@ impl Expr {
                         instructions,
                         val: dst,
                     }
+
                 }
             }
             ast::Expr::Var(name) => Self {

@@ -258,7 +258,15 @@ impl Expr {
                     }
                 }
             },
-            _ => unimplemented!()
+            ast::Expr::Var(name) => Self { instructions: vec![], val: Val::Var(Rc::clone(name)) },
+            ast::Expr::Assignment { lvalue, rvalue } => {
+                if let ast::Expr::Var(name) = lvalue.as_ref() {
+                    let Expr { mut instructions, val: src } = Expr::parse_with(rvalue, make_temp_var); 
+                    let dst = Val::Var(Rc::clone(name));
+                    instructions.push(Instruction::Copy { src, dst: dst.clone() });
+                    Self { instructions, val: dst }
+                } else { panic!("Error: Cannot assign to rvalue.") }
+            },
         }
     }
 }

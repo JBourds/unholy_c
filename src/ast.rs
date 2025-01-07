@@ -238,20 +238,22 @@ impl Expr {
                 break;
             }
 
-            let (right, tokens_inner) = if operator == BinaryOp::Assign {
-                Expr::parse(tokens_inner, operator.precedence())?
+            if operator == BinaryOp::Assign {
+                let (right, tokens_inner) = Expr::parse(tokens_inner, operator.precedence())?;
+                left = Expr::Assignment {
+                    lvalue: Box::new(left),
+                    rvalue: Box::new(right),
+                };
+                tokens = tokens_inner;
             } else {
-                Expr::parse(tokens_inner, operator.precedence() + 1)?
-            };
-
-            left = Expr::Binary {
-                op: operator,
-                left: Box::new(left),
-                right: Box::new(right),
-            };
-
-            // Update tokens in outer scope
-            tokens = tokens_inner;
+                let (right, tokens_inner) = Expr::parse(tokens_inner, operator.precedence() + 1)?;
+                left = Expr::Binary {
+                    op: operator,
+                    left: Box::new(left),
+                    right: Box::new(right),
+                };
+                tokens = tokens_inner;
+            }
         }
         Ok((left, tokens))
     }

@@ -87,9 +87,9 @@ impl<'a> AstNode<'a> for Function<'a> {
             };
 
             let mut items = vec![];
-            while let Ok((stmt, tokens)) = BlockItem::consume(remaining) {
+            while let Ok((item, tokens)) = BlockItem::consume(remaining) {
                 remaining = tokens;
-                items.push(stmt);
+                items.push(item);
             }
             if let Some(Token::RSquirly) = remaining.first() {
                 Ok((
@@ -238,8 +238,17 @@ impl Expr {
                 break;
             }
 
-            if operator == BinaryOp::Assign {
+            if operator.does_assignment() {
                 let (right, tokens_inner) = Expr::parse(tokens_inner, operator.precedence())?;
+                let right = if let Some(op) = operator.compound_op() {
+                    Expr::Binary {
+                        op,
+                        left: Box::new(left.clone()),
+                        right: Box::new(right.clone()),
+                    }
+                } else {
+                    right
+                };
                 left = Expr::Assignment {
                     lvalue: Box::new(left),
                     rvalue: Box::new(right),
@@ -391,7 +400,24 @@ impl BinaryOp {
         matches!(*self, Self::And | Self::Or)
     }
 
-    pub fn compound_binary(&self) -> Option<Self> {
+    pub fn does_assignment(&self) -> bool {
+        matches!(
+            *self,
+            Self::Assign
+                | Self::AddAssign
+                | Self::SubAssign
+                | Self::MultAssign
+                | Self::DivAssign
+                | Self::ModAssign
+                | Self::AndAssign
+                | Self::OrAssign
+                | Self::XorAssign
+                | Self::LShiftAssign
+                | Self::RShiftAssign
+        )
+    }
+
+    pub fn compound_op(&self) -> Option<Self> {
         match self {
             Self::AddAssign => Some(Self::Add),
             Self::SubAssign => Some(Self::Subtract),
@@ -465,6 +491,14 @@ impl BinaryOp {
             Token::Great => Ok(Some((BinaryOp::GreaterThan, tokens))),
             Token::GreatEq => Ok(Some((BinaryOp::GreaterOrEqual, tokens))),
             Token::Assign => Ok(Some((BinaryOp::Assign, tokens))),
+            Token::AddAssign => Ok(Some((BinaryOp::AddAssign, tokens))),
+            Token::SubAssign => Ok(Some((BinaryOp::SubAssign, tokens))),
+            Token::MultAssign => Ok(Some((BinaryOp::MultAssign, tokens))),
+            Token::DivAssign => Ok(Some((BinaryOp::DivAssign, tokens))),
+            Token::ModAssign => Ok(Some((BinaryOp::ModAssign, tokens))),
+            Token::OrAssign => Ok(Some((BinaryOp::OrAssign, tokens))),
+            Token::AndAssign => Ok(Some((BinaryOp::AndAssign, tokens))),
+            Token::XorAssign => Ok(Some((BinaryOp::XorAssign, tokens))),
             _ => Ok(None),
         }
     }

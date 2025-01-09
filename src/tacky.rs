@@ -243,7 +243,7 @@ impl Expr {
                         instructions,
                         val: dst,
                     }
-                } else if let Some(op) = op.compound_binary() {
+                } else if let Some(op) = op.compound_op() {
                     if let ast::Expr::Var(dst) = left.as_ref() {
                         let binary = ast::Expr::Binary { 
                             op, 
@@ -297,10 +297,10 @@ impl Expr {
             },
             ast::Expr::Assignment { lvalue, rvalue } => {
                 if let ast::Expr::Var(name) = lvalue.as_ref() {
-                    let Expr {
+                    let Self {
                         mut instructions,
                         val: src,
-                    } = Expr::parse_with(rvalue, make_temp_var);
+                    } = Self::parse_with(rvalue, make_temp_var);
                     let dst = Val::Var(Rc::clone(name));
                     instructions.push(Instruction::Copy {
                         src,
@@ -357,7 +357,7 @@ impl From<&ast::UnaryOp> for UnaryOp {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum BinaryOp {
     Add,
     Subtract,

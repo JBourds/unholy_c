@@ -89,7 +89,7 @@ fn resolve_stmt(
                 .map(
                     |result_box_stmt: std::result::Result<&Box<ast::Stmt>, anyhow::Error>| {
                         assert!(result_box_stmt.is_ok());
-                        resolve_stmt(&(result_box_stmt.unwrap()), variable_map)
+                        resolve_stmt(result_box_stmt.unwrap(), variable_map)
                     },
                 )
                 .transpose()?

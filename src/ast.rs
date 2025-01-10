@@ -408,6 +408,10 @@ impl BinaryOp {
         matches!(*self, Self::And | Self::Or)
     }
 
+    pub fn is_valid_for(&self, expr: &Expr) -> bool {
+        !self.does_assignment() || matches!(expr, Expr::Var(_))
+    }
+
     pub fn does_assignment(&self) -> bool {
         matches!(
             *self,
@@ -432,8 +436,8 @@ impl BinaryOp {
             Self::MultAssign => Some(Self::Multiply),
             Self::DivAssign => Some(Self::Divide),
             Self::ModAssign => Some(Self::Remainder),
-            Self::AndAssign => Some(Self::And),
-            Self::OrAssign => Some(Self::Or),
+            Self::AndAssign => Some(Self::BitAnd),
+            Self::OrAssign => Some(Self::BitOr),
             Self::XorAssign => Some(Self::Xor),
             Self::LShiftAssign => Some(Self::LShift),
             Self::RShiftAssign => Some(Self::RShift),

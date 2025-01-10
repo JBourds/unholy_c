@@ -1,5 +1,5 @@
 use crate::lexer::{self, Token};
-use anyhow::{bail, Context, Error, Result};
+use anyhow::{bail, Context, Result};
 use std::rc::Rc;
 
 pub fn parse<'a>(tokens: &'a [Token]) -> Result<Program<'a>> {
@@ -308,7 +308,7 @@ impl Factor {
             _ => match tokens {
                 [lexer::Token::Literal(_), ..] => {
                     let (lit, tokens) = Literal::consume(tokens)?;
-                    Ok::<(Expr, &[lexer::Token<'_>]), Error>((Expr::Literal(lit), tokens))
+                    Ok((Expr::Literal(lit), tokens))
                 }
                 [lexer::Token::Ident(s), tokens @ ..] => {
                     check_for_postfix(Expr::Var(Rc::new(String::from(*s))), tokens)

@@ -40,18 +40,17 @@ impl TryFrom<&ast::Function<'_>> for Function {
     //  there wil actually be a possibility of failure once we use all of the
     //  function information.
     fn try_from(node: &ast::Function<'_>) -> Result<Self> {
-        let ast::Function {
-            name, statements, ..
-        } = node;
+        let ast::Function { name, items, .. } = node;
         let mut temp_var_counter = 0;
         let mut make_temp_var =
             Function::make_temp_var(Rc::new(name.to_string()), &mut temp_var_counter);
-        let instructions = statements
-            .iter()
-            .fold(Vec::new(), |mut instructions, stmt| {
-                instructions.extend(Instruction::parse_with(stmt, &mut make_temp_var));
-                instructions
-            });
+        let mut instructions = items.iter().fold(Vec::new(), |mut instructions, item| {
+            instructions.extend(Instruction::parse_with(item, &mut make_temp_var));
+            instructions
+        });
+        // Temporary fix suggested by the book for the case where a function
+        // is supposed to return something but does not.
+        instructions.push(Instruction::Return(Some(Val::Constant(0))));
         Ok(Self {
             name: Rc::new(name.to_string()),
             instructions,
@@ -90,19 +89,42 @@ pub enum Instruction {
 }
 
 impl Instruction {
-    fn parse_with(node: &ast::Stmt, make_temp_var: &mut impl FnMut() -> String) -> Vec<Self> {
+    fn parse_with(node: &ast::BlockItem, make_temp_var: &mut impl FnMut() -> String) -> Vec<Self> {
         match node {
-            ast::Stmt::Return(Some(expr)) => {
-                let Expr {
-                    mut instructions,
-                    val,
-                } = Expr::parse_with(expr, make_temp_var);
-                instructions.push(Instruction::Return(Some(val)));
-                instructions
+            ast::BlockItem::Decl(decl) => {
+                if let Some(init) = &decl.init {
+                    let Expr {
+                        mut instructions,
+                        val: src,
+                    } = Expr::parse_with(init, make_temp_var);
+                    let dst = Val::Var(Rc::clone(&decl.name));
+                    instructions.push(Instruction::Copy {
+                        src,
+                        dst: dst.clone(),
+                    });
+                    instructions
+                } else {
+                    vec![]
+                }
             }
-            ast::Stmt::Return(None) => {
-                vec![Instruction::Return(None)]
-            }
+            ast::BlockItem::Stmt(stmt) => match stmt {
+                ast::Stmt::Null => vec![],
+                ast::Stmt::Return(Some(expr)) => {
+                    let Expr {
+                        mut instructions,
+                        val,
+                    } = Expr::parse_with(expr, make_temp_var);
+                    instructions.push(Instruction::Return(Some(val)));
+                    instructions
+                }
+                ast::Stmt::Return(None) => {
+                    vec![Instruction::Return(None)]
+                }
+                ast::Stmt::Expr(expr) => {
+                    let Expr { instructions, .. } = Expr::parse_with(expr, make_temp_var);
+                    instructions
+                }
+            },
         }
     }
 }
@@ -125,12 +147,64 @@ impl Expr {
                     mut instructions,
                     val,
                 } = Expr::parse_with(expr.as_ref(), make_temp_var);
-                let dst = Val::Var(make_temp_var().into());
-                instructions.push(Instruction::Unary {
-                    op: UnaryOp::from(op),
-                    src: val,
-                    dst: dst.clone(),
-                });
+                let dst = match op {
+                    ast::UnaryOp::PreInc => {
+                        instructions.push(Instruction::Binary {
+                            op: BinaryOp::Add,
+                            src1: val.clone(),
+                            src2: Val::Constant(1),
+                            dst: val.clone(),
+                        });
+                        val.clone()
+                    }
+                    ast::UnaryOp::PostInc => {
+                        let dst = Val::Var(make_temp_var().into());
+                        instructions.push(Instruction::Copy {
+                            src: val.clone(),
+                            dst: dst.clone(),
+                        });
+                        instructions.push(Instruction::Binary {
+                            op: BinaryOp::Add,
+                            src1: val.clone(),
+                            src2: Val::Constant(1),
+                            dst: val.clone(),
+                        });
+                        dst
+                    }
+                    ast::UnaryOp::PreDec => {
+                        instructions.push(Instruction::Binary {
+                            op: BinaryOp::Subtract,
+                            src1: val.clone(),
+                            src2: Val::Constant(1),
+                            dst: val.clone(),
+                        });
+                        val.clone()
+                    }
+                    ast::UnaryOp::PostDec => {
+                        let dst = Val::Var(make_temp_var().into());
+                        instructions.push(Instruction::Copy {
+                            src: val.clone(),
+                            dst: dst.clone(),
+                        });
+                        instructions.push(Instruction::Binary {
+                            op: BinaryOp::Subtract,
+                            src1: val.clone(),
+                            src2: Val::Constant(1),
+                            dst: val.clone(),
+                        });
+                        dst
+                    }
+                    // Other operations have tacky unary op equivalents
+                    _ => {
+                        let dst = Val::Var(make_temp_var().into());
+                        instructions.push(Instruction::Unary {
+                            op: UnaryOp::from(op),
+                            src: val,
+                            dst: dst.clone(),
+                        });
+                        dst
+                    }
+                };
                 Expr {
                     instructions,
                     val: dst,
@@ -221,6 +295,29 @@ impl Expr {
                         instructions,
                         val: dst,
                     }
+                } else if let Some(op) = op.compound_op() {
+                    if let ast::Expr::Var(dst) = left.as_ref() {
+                        let binary = ast::Expr::Binary {
+                            op,
+                            left: left.clone(),
+                            right: right.clone(),
+                        };
+                        let Self {
+                            mut instructions,
+                            val: src,
+                        } = Self::parse_with(&binary, make_temp_var);
+
+                        instructions.push(Instruction::Copy {
+                            src,
+                            dst: Val::Var(Rc::clone(dst)),
+                        });
+                        Self {
+                            instructions,
+                            val: Val::Var(Rc::clone(dst)),
+                        }
+                    } else {
+                        panic!("Cannot use compound assignment on non-variable value.")
+                    }
                 } else {
                     let Self {
                         mut instructions,
@@ -244,6 +341,29 @@ impl Expr {
                         instructions,
                         val: dst,
                     }
+                }
+            }
+            ast::Expr::Var(name) => Self {
+                instructions: vec![],
+                val: Val::Var(Rc::clone(name)),
+            },
+            ast::Expr::Assignment { lvalue, rvalue } => {
+                if let ast::Expr::Var(name) = lvalue.as_ref() {
+                    let Self {
+                        mut instructions,
+                        val: src,
+                    } = Self::parse_with(rvalue, make_temp_var);
+                    let dst = Val::Var(Rc::clone(name));
+                    instructions.push(Instruction::Copy {
+                        src,
+                        dst: dst.clone(),
+                    });
+                    Self {
+                        instructions,
+                        val: dst,
+                    }
+                } else {
+                    panic!("Error: Cannot assign to rvalue.")
                 }
             }
         }
@@ -277,11 +397,12 @@ impl From<&ast::UnaryOp> for UnaryOp {
             ast::UnaryOp::Complement => Self::Complement,
             ast::UnaryOp::Negate => Self::Negate,
             ast::UnaryOp::Not => Self::Not,
+            _ => unreachable!(),
         }
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum BinaryOp {
     Add,
     Subtract,
@@ -299,6 +420,17 @@ pub enum BinaryOp {
     LessOrEqual,
     GreaterThan,
     GreaterOrEqual,
+    Assign,
+    AddAssign,
+    SubAssign,
+    MultAssign,
+    DivAssign,
+    ModAssign,
+    AndAssign,
+    OrAssign,
+    XorAssign,
+    LShiftAssign,
+    RShiftAssign,
 }
 
 impl From<&ast::BinaryOp> for BinaryOp {
@@ -322,6 +454,17 @@ impl From<&ast::BinaryOp> for BinaryOp {
             ast::BinaryOp::LessOrEqual => Self::LessOrEqual,
             ast::BinaryOp::GreaterThan => Self::GreaterThan,
             ast::BinaryOp::GreaterOrEqual => Self::GreaterOrEqual,
+            ast::BinaryOp::Assign => Self::Assign,
+            ast::BinaryOp::AddAssign => Self::AddAssign,
+            ast::BinaryOp::SubAssign => Self::SubAssign,
+            ast::BinaryOp::MultAssign => Self::MultAssign,
+            ast::BinaryOp::DivAssign => Self::DivAssign,
+            ast::BinaryOp::ModAssign => Self::ModAssign,
+            ast::BinaryOp::AndAssign => Self::AndAssign,
+            ast::BinaryOp::OrAssign => Self::OrAssign,
+            ast::BinaryOp::XorAssign => Self::XorAssign,
+            ast::BinaryOp::LShiftAssign => Self::LShiftAssign,
+            ast::BinaryOp::RShiftAssign => Self::RShiftAssign,
         }
     }
 }
@@ -332,7 +475,9 @@ mod tests {
 
     #[test]
     fn test_return_literal() {
-        let ast = ast::Stmt::Return(Some(ast::Expr::Literal(ast::Literal::Int(2))));
+        let ast = ast::BlockItem::Stmt(ast::Stmt::Return(Some(ast::Expr::Literal(
+            ast::Literal::Int(2),
+        ))));
         let mut counter = 0;
         let mut make_temp_var = Function::make_temp_var(Rc::new("test".to_string()), &mut counter);
         let actual = Instruction::parse_with(&ast, &mut make_temp_var);
@@ -342,10 +487,10 @@ mod tests {
 
     #[test]
     fn test_return_unary() {
-        let ast = ast::Stmt::Return(Some(ast::Expr::Unary {
+        let ast = ast::BlockItem::Stmt(ast::Stmt::Return(Some(ast::Expr::Unary {
             op: ast::UnaryOp::Complement,
             expr: Box::new(ast::Expr::Literal(ast::Literal::Int(2))),
-        }));
+        })));
         let mut counter = 0;
         let mut make_temp_var = Function::make_temp_var(Rc::new("test".to_string()), &mut counter);
         let actual = Instruction::parse_with(&ast, &mut make_temp_var);
@@ -361,7 +506,7 @@ mod tests {
     }
     #[test]
     fn test_return_nested_unary() {
-        let ast = ast::Stmt::Return(Some(ast::Expr::Unary {
+        let ast = ast::BlockItem::Stmt(ast::Stmt::Return(Some(ast::Expr::Unary {
             op: ast::UnaryOp::Negate,
             expr: Box::new(ast::Expr::Unary {
                 op: ast::UnaryOp::Complement,
@@ -370,7 +515,7 @@ mod tests {
                     expr: Box::new(ast::Expr::Literal(ast::Literal::Int(2))),
                 }),
             }),
-        }));
+        })));
         let mut counter = 0;
         let mut make_temp_var = Function::make_temp_var(Rc::new("test".to_string()), &mut counter);
         let actual = Instruction::parse_with(&ast, &mut make_temp_var);

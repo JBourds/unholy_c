@@ -89,7 +89,7 @@ impl From<&tacky::UnaryOp> for UnaryOp {
         match node {
             tacky::UnaryOp::Negate => Self::Negate,
             tacky::UnaryOp::Complement => Self::Complement,
-            tacky::UnaryOp::Not => unreachable!(),
+            _ => unreachable!(),
         }
     }
 }
@@ -765,6 +765,7 @@ impl From<&tacky::Instruction> for Vec<Instruction<Initial>> {
                         },
                     }),
                 ],
+                _ => unimplemented!(),
             },
             tacky::Instruction::JumpIfZero { condition, target } => vec![
                 new_instr(InstructionType::Cmp {

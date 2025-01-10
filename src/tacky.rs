@@ -147,12 +147,58 @@ impl Expr {
                     mut instructions,
                     val,
                 } = Expr::parse_with(expr.as_ref(), make_temp_var);
-                let dst = Val::Var(make_temp_var().into());
-                instructions.push(Instruction::Unary {
-                    op: UnaryOp::from(op),
-                    src: val,
-                    dst: dst.clone(),
-                });
+                let dst = match op {
+                    ast::UnaryOp::PreInc => {
+                        instructions.push(Instruction::Binary { 
+                            op: BinaryOp::Add, 
+                            src1: val.clone(), 
+                            src2: Val::Constant(1), 
+                            dst: val.clone() 
+                        });
+                        val.clone()
+                    }
+                    ast::UnaryOp::PostInc => {
+                        let dst = Val::Var(make_temp_var().into());
+                        instructions.push(Instruction::Copy { src: val.clone(), dst: dst.clone() });
+                        instructions.push(Instruction::Binary { 
+                            op: BinaryOp::Add, 
+                            src1: val.clone(), 
+                            src2: Val::Constant(1), 
+                            dst: val.clone() 
+                        });
+                        dst
+                    }
+                    ast::UnaryOp::PreDec => {
+                        instructions.push(Instruction::Binary { 
+                            op: BinaryOp::Subtract, 
+                            src1: val.clone(), 
+                            src2: Val::Constant(1), 
+                            dst: val.clone() 
+                        });
+                        val.clone()
+                    }
+                    ast::UnaryOp::PostDec => {
+                        let dst = Val::Var(make_temp_var().into());
+                        instructions.push(Instruction::Copy { src: val.clone(), dst: dst.clone() });
+                        instructions.push(Instruction::Binary { 
+                            op: BinaryOp::Subtract, 
+                            src1: val.clone(), 
+                            src2: Val::Constant(1), 
+                            dst: val.clone() 
+                        });
+                        dst
+                    }
+                    // Other operations have tacky unary op equivalents
+                    _ => {
+                        let dst = Val::Var(make_temp_var().into());
+                        instructions.push(Instruction::Unary {
+                            op: UnaryOp::from(op),
+                            src: val,
+                            dst: dst.clone(),
+                        });
+                        dst
+                    }
+                };
                 Expr {
                     instructions,
                     val: dst,

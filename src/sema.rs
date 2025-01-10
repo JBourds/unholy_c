@@ -76,6 +76,11 @@ fn resolve_stmt(
         }
         ast::Stmt::Return(None) => Ok(ast::Stmt::Return(None)),
         ast::Stmt::Expr(expr) => Ok(ast::Stmt::Expr(resolve_expr(expr, variable_map)?)),
+        ast::Stmt::If {
+            condition,
+            then,
+            r#else,
+        } => todo!(),
         ast::Stmt::Null => Ok(ast::Stmt::Null),
     }
 }
@@ -118,5 +123,10 @@ fn resolve_expr(
             left: Box::new(resolve_expr(left, variable_map)?),
             right: Box::new(resolve_expr(right, variable_map)?),
         }),
+        ast::Expr::Conditional {
+            condition,
+            then,
+            r#else,
+        } => todo!(),
     }
 }

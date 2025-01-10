@@ -120,6 +120,11 @@ impl Instruction {
                 ast::Stmt::Return(None) => {
                     vec![Instruction::Return(None)]
                 }
+                ast::Stmt::If {
+                    condition,
+                    then,
+                    r#else,
+                } => todo!(),
                 ast::Stmt::Expr(expr) => {
                     let Expr { instructions, .. } = Expr::parse_with(expr, make_temp_var);
                     instructions
@@ -366,6 +371,11 @@ impl Expr {
                     panic!("Error: Cannot assign to rvalue.")
                 }
             }
+            ast::Expr::Conditional {
+                condition,
+                then,
+                r#else,
+            } => todo!(),
         }
     }
 }
@@ -465,6 +475,9 @@ impl From<&ast::BinaryOp> for BinaryOp {
             ast::BinaryOp::XorAssign => Self::XorAssign,
             ast::BinaryOp::LShiftAssign => Self::LShiftAssign,
             ast::BinaryOp::RShiftAssign => Self::RShiftAssign,
+            ast::BinaryOp::Ternary => {
+                unreachable!("Ternary expressions are not true Binary operands")
+            }
         }
     }
 }

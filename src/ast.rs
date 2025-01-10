@@ -506,6 +506,8 @@ impl BinaryOp {
             Token::ModAssign => Ok(Some((BinaryOp::ModAssign, tokens))),
             Token::OrAssign => Ok(Some((BinaryOp::OrAssign, tokens))),
             Token::AndAssign => Ok(Some((BinaryOp::AndAssign, tokens))),
+            Token::LShiftAssign => Ok(Some((BinaryOp::LShiftAssign, tokens))),
+            Token::RShiftAssign => Ok(Some((BinaryOp::RShiftAssign, tokens))),
             Token::XorAssign => Ok(Some((BinaryOp::XorAssign, tokens))),
             _ => Ok(None),
         }

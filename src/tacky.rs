@@ -44,9 +44,7 @@ impl TryFrom<&ast::Function<'_>> for Function {
         let mut temp_var_counter = 0;
         let mut make_temp_var =
             Function::make_temp_var(Rc::new(name.to_string()), &mut temp_var_counter);
-        let mut instructions = block.as_ref().map_or(vec![], |block| {
-            Instruction::parse_with(block, &mut make_temp_var)
-        });
+        let mut instructions = block.as_ref().map_or(vec![], |block| Instruction::parse_with(block, &mut make_temp_var));
         // Temporary fix suggested by the book for the case where a function
         // is supposed to return something but does not.
         instructions.push(Instruction::Return(Some(Val::Constant(0))));

@@ -44,7 +44,9 @@ impl TryFrom<&ast::Function<'_>> for Function {
         let mut temp_var_counter = 0;
         let mut make_temp_var =
             Function::make_temp_var(Rc::new(name.to_string()), &mut temp_var_counter);
-        let mut instructions = block.as_ref().map_or(vec![], |block| Instruction::parse_with(block, &mut make_temp_var));
+        let mut instructions = block.as_ref().map_or(vec![], |block| {
+            Instruction::parse_with(block, &mut make_temp_var)
+        });
         // Temporary fix suggested by the book for the case where a function
         // is supposed to return something but does not.
         instructions.push(Instruction::Return(Some(Val::Constant(0))));
@@ -124,8 +126,12 @@ impl Instruction {
                     ast::Stmt::Compound(block) => {
                         block_instructions.extend(Self::parse_with(block, make_temp_var));
                     }
-                    ast::Stmt::Goto(label) => { block_instructions.push(Instruction::Jump(Rc::clone(label))); },
-                    ast::Stmt::Label(label) => { block_instructions.push(Instruction::Label(Rc::clone(label))); },
+                    ast::Stmt::Goto(label) => {
+                        block_instructions.push(Instruction::Jump(Rc::clone(label)));
+                    }
+                    ast::Stmt::Label(label) => {
+                        block_instructions.push(Instruction::Label(Rc::clone(label)));
+                    }
                     ast::Stmt::If {
                         condition,
                         then,
@@ -585,9 +591,9 @@ mod tests {
 
     #[test]
     fn test_return_literal() {
-        let ast = ast::Block(vec![ast::BlockItem::Stmt(ast::Stmt::Return(Some(ast::Expr::Literal(
-            ast::Literal::Int(2),
-        ))))]);
+        let ast = ast::Block(vec![ast::BlockItem::Stmt(ast::Stmt::Return(Some(
+            ast::Expr::Literal(ast::Literal::Int(2)),
+        )))]);
         let mut counter = 0;
         let mut make_temp_var = Function::make_temp_var(Rc::new("test".to_string()), &mut counter);
         let actual = Instruction::parse_with(&ast, &mut make_temp_var);
@@ -597,10 +603,12 @@ mod tests {
 
     #[test]
     fn test_return_unary() {
-        let ast = ast::Block(vec![ast::BlockItem::Stmt(ast::Stmt::Return(Some(ast::Expr::Unary {
-            op: ast::UnaryOp::Complement,
-            expr: Box::new(ast::Expr::Literal(ast::Literal::Int(2))),
-        })))]);
+        let ast = ast::Block(vec![ast::BlockItem::Stmt(ast::Stmt::Return(Some(
+            ast::Expr::Unary {
+                op: ast::UnaryOp::Complement,
+                expr: Box::new(ast::Expr::Literal(ast::Literal::Int(2))),
+            },
+        )))]);
         let mut counter = 0;
         let mut make_temp_var = Function::make_temp_var(Rc::new("test".to_string()), &mut counter);
         let actual = Instruction::parse_with(&ast, &mut make_temp_var);
@@ -616,16 +624,18 @@ mod tests {
     }
     #[test]
     fn test_return_nested_unary() {
-        let ast = ast::Block(vec![ast::BlockItem::Stmt(ast::Stmt::Return(Some(ast::Expr::Unary {
-            op: ast::UnaryOp::Negate,
-            expr: Box::new(ast::Expr::Unary {
-                op: ast::UnaryOp::Complement,
+        let ast = ast::Block(vec![ast::BlockItem::Stmt(ast::Stmt::Return(Some(
+            ast::Expr::Unary {
+                op: ast::UnaryOp::Negate,
                 expr: Box::new(ast::Expr::Unary {
-                    op: ast::UnaryOp::Negate,
-                    expr: Box::new(ast::Expr::Literal(ast::Literal::Int(2))),
+                    op: ast::UnaryOp::Complement,
+                    expr: Box::new(ast::Expr::Unary {
+                        op: ast::UnaryOp::Negate,
+                        expr: Box::new(ast::Expr::Literal(ast::Literal::Int(2))),
+                    }),
                 }),
-            }),
-        })))]);
+            },
+        )))]);
         let mut counter = 0;
         let mut make_temp_var = Function::make_temp_var(Rc::new("test".to_string()), &mut counter);
         let actual = Instruction::parse_with(&ast, &mut make_temp_var);

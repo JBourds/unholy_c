@@ -274,36 +274,26 @@ impl Factor {
     pub fn parse<'a>(tokens: &'a [Token<'a>]) -> Result<(Expr, &'a [Token<'a>])> {
         let check_for_postfix =
             |expr: Expr, tokens: &'a [Token<'a>]| match UnaryOp::consume_postfix(tokens) {
-                Ok((op, tokens)) => {
-                    if op.is_valid_for(&expr) {
-                        Ok((
-                            Expr::Unary {
-                                op,
-                                expr: Box::new(expr),
-                            },
-                            tokens,
-                        ))
-                    } else {
-                        bail!("Invalid op {:?} for expression {:?}", op, expr)
-                    }
-                }
+                Ok((op, tokens)) => Ok((
+                    Expr::Unary {
+                        op,
+                        expr: Box::new(expr),
+                    },
+                    tokens,
+                )),
                 _ => Ok((expr, tokens)),
             };
 
         match UnaryOp::consume_prefix(tokens) {
             Ok((op, tokens)) => {
                 let (expr, tokens) = Factor::parse(tokens)?;
-                if op.is_valid_for(&expr) {
-                    Ok((
-                        Expr::Unary {
-                            op,
-                            expr: Box::new(expr),
-                        },
-                        tokens,
-                    ))
-                } else {
-                    bail!("Invalid op {:?} for expression {:?}", op, expr)
-                }
+                Ok((
+                    Expr::Unary {
+                        op,
+                        expr: Box::new(expr),
+                    },
+                    tokens,
+                ))
             }
             _ => match tokens {
                 [lexer::Token::Literal(_), ..] => {
@@ -530,17 +520,7 @@ pub enum UnaryOp {
 }
 
 impl UnaryOp {
-    #[allow(dead_code)]
-    fn is_postfix(&self) -> bool {
-        matches!(self, UnaryOp::PostInc | UnaryOp::PostDec)
-    }
-
-    #[allow(dead_code)]
-    fn is_prefix(&self) -> bool {
-        !matches!(self, UnaryOp::PostInc | UnaryOp::PostDec)
-    }
-
-    fn is_valid_for(&self, expr: &Expr) -> bool {
+    pub fn is_valid_for(&self, expr: &Expr) -> bool {
         !matches!(
             self,
             UnaryOp::PreInc | UnaryOp::PreDec | UnaryOp::PostInc | UnaryOp::PostDec

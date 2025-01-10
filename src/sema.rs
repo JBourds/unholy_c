@@ -103,10 +103,16 @@ fn resolve_expr(
             }
         }
         ast::Expr::Literal(lit) => Ok(ast::Expr::Literal(*lit)),
-        ast::Expr::Unary { op, expr } => Ok(ast::Expr::Unary {
-            op: *op,
-            expr: Box::new(resolve_expr(expr, variable_map)?),
-        }),
+        ast::Expr::Unary { op, expr } => {
+            if op.is_valid_for(expr) {
+                Ok(ast::Expr::Unary {
+                    op: *op,
+                    expr: Box::new(resolve_expr(expr, variable_map)?),
+                })
+            } else {
+                bail!("Op {:?} is invalid for expression {:?}", op, expr)
+            }
+        }
         ast::Expr::Binary { op, left, right } => Ok(ast::Expr::Binary {
             op: *op,
             left: Box::new(resolve_expr(left, variable_map)?),

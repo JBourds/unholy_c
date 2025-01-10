@@ -530,10 +530,12 @@ pub enum UnaryOp {
 }
 
 impl UnaryOp {
+    #[allow(dead_code)]
     fn is_postfix(&self) -> bool {
         matches!(self, UnaryOp::PostInc | UnaryOp::PostDec)
     }
 
+    #[allow(dead_code)]
     fn is_prefix(&self) -> bool {
         !matches!(self, UnaryOp::PostInc | UnaryOp::PostDec)
     }

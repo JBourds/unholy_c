@@ -149,42 +149,48 @@ impl Expr {
                 } = Expr::parse_with(expr.as_ref(), make_temp_var);
                 let dst = match op {
                     ast::UnaryOp::PreInc => {
-                        instructions.push(Instruction::Binary { 
-                            op: BinaryOp::Add, 
-                            src1: val.clone(), 
-                            src2: Val::Constant(1), 
-                            dst: val.clone() 
+                        instructions.push(Instruction::Binary {
+                            op: BinaryOp::Add,
+                            src1: val.clone(),
+                            src2: Val::Constant(1),
+                            dst: val.clone(),
                         });
                         val.clone()
                     }
                     ast::UnaryOp::PostInc => {
                         let dst = Val::Var(make_temp_var().into());
-                        instructions.push(Instruction::Copy { src: val.clone(), dst: dst.clone() });
-                        instructions.push(Instruction::Binary { 
-                            op: BinaryOp::Add, 
-                            src1: val.clone(), 
-                            src2: Val::Constant(1), 
-                            dst: val.clone() 
+                        instructions.push(Instruction::Copy {
+                            src: val.clone(),
+                            dst: dst.clone(),
+                        });
+                        instructions.push(Instruction::Binary {
+                            op: BinaryOp::Add,
+                            src1: val.clone(),
+                            src2: Val::Constant(1),
+                            dst: val.clone(),
                         });
                         dst
                     }
                     ast::UnaryOp::PreDec => {
-                        instructions.push(Instruction::Binary { 
-                            op: BinaryOp::Subtract, 
-                            src1: val.clone(), 
-                            src2: Val::Constant(1), 
-                            dst: val.clone() 
+                        instructions.push(Instruction::Binary {
+                            op: BinaryOp::Subtract,
+                            src1: val.clone(),
+                            src2: Val::Constant(1),
+                            dst: val.clone(),
                         });
                         val.clone()
                     }
                     ast::UnaryOp::PostDec => {
                         let dst = Val::Var(make_temp_var().into());
-                        instructions.push(Instruction::Copy { src: val.clone(), dst: dst.clone() });
-                        instructions.push(Instruction::Binary { 
-                            op: BinaryOp::Subtract, 
-                            src1: val.clone(), 
-                            src2: Val::Constant(1), 
-                            dst: val.clone() 
+                        instructions.push(Instruction::Copy {
+                            src: val.clone(),
+                            dst: dst.clone(),
+                        });
+                        instructions.push(Instruction::Binary {
+                            op: BinaryOp::Subtract,
+                            src1: val.clone(),
+                            src2: Val::Constant(1),
+                            dst: val.clone(),
                         });
                         dst
                     }
@@ -291,26 +297,27 @@ impl Expr {
                     }
                 } else if let Some(op) = op.compound_op() {
                     if let ast::Expr::Var(dst) = left.as_ref() {
-                        let binary = ast::Expr::Binary { 
-                            op, 
-                            left: left.clone(), 
-                            right: right.clone(), 
+                        let binary = ast::Expr::Binary {
+                            op,
+                            left: left.clone(),
+                            right: right.clone(),
                         };
                         let Self {
                             mut instructions,
                             val: src,
                         } = Self::parse_with(&binary, make_temp_var);
-                        
-                        instructions.push(Instruction::Copy { 
-                            src, 
-                            dst: Val::Var(Rc::clone(dst)) 
+
+                        instructions.push(Instruction::Copy {
+                            src,
+                            dst: Val::Var(Rc::clone(dst)),
                         });
                         Self {
                             instructions,
-                            val: Val::Var(Rc::clone(dst))
+                            val: Val::Var(Rc::clone(dst)),
                         }
-                    } else { panic!("Cannot use compound assignment on non-variable value.") }
-
+                    } else {
+                        panic!("Cannot use compound assignment on non-variable value.")
+                    }
                 } else {
                     let Self {
                         mut instructions,
@@ -334,7 +341,6 @@ impl Expr {
                         instructions,
                         val: dst,
                     }
-
                 }
             }
             ast::Expr::Var(name) => Self {
@@ -391,7 +397,7 @@ impl From<&ast::UnaryOp> for UnaryOp {
             ast::UnaryOp::Complement => Self::Complement,
             ast::UnaryOp::Negate => Self::Negate,
             ast::UnaryOp::Not => Self::Not,
-            _ => unreachable!()
+            _ => unreachable!(),
         }
     }
 }

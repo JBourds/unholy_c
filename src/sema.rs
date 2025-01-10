@@ -5,7 +5,7 @@ use anyhow::{bail, Result};
 
 pub fn validate<'a>(program: &ast::Program<'a>) -> Result<ast::Program<'a>> {
     let valid_function = validate_function(&program.function)?;
-    Ok(ast::Program {
+    validate_gotos(&ast::Program {
         function: valid_function,
     })
 }
@@ -96,6 +96,8 @@ fn resolve_stmt(
                 .map(Box::new),
         }),
         ast::Stmt::Null => Ok(ast::Stmt::Null),
+        ast::Stmt::Goto(label) => Ok(ast::Stmt::Goto(Rc::clone(label))),
+        ast::Stmt::Label(label) => Ok(ast::Stmt::Label(Rc::clone(label))),
     }
 }
 
@@ -146,5 +148,112 @@ fn resolve_expr(
             then: Box::new(resolve_expr(then, variable_map)?),
             r#else: Box::new(resolve_expr(r#else, variable_map)?),
         }),
+    }
+}
+
+pub fn validate_gotos<'a>(program: &ast::Program<'a>) -> Result<ast::Program<'a>> {
+    let mut label_map = HashMap::new();
+
+    let mut new_blocks = Vec::with_capacity(program.function.items.len());
+
+    let mut last_thing_was_a_label = (false, false);
+    for block_item in program.function.items.iter() {
+        last_thing_was_a_label = match block_item {
+            ast::BlockItem::Stmt(ast::Stmt::Label(_)) => (last_thing_was_a_label.1, true),
+            _ => (last_thing_was_a_label.1, false),
+        };
+
+        let fixed = match block_item {
+            ast::BlockItem::Stmt(stmt) => ast::BlockItem::Stmt(resolve_gotos_stmt(
+                program.function.name,
+                stmt,
+                &mut label_map,
+            )?),
+            _ if last_thing_was_a_label.0 => bail!("A label most be followed by a statement, not expression. To get around this, add a null statement i.e: (label: ;)"),
+            _ => block_item.clone(),
+        };
+        new_blocks.push(fixed);
+    }
+    if last_thing_was_a_label.1 {
+        bail!("Label must be followed by a statement. To get around this, add a null statement i.e: (label: ;)")
+    }
+
+    let mut new_blocks1 = Vec::with_capacity(new_blocks.len());
+    for block_item in new_blocks.into_iter() {
+        let fixed = match block_item {
+            ast::BlockItem::Stmt(stmt) => {
+                ast::BlockItem::Stmt(validate_goto_stmt(&stmt, &label_map)?)
+            }
+            _ => block_item.clone(),
+        };
+        new_blocks1.push(fixed);
+    }
+
+    Ok(ast::Program {
+        function: ast::Function {
+            ret_t: program.function.ret_t,
+            name: program.function.name,
+            signature: program.function.signature.clone(),
+            items: new_blocks1,
+        },
+    })
+}
+
+pub fn resolve_gotos_stmt(
+    func_name: &str,
+    stmt: &ast::Stmt,
+    label_map: &mut HashMap<Rc<String>, Rc<String>>,
+) -> Result<ast::Stmt> {
+    match stmt {
+        ast::Stmt::If {
+            condition,
+            then,
+            r#else,
+        } => Ok(ast::Stmt::If {
+            condition: condition.clone(),
+            then: Box::new(resolve_gotos_stmt(func_name, then, label_map)?),
+            r#else: match r#else {
+                Some(r#else) => Some(Box::new(resolve_gotos_stmt(func_name, r#else, label_map)?)),
+                None => None,
+            },
+        }),
+        ast::Stmt::Label(name) => {
+            if label_map.contains_key(name) {
+                bail!("Duplicate labels {name}");
+            } else {
+                let new_name = Rc::new(format!("{func_name}.{name}"));
+                label_map.insert(Rc::clone(name), Rc::clone(&new_name));
+                Ok(ast::Stmt::Label(new_name))
+            }
+        }
+        _ => Ok(stmt.clone()),
+    }
+}
+
+pub fn validate_goto_stmt(
+    stmt: &ast::Stmt,
+    label_map: &HashMap<Rc<String>, Rc<String>>,
+) -> Result<ast::Stmt> {
+    match stmt {
+        ast::Stmt::If {
+            condition,
+            then,
+            r#else,
+        } => Ok(ast::Stmt::If {
+            condition: condition.clone(),
+            then: Box::new(validate_goto_stmt(then, label_map)?),
+            r#else: match r#else {
+                Some(r#else) => Some(Box::new(validate_goto_stmt(r#else, label_map)?)),
+                None => None,
+            },
+        }),
+        ast::Stmt::Goto(label) => {
+            if let Some(new_label) = label_map.get(label) {
+                Ok(ast::Stmt::Goto(Rc::clone(new_label)))
+            } else {
+                bail!("Goto label '{label}' does not exist");
+            }
+        }
+        _ => Ok(stmt.clone()),
     }
 }

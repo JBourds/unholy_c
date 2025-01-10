@@ -110,7 +110,7 @@ impl<'a> AstNode<'a> for Function<'a> {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum BlockItem {
     Stmt(Stmt),
     Decl(Declaration),
@@ -127,7 +127,7 @@ impl<'a> AstNode<'a> for BlockItem {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Declaration {
     pub typ: Type,
     pub name: Rc<String>,
@@ -175,6 +175,8 @@ pub enum Stmt {
         then: Box<Stmt>,
         r#else: Option<Box<Stmt>>,
     },
+    Goto(Rc<String>),
+    Label(Rc<String>),
     Null,
 }
 
@@ -192,6 +194,12 @@ impl<'a> AstNode<'a> for Stmt {
         };
         match tokens {
             [Token::Semi, tokens @ ..] => Ok((Self::Null, tokens)),
+            [Token::Goto, Token::Ident(name), Token::Semi, tokens @ ..] => {
+                Ok((Self::Goto(Rc::new(name.to_string())), tokens))
+            }
+            [Token::Ident(name), Token::Colon, tokens @ ..] => {
+                Ok((Self::Label(Rc::new(name.to_string())), tokens))
+            }
             [Token::Return, Token::Semi, tokens @ ..] => Ok((Self::Return(None), tokens)),
             [Token::Return, tokens @ ..] => {
                 let (expr, tokens) = comma_terminated_expr(tokens)?;

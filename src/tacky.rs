@@ -170,6 +170,8 @@ impl Instruction {
                     let Expr { instructions, .. } = Expr::parse_with(expr, make_temp_var);
                     instructions
                 }
+                ast::Stmt::Goto(label) => vec![Instruction::Jump(Rc::clone(label))],
+                ast::Stmt::Label(label) => vec![Instruction::Label(Rc::clone(label))],
             },
         }
     }

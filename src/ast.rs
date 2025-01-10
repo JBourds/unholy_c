@@ -166,7 +166,7 @@ impl<'a> AstNode<'a> for Declaration {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Stmt {
     Return(Option<Expr>),
     Expr(Expr),

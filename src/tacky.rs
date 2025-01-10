@@ -124,7 +124,48 @@ impl Instruction {
                     condition,
                     then,
                     r#else,
-                } => todo!(),
+                } => {
+                    let (else_label, end_label) = {
+                        let label = make_temp_var();
+                        // This isn't needed and can be simplified... To Bad!
+                        let Some((name, count)) = label.as_str().split_once('.') else {
+                            unreachable!("label should always be name.count");
+                        };
+                        let else_label = format!("{name}.{count}.else");
+                        let end_label = format!("{name}.{count}.end");
+                        (Rc::new(else_label), Rc::new(end_label))
+                    };
+                    let Expr {
+                        mut instructions,
+                        val,
+                    } = Expr::parse_with(condition, make_temp_var);
+
+                    instructions.push(Self::JumpIfZero {
+                        condition: val,
+                        target: Rc::clone(match r#else {
+                            Some(_) => &else_label,
+                            None => &end_label,
+                        }),
+                    });
+
+                    instructions.extend(Instruction::parse_with(
+                        &ast::BlockItem::Stmt((**then).clone()),
+                        make_temp_var,
+                    ));
+
+                    if let Some(r#else) = r#else {
+                        instructions.push(Instruction::Jump(Rc::clone(&end_label)));
+                        instructions.push(Instruction::Label(Rc::clone(&else_label)));
+                        instructions.extend(Instruction::parse_with(
+                            &ast::BlockItem::Stmt((**r#else).clone()),
+                            make_temp_var,
+                        ));
+                    }
+
+                    instructions.push(Instruction::Label(Rc::clone(&end_label)));
+
+                    instructions
+                }
                 ast::Stmt::Expr(expr) => {
                     let Expr { instructions, .. } = Expr::parse_with(expr, make_temp_var);
                     instructions
@@ -375,7 +416,60 @@ impl Expr {
                 condition,
                 then,
                 r#else,
-            } => todo!(),
+            } => {
+                let (result, e2_label, end_label) = {
+                    let label = make_temp_var();
+                    // This isn't needed and can be simplified... To Bad!
+                    let Some((name, count)) = label.as_str().split_once('.') else {
+                        unreachable!("label should always be name.count");
+                    };
+                    let e2_label = format!("{name}.{count}.e2");
+                    let end_label = format!("{name}.{count}.end");
+                    (Rc::new(label), Rc::new(e2_label), Rc::new(end_label))
+                };
+                let Expr {
+                    mut instructions,
+                    val,
+                } = Expr::parse_with(condition, make_temp_var);
+
+                instructions.push(Instruction::JumpIfZero {
+                    condition: val,
+                    target: Rc::clone(&e2_label),
+                });
+
+                let Expr {
+                    instructions: e1_instructions,
+                    val: e1_val,
+                } = Expr::parse_with(then, make_temp_var);
+
+                instructions.extend(e1_instructions);
+                instructions.push(Instruction::Copy {
+                    src: e1_val,
+                    dst: Val::Var(Rc::clone(&result)),
+                });
+
+                instructions.push(Instruction::Jump(Rc::clone(&end_label)));
+                instructions.push(Instruction::Label(Rc::clone(&e2_label)));
+
+                let Expr {
+                    instructions: e2_instructions,
+                    val: e2_val,
+                } = Expr::parse_with(r#else, make_temp_var);
+
+                instructions.extend(e2_instructions);
+
+                instructions.push(Instruction::Copy {
+                    src: e2_val,
+                    dst: Val::Var(Rc::clone(&result)),
+                });
+
+                instructions.push(Instruction::Label(end_label));
+
+                Self {
+                    instructions,
+                    val: Val::Var(Rc::clone(&result)),
+                }
+            }
         }
     }
 }

@@ -80,7 +80,21 @@ fn resolve_stmt(
             condition,
             then,
             r#else,
-        } => todo!(),
+        } => Ok(ast::Stmt::If {
+            condition: resolve_expr(condition, variable_map)?,
+            then: Box::new(resolve_stmt(then, variable_map)?),
+            r#else: r#else
+                .as_ref()
+                .map(Ok)
+                .map(
+                    |result_box_stmt: std::result::Result<&Box<ast::Stmt>, anyhow::Error>| {
+                        assert!(result_box_stmt.is_ok());
+                        resolve_stmt(&(result_box_stmt.unwrap()), variable_map)
+                    },
+                )
+                .transpose()?
+                .map(Box::new),
+        }),
         ast::Stmt::Null => Ok(ast::Stmt::Null),
     }
 }
@@ -127,6 +141,10 @@ fn resolve_expr(
             condition,
             then,
             r#else,
-        } => todo!(),
+        } => Ok(ast::Expr::Conditional {
+            condition: Box::new(resolve_expr(condition, variable_map)?),
+            then: Box::new(resolve_expr(then, variable_map)?),
+            r#else: Box::new(resolve_expr(r#else, variable_map)?),
+        }),
     }
 }

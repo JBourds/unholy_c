@@ -3,6 +3,10 @@ use std::{collections::HashMap, rc::Rc};
 use crate::ast;
 use anyhow::{bail, Result};
 
+// Frame entry consists of a bool for whether the variable value is from the
+// current scope as well as the string variable name
+type FrameEntry = (bool, Rc<String>);
+
 pub fn validate<'a>(program: &ast::Program<'a>) -> Result<ast::Program<'a>> {
     let valid_function = validate_function(&program.function)?;
     validate_gotos(&ast::Program {
@@ -18,39 +22,63 @@ fn validate_function<'a>(function: &ast::Function<'a>) -> Result<ast::Function<'
         count += 1;
         new_name
     };
-    let valid_items = function
-        .items
-        .iter()
-        .try_fold(Vec::new(), |mut items, block_item| {
-            items.push(validate_blockitem(
-                block_item,
-                &mut variable_map,
-                &mut unique_name_generator,
-            )?);
-            Ok::<Vec<ast::BlockItem>, anyhow::Error>(items)
-        })?;
+    let block = if let Some(block) = &function.block {
+        Some(validate_block(
+            block,
+            &mut variable_map,
+            &mut unique_name_generator,
+        )?)
+    } else {
+        None
+    };
 
     Ok(ast::Function {
         ret_t: function.ret_t,
         name: function.name,
         signature: function.signature.clone(),
-        items: valid_items,
+        block,
     })
+}
+
+fn validate_block(
+    block: &ast::Block,
+    variable_map: &mut HashMap<Rc<String>, FrameEntry>,
+    make_temporary: &mut impl FnMut(&str) -> String,
+) -> Result<ast::Block> {
+    let valid_items = block
+        .items()
+        .iter()
+        .try_fold(Vec::new(), |mut items, block_item| {
+            items.push(validate_blockitem(
+                block_item,
+                variable_map,
+                make_temporary,
+            )?);
+            Ok::<Vec<ast::BlockItem>, anyhow::Error>(items)
+        })?;
+    Ok(ast::Block(valid_items))
 }
 
 fn validate_blockitem(
     instruction: &ast::BlockItem,
-    variable_map: &mut HashMap<Rc<String>, Rc<String>>,
+    variable_map: &mut HashMap<Rc<String>, FrameEntry>,
     make_temporary: &mut impl FnMut(&str) -> String,
 ) -> Result<ast::BlockItem> {
     match instruction {
-        ast::BlockItem::Stmt(stmt) => Ok(ast::BlockItem::Stmt(resolve_stmt(stmt, variable_map)?)),
+        ast::BlockItem::Stmt(stmt) => Ok(ast::BlockItem::Stmt(resolve_stmt(
+            stmt,
+            variable_map,
+            make_temporary,
+        )?)),
         ast::BlockItem::Decl(ast::Declaration { typ, name, init }) => {
-            if variable_map.contains_key(name) {
+            if variable_map
+                .get(name)
+                .map_or(false, |(from_this_frame, _)| *from_this_frame)
+            {
                 bail!("Duplicate variable declaration '{name}'");
             }
             let unique_name = Rc::new(make_temporary(name));
-            variable_map.insert(Rc::clone(name), Rc::clone(&unique_name));
+            variable_map.insert(Rc::clone(name), (true, Rc::clone(&unique_name)));
 
             let init = match init {
                 Some(expr) => Some(resolve_expr(expr, variable_map)?),
@@ -68,7 +96,8 @@ fn validate_blockitem(
 
 fn resolve_stmt(
     stmt: &ast::Stmt,
-    variable_map: &HashMap<Rc<String>, Rc<String>>,
+    variable_map: &HashMap<Rc<String>, FrameEntry>,
+    make_temporary: &mut impl FnMut(&str) -> String,
 ) -> Result<ast::Stmt> {
     match stmt {
         ast::Stmt::Return(Some(expr)) => {
@@ -82,20 +111,31 @@ fn resolve_stmt(
             r#else,
         } => Ok(ast::Stmt::If {
             condition: resolve_expr(condition, variable_map)?,
-            then: Box::new(resolve_stmt(then, variable_map)?),
+            then: Box::new(resolve_stmt(then, variable_map, make_temporary)?),
             r#else: r#else
                 .as_ref()
                 .map(Ok)
                 .map(
                     |result_box_stmt: std::result::Result<&Box<ast::Stmt>, anyhow::Error>| {
                         assert!(result_box_stmt.is_ok());
-                        resolve_stmt(result_box_stmt.unwrap(), variable_map)
+                        resolve_stmt(result_box_stmt.unwrap(), variable_map, make_temporary)
                     },
                 )
                 .transpose()?
                 .map(Box::new),
         }),
         ast::Stmt::Null => Ok(ast::Stmt::Null),
+        ast::Stmt::Compound(block) => {
+            let mut new_map =
+                variable_map
+                    .iter()
+                    .fold(HashMap::new(), |mut map, (key, (_, var))| {
+                        map.insert(Rc::clone(key), (false, Rc::clone(var)));
+                        map
+                    });
+            let block = validate_block(block, &mut new_map, make_temporary)?;
+            Ok(ast::Stmt::Compound(block))
+        }
         ast::Stmt::Goto(label) => Ok(ast::Stmt::Goto(Rc::clone(label))),
         ast::Stmt::Label(label) => Ok(ast::Stmt::Label(Rc::clone(label))),
     }
@@ -103,7 +143,7 @@ fn resolve_stmt(
 
 fn resolve_expr(
     expr: &ast::Expr,
-    variable_map: &HashMap<Rc<String>, Rc<String>>,
+    variable_map: &HashMap<Rc<String>, FrameEntry>,
 ) -> Result<ast::Expr> {
     match expr {
         ast::Expr::Assignment { lvalue, rvalue } => {
@@ -117,7 +157,7 @@ fn resolve_expr(
             })
         }
         ast::Expr::Var(var) => {
-            if let Some(name) = variable_map.get(var) {
+            if let Some((_, name)) = variable_map.get(var) {
                 Ok(ast::Expr::Var(Rc::clone(name)))
             } else {
                 bail!("Undeclared variable '{var}'")
@@ -154,47 +194,52 @@ fn resolve_expr(
 pub fn validate_gotos<'a>(program: &ast::Program<'a>) -> Result<ast::Program<'a>> {
     let mut label_map = HashMap::new();
 
-    let mut new_blocks = Vec::with_capacity(program.function.items.len());
+    let block = if let Some(block) = &program.function.block {
+        let mut new_blocks = Vec::with_capacity(block.items().len());
 
-    let mut last_thing_was_a_label = (false, false);
-    for block_item in program.function.items.iter() {
-        last_thing_was_a_label = match block_item {
-            ast::BlockItem::Stmt(ast::Stmt::Label(_)) => (last_thing_was_a_label.1, true),
-            _ => (last_thing_was_a_label.1, false),
-        };
+        let mut last_thing_was_a_label = (false, false);
+        for block_item in block.items().iter() {
+            last_thing_was_a_label = match block_item {
+                ast::BlockItem::Stmt(ast::Stmt::Label(_)) => (last_thing_was_a_label.1, true),
+                _ => (last_thing_was_a_label.1, false),
+            };
 
-        let fixed = match block_item {
-            ast::BlockItem::Stmt(stmt) => ast::BlockItem::Stmt(resolve_gotos_stmt(
-                program.function.name,
-                stmt,
-                &mut label_map,
-            )?),
-            _ if last_thing_was_a_label.0 => bail!("A label most be followed by a statement, not expression. To get around this, add a null statement i.e: (label: ;)"),
-            _ => block_item.clone(),
-        };
-        new_blocks.push(fixed);
-    }
-    if last_thing_was_a_label.1 {
-        bail!("Label must be followed by a statement. To get around this, add a null statement i.e: (label: ;)")
-    }
+            let fixed = match block_item {
+                ast::BlockItem::Stmt(stmt) => ast::BlockItem::Stmt(resolve_gotos_stmt(
+                    program.function.name,
+                    stmt,
+                    &mut label_map,
+                )?),
+                _ if last_thing_was_a_label.0 => bail!("A label most be followed by a statement, not expression. To get around this, add a null statement i.e: (label: ;)"),
+                _ => block_item.clone(),
+            };
+            new_blocks.push(fixed);
+        }
+        if last_thing_was_a_label.1 {
+            bail!("Label must be followed by a statement. To get around this, add a null statement i.e: (label: ;)")
+        }
 
-    let mut new_blocks1 = Vec::with_capacity(new_blocks.len());
-    for block_item in new_blocks.into_iter() {
-        let fixed = match block_item {
-            ast::BlockItem::Stmt(stmt) => {
-                ast::BlockItem::Stmt(validate_goto_stmt(&stmt, &label_map)?)
-            }
-            _ => block_item.clone(),
-        };
-        new_blocks1.push(fixed);
-    }
+        let mut new_blocks1 = Vec::with_capacity(new_blocks.len());
+        for block_item in new_blocks.into_iter() {
+            let fixed = match block_item {
+                ast::BlockItem::Stmt(stmt) => {
+                    ast::BlockItem::Stmt(validate_goto_stmt(&stmt, &label_map)?)
+                }
+                _ => block_item.clone(),
+            };
+            new_blocks1.push(fixed);
+        }
+        Some(ast::Block(new_blocks1))
+    } else {
+        None
+    };
 
     Ok(ast::Program {
         function: ast::Function {
             ret_t: program.function.ret_t,
             name: program.function.name,
             signature: program.function.signature.clone(),
-            items: new_blocks1,
+            block,
         },
     })
 }

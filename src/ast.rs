@@ -42,7 +42,7 @@ pub struct Function<'a> {
     pub ret_t: Type,
     pub name: &'a str,
     pub signature: Vec<(Type, Option<&'a str>)>,
-    pub items: Vec<BlockItem>,
+    pub block: Option<Block>,
 }
 
 impl<'a> AstNode<'a> for Function<'a> {
@@ -51,8 +51,8 @@ impl<'a> AstNode<'a> for Function<'a> {
             .context("No return type indicated for function. Add a return type, or mark the function as returning \"void\" to signal that it returns nothing.")?;
         if let [Token::Ident(name), Token::LParen, tokens @ ..] = tokens {
             let mut signature = vec![];
-            let mut remaining = match tokens {
-                [Token::Void, Token::RParen, Token::LSquirly, tokens @ ..] => tokens,
+            let remaining = match tokens {
+                [Token::Void, Token::RParen, tokens @ ..] => tokens,
                 [Token::Void, t, ..] => {
                     bail!("Expected closing parentheses but found \"{}\"", t)
                 }
@@ -79,31 +79,38 @@ impl<'a> AstNode<'a> for Function<'a> {
                     }
 
                     match remaining {
-                        [Token::RParen, Token::LSquirly, tokens @ ..] => tokens,
+                        [Token::RParen, tokens @ ..] => tokens,
                         [t, ..] => bail!("Expected a closing parentheses but found {}", t),
                         [] => bail!("Expected a closing parentheses but found no more tokens."),
                     }
                 }
             };
 
-            let mut items = vec![];
-            while let Ok((item, tokens)) = BlockItem::consume(remaining) {
-                remaining = tokens;
-                items.push(item);
-            }
-            if let Some(Token::RSquirly) = remaining.first() {
-                Ok((
-                    Self {
-                        ret_t,
-                        name,
-                        signature,
-                        items,
-                    },
-                    &remaining[1..],
-                ))
-            } else {
-                bail!("No closing brace for the function. Add a \"}}\" after the statements in the function body. Found tokens:\n{:#?}", remaining)
-            }
+            let (block, tokens) = match remaining {
+                [Token::Semi, tokens @ ..] => (None, tokens),
+                [Token::LSquirly, ..] => {
+                    let (block, tokens) = Block::consume(remaining)
+                        .context("Failed to parse block within function definition.")?;
+                    (Some(block), tokens)
+                }
+                [token, ..] => bail!(
+                    "Expected \";\" or \"{{\" after function signature but found token: {}.",
+                    token
+                ),
+                [] => bail!(
+                    "Expected \";\" or \"{{\" after function signature but found no more tokens."
+                ),
+            };
+
+            Ok((
+                Self {
+                    ret_t,
+                    name,
+                    signature,
+                    block,
+                },
+                tokens,
+            ))
         } else {
             bail!("Failed to parse function.")
         }
@@ -167,7 +174,38 @@ impl<'a> AstNode<'a> for Declaration {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+pub struct Block(pub Vec<BlockItem>);
+impl Block {
+    pub fn items(&self) -> &Vec<BlockItem> {
+        &self.0
+    }
+}
+
+impl<'a> AstNode<'a> for Block {
+    fn consume(tokens: &'a [Token<'a>]) -> Result<(Self, &'a [Token<'a>])> {
+        match tokens.first() {
+            Some(Token::LSquirly) => {
+                let mut remaining = &tokens[1..];
+                let mut items = vec![];
+                while let Ok((item, tokens)) = BlockItem::consume(remaining) {
+                    remaining = tokens;
+                    items.push(item);
+                }
+                match remaining.first() {
+                    Some(Token::RSquirly) => Ok((Self(items), &remaining[1..])),
+                    Some(token) => bail!("Expected \"}}\" to end block but found {}", token),
+                    None => bail!("Missing \"}}\" to end block."),
+                }
+            }
+            Some(token) => bail!("Expected \"{{\" to start block but found {}", token),
+            None => bail!("Missing \"{{\" to start block."),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub enum Stmt {
+    Compound(Block),
     Return(Option<Expr>),
     Expr(Expr),
     If {
@@ -193,6 +231,10 @@ impl<'a> AstNode<'a> for Stmt {
             }
         };
         match tokens {
+            [Token::LSquirly, ..] => {
+                let (block, tokens) = Block::consume(tokens)?;
+                Ok((Self::Compound(block), tokens))
+            }
             [Token::Semi, tokens @ ..] => Ok((Self::Null, tokens)),
             [Token::Goto, Token::Ident(name), Token::Semi, tokens @ ..] => {
                 Ok((Self::Goto(Rc::new(name.to_string())), tokens))
@@ -648,9 +690,9 @@ mod tests {
                 ret_t: Type::Int,
                 name: "main",
                 signature: vec![],
-                items: vec![BlockItem::Stmt(Stmt::Return(Some(Expr::Literal(
-                    Literal::Int(2),
-                ))))],
+                block: Some(Block(vec![BlockItem::Stmt(Stmt::Return(Some(
+                    Expr::Literal(Literal::Int(2)),
+                )))])),
             },
         };
         assert_eq!(expected, program);
@@ -685,9 +727,9 @@ mod tests {
                 (Type::Int, None),
                 (Type::Int, Some("z")),
             ],
-            items: vec![BlockItem::Stmt(Stmt::Return(Some(Expr::Literal(
-                Literal::Int(2),
-            ))))],
+            block: Some(Block(vec![BlockItem::Stmt(Stmt::Return(Some(
+                Expr::Literal(Literal::Int(2)),
+            )))])),
         };
         assert_eq!(expected, function);
     }
@@ -724,7 +766,7 @@ mod tests {
         let expected = Program {
             function: Function {
                 name: "main",
-                items: vec![],
+                block: Some(Block(vec![])),
                 signature: vec![],
                 ret_t: Type::Int,
             },
@@ -870,13 +912,15 @@ mod tests {
                 ret_t: Type::Int,
                 name: "main",
                 signature: vec![],
-                items: vec![BlockItem::Stmt(Stmt::Return(Some(Expr::Unary {
-                    op: UnaryOp::Negate,
-                    expr: Box::new(Expr::Unary {
+                block: Some(Block(vec![BlockItem::Stmt(Stmt::Return(Some(
+                    Expr::Unary {
                         op: UnaryOp::Negate,
-                        expr: Box::new(Expr::Literal(Literal::Int(2))),
-                    }),
-                })))],
+                        expr: Box::new(Expr::Unary {
+                            op: UnaryOp::Negate,
+                            expr: Box::new(Expr::Literal(Literal::Int(2))),
+                        }),
+                    },
+                )))])),
             },
         };
         assert_eq!(expected, program);

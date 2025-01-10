@@ -170,13 +170,14 @@ impl<'a> AstNode<'a> for Declaration {
 pub enum Stmt {
     Return(Option<Expr>),
     Expr(Expr),
+    If {
+        condition: Expr,
+        then: Box<Stmt>,
+        r#else: Option<Box<Stmt>>,
+    },
     Null,
-    //If {
-    //    condition: Expr<'a>,
-    //    then_stmt: Box<Stmt<'a>>,
-    //    else_stmt: Option<Box<Stmt<'a>>>,
-    //},
 }
+
 impl<'a> AstNode<'a> for Stmt {
     fn consume(tokens: &'a [Token<'a>]) -> Result<(Stmt, &'a [Token<'a>])> {
         let comma_terminated_expr = |tokens| {
@@ -195,6 +196,34 @@ impl<'a> AstNode<'a> for Stmt {
             [Token::Return, tokens @ ..] => {
                 let (expr, tokens) = comma_terminated_expr(tokens)?;
                 Ok((Self::Return(Some(expr)), tokens))
+            }
+            [Token::If, Token::LParen, tokens @ ..] => {
+                let (condition, tokens) = Expr::parse(tokens, 0)
+                    .context("Failed to parse expression for if statement conditional")?;
+                let tokens = if let Some(Token::RParen) = tokens.first() {
+                    &tokens[1..]
+                } else {
+                    bail!("If statment conditional must be closed with right paren");
+                };
+                let (then, tokens) =
+                    Stmt::consume(tokens).context("Failed to parse then branch")?;
+
+                let (r#else, tokens) = if let Some(Token::Else) = tokens.first() {
+                    let (stmt, tokens) =
+                        Stmt::consume(&tokens[1..]).context("Failed to parse else branch")?;
+                    (Some(stmt), tokens)
+                } else {
+                    (None, tokens)
+                };
+
+                Ok((
+                    Self::If {
+                        condition,
+                        then: Box::new(then),
+                        r#else: r#else.map(Box::new),
+                    },
+                    tokens,
+                ))
             }
             _ => {
                 let (expr, tokens) = comma_terminated_expr(tokens)?;
@@ -220,6 +249,11 @@ pub enum Expr {
         op: BinaryOp,
         left: Box<Expr>,
         right: Box<Expr>,
+    },
+    Conditional {
+        condition: Box<Expr>,
+        then: Box<Expr>,
+        r#else: Box<Expr>,
     },
 }
 
@@ -253,6 +287,30 @@ impl Expr {
                     lvalue: Box::new(left),
                     rvalue: Box::new(right),
                 };
+                tokens = tokens_inner;
+            } else if operator == BinaryOp::Ternary {
+                let parse_conditional_middle =
+                    |tokens: &'a [Token<'_>]| -> Result<(Expr, &'a [Token<'_>])> {
+                        let (expr, tokens) = Expr::parse(tokens, 0)
+                            .context("Failed to parse middle expression in ternary")?;
+
+                        let tokens = match tokens.first() {
+                            Some(Token::Colon) => &tokens[1..],
+                            _ => bail!("Missing closing colon in ternary"),
+                        };
+
+                        Ok((expr, tokens))
+                    };
+
+                let (middle, tokens_inner) = parse_conditional_middle(tokens_inner)?;
+                let (right, tokens_inner) = Expr::parse(tokens_inner, operator.precedence())?;
+
+                left = Expr::Conditional {
+                    condition: Box::new(left),
+                    then: Box::new(middle),
+                    r#else: Box::new(right),
+                };
+
                 tokens = tokens_inner;
             } else {
                 let (right, tokens_inner) = Expr::parse(tokens_inner, operator.precedence() + 1)?;
@@ -391,6 +449,7 @@ pub enum BinaryOp {
     XorAssign,
     LShiftAssign,
     RShiftAssign,
+    Ternary,
 }
 
 impl BinaryOp {
@@ -466,6 +525,7 @@ impl BinaryOp {
             Self::XorAssign => 1,
             Self::LShiftAssign => 1,
             Self::RShiftAssign => 1,
+            Self::Ternary => 3,
         }
     }
 
@@ -503,6 +563,7 @@ impl BinaryOp {
             Token::LShiftAssign => Ok(Some((BinaryOp::LShiftAssign, tokens))),
             Token::RShiftAssign => Ok(Some((BinaryOp::RShiftAssign, tokens))),
             Token::XorAssign => Ok(Some((BinaryOp::XorAssign, tokens))),
+            Token::Ternary => Ok(Some((BinaryOp::Ternary, tokens))),
             _ => Ok(None),
         }
     }

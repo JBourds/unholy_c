@@ -1,5 +1,5 @@
 use crate::lexer::{self, Token};
-use anyhow::{bail, Context, Result};
+use anyhow::{bail, Context, Error, Result};
 use std::rc::Rc;
 
 pub fn parse<'a>(tokens: &'a [Token]) -> Result<Program<'a>> {
@@ -272,49 +272,57 @@ struct Factor;
 
 impl Factor {
     pub fn parse<'a>(tokens: &'a [Token<'a>]) -> Result<(Expr, &'a [Token<'a>])> {
-        match tokens {
-            [lexer::Token::Literal(_), ..] => {
-                let (lit, tokens) = Literal::consume(tokens)?;
-                Ok((Expr::Literal(lit), tokens))
-            }
-            [lexer::Token::Ident(s), tokens @ ..] => {
-                Ok((Expr::Var(Rc::new(String::from(*s))), tokens))
-            }
-            _ => {
-                if let Ok((unary, tokens)) = UnaryOp::consume(tokens) {
-                    // Handling for prefix/postfix unary operators
-                    let (expr, tokens) = if unary.is_prefix() {
-                        Factor::parse(tokens)
-                            .context("Parsing grammer rule: <unop> <factor> failed")?
-                    } else if let Some(lexer::Token::Ident(name)) = tokens.first() {
-                        let lvalue = Expr::Var(Rc::new(String::from(*name)));
-                        (lvalue, &tokens[2..])
+        let check_for_postfix =
+            |expr: Expr, tokens: &'a [Token<'a>]| match UnaryOp::consume_postfix(tokens) {
+                Ok((op, tokens)) => {
+                    if op.is_valid_for(&expr) {
+                        Ok((
+                            Expr::Unary {
+                                op,
+                                expr: Box::new(expr),
+                            },
+                            tokens,
+                        ))
                     } else {
-                        unreachable!("Token stream should still contain lvalue and operator when parsing postfix operator. Logic error!")
-                    };
+                        bail!("Invalid op {:?} for expression {:?}", op, expr)
+                    }
+                }
+                _ => Ok((expr, tokens)),
+            };
+
+        match UnaryOp::consume_prefix(tokens) {
+            Ok((op, tokens)) => {
+                let (expr, tokens) = Factor::parse(tokens)?;
+                if op.is_valid_for(&expr) {
                     Ok((
                         Expr::Unary {
-                            op: unary,
+                            op,
                             expr: Box::new(expr),
                         },
                         tokens,
                     ))
                 } else {
-                    // We have 1 more rule to try to parse here
-                    // "(" <exp> ")"
-                    match tokens {
-                        [Token::LParen, tokens @ ..] => {
-                            let (expr, tokens) = Expr::parse(tokens, 0)
-                                .context("Parsing grammer rule: \"(\" <exp> \")\" failed")?;
-                            match tokens {
-                                [Token::RParen, tokens @ ..] => Ok((expr, tokens)),
-                                _ => bail!("Could not find matching right parenthesis"),
-                            }
-                        }
-                        _ => bail!("Could not parse valid expression."),
-                    }
+                    bail!("Invalid op {:?} for expression {:?}", op, expr)
                 }
             }
+            _ => match tokens {
+                [lexer::Token::Literal(_), ..] => {
+                    let (lit, tokens) = Literal::consume(tokens)?;
+                    Ok::<(Expr, &[lexer::Token<'_>]), Error>((Expr::Literal(lit), tokens))
+                }
+                [lexer::Token::Ident(s), tokens @ ..] => {
+                    check_for_postfix(Expr::Var(Rc::new(String::from(*s))), tokens)
+                }
+                [Token::LParen, tokens @ ..] => {
+                    let (expr, tokens) = Expr::parse(tokens, 0)
+                        .context("Parsing grammer rule: \"(\" <exp> \")\" failed")?;
+                    match tokens {
+                        [Token::RParen, tokens @ ..] => check_for_postfix(expr, tokens),
+                        _ => bail!("Could not find matching right parenthesis"),
+                    }
+                }
+                _ => bail!("Could not match valid grammar rule."),
+            },
         }
     }
 }
@@ -523,13 +531,15 @@ impl UnaryOp {
     fn is_prefix(&self) -> bool {
         !matches!(self, UnaryOp::PostInc | UnaryOp::PostDec)
     }
-}
 
-impl<'a> AstNode<'a> for UnaryOp {
-    fn consume(tokens: &'a [Token<'a>]) -> Result<(Self, &'a [Token<'a>])>
-    where
-        Self: Sized,
-    {
+    fn is_valid_for(&self, expr: &Expr) -> bool {
+        !matches!(
+            self,
+            UnaryOp::PreInc | UnaryOp::PreDec | UnaryOp::PostInc | UnaryOp::PostDec
+        ) || matches!(expr, Expr::Var(_))
+    }
+
+    fn consume_prefix<'a>(tokens: &'a [Token<'a>]) -> Result<(Self, &'a [Token<'a>])> {
         if let Some(token) = tokens.first() {
             match tokens {
                 [Token::Minus, tokens @ ..] => Ok((Self::Negate, tokens)),
@@ -537,9 +547,18 @@ impl<'a> AstNode<'a> for UnaryOp {
                 [Token::Not, tokens @ ..] => Ok((Self::Not, tokens)),
                 [Token::Increment, tokens @ ..] => Ok((Self::PreInc, tokens)),
                 [Token::Decrement, tokens @ ..] => Ok((Self::PreDec, tokens)),
-                // Needs special handling because it requires lookahead
-                [Token::Ident(_), Token::Increment, ..] => Ok((Self::PostInc, tokens)),
-                [Token::Ident(_), Token::Decrement, ..] => Ok((Self::PostDec, tokens)),
+                _ => bail!("Expected '-', '~', `++`, `--`, or '!', found '{}'", token),
+            }
+        } else {
+            bail!("No remaining tokens")
+        }
+    }
+
+    fn consume_postfix<'a>(tokens: &'a [Token<'a>]) -> Result<(Self, &'a [Token<'a>])> {
+        if let Some(token) = tokens.first() {
+            match tokens {
+                [Token::Increment, tokens @ ..] => Ok((Self::PostInc, tokens)),
+                [Token::Decrement, tokens @ ..] => Ok((Self::PostDec, tokens)),
                 _ => bail!("Expected '-', '~', `++`, `--`, or '!', found '{}'", token),
             }
         } else {

@@ -40,13 +40,12 @@ impl TryFrom<&ast::Function<'_>> for Function {
     //  there wil actually be a possibility of failure once we use all of the
     //  function information.
     fn try_from(node: &ast::Function<'_>) -> Result<Self> {
-        let ast::Function { name, items, .. } = node;
+        let ast::Function { name, block, .. } = node;
         let mut temp_var_counter = 0;
         let mut make_temp_var =
             Function::make_temp_var(Rc::new(name.to_string()), &mut temp_var_counter);
-        let mut instructions = items.iter().fold(Vec::new(), |mut instructions, item| {
-            instructions.extend(Instruction::parse_with(item, &mut make_temp_var));
-            instructions
+        let mut instructions = block.as_ref().map_or(vec![], |block| {
+            Instruction::parse_with(block, &mut make_temp_var)
         });
         // Temporary fix suggested by the book for the case where a function
         // is supposed to return something but does not.
@@ -89,91 +88,99 @@ pub enum Instruction {
 }
 
 impl Instruction {
-    fn parse_with(node: &ast::BlockItem, make_temp_var: &mut impl FnMut() -> String) -> Vec<Self> {
-        match node {
-            ast::BlockItem::Decl(decl) => {
-                if let Some(init) = &decl.init {
-                    let Expr {
-                        mut instructions,
-                        val: src,
-                    } = Expr::parse_with(init, make_temp_var);
-                    let dst = Val::Var(Rc::clone(&decl.name));
-                    instructions.push(Instruction::Copy {
-                        src,
-                        dst: dst.clone(),
-                    });
-                    instructions
-                } else {
-                    vec![]
+    fn parse_with(node: &ast::Block, make_temp_var: &mut impl FnMut() -> String) -> Vec<Self> {
+        let mut block_instructions = vec![];
+        for item in node.items().iter() {
+            match item {
+                ast::BlockItem::Decl(decl) => {
+                    if let Some(init) = &decl.init {
+                        let Expr {
+                            mut instructions,
+                            val: src,
+                        } = Expr::parse_with(init, make_temp_var);
+                        let dst = Val::Var(Rc::clone(&decl.name));
+                        instructions.push(Instruction::Copy {
+                            src,
+                            dst: dst.clone(),
+                        });
+                        block_instructions.extend(instructions);
+                    }
                 }
-            }
-            ast::BlockItem::Stmt(stmt) => match stmt {
-                ast::Stmt::Null => vec![],
-                ast::Stmt::Return(Some(expr)) => {
-                    let Expr {
-                        mut instructions,
-                        val,
-                    } = Expr::parse_with(expr, make_temp_var);
-                    instructions.push(Instruction::Return(Some(val)));
-                    instructions
-                }
-                ast::Stmt::Return(None) => {
-                    vec![Instruction::Return(None)]
-                }
-                ast::Stmt::If {
-                    condition,
-                    then,
-                    r#else,
-                } => {
-                    let (else_label, end_label) = {
-                        let label = make_temp_var();
-                        // This isn't needed and can be simplified... To Bad!
-                        let Some((name, count)) = label.as_str().split_once('.') else {
-                            unreachable!("label should always be name.count");
+                ast::BlockItem::Stmt(stmt) => match stmt {
+                    ast::Stmt::Null => {}
+                    ast::Stmt::Return(Some(expr)) => {
+                        let Expr {
+                            mut instructions,
+                            val,
+                        } = Expr::parse_with(expr, make_temp_var);
+                        instructions.push(Instruction::Return(Some(val)));
+                        block_instructions.extend(instructions);
+                    }
+                    ast::Stmt::Return(None) => {
+                        block_instructions.push(Instruction::Return(None));
+                    }
+                    ast::Stmt::Expr(expr) => {
+                        let Expr { instructions, .. } = Expr::parse_with(expr, make_temp_var);
+                        block_instructions.extend(instructions);
+                    }
+                    ast::Stmt::Compound(block) => {
+                        block_instructions.extend(Self::parse_with(block, make_temp_var));
+                    }
+                    ast::Stmt::Goto(label) => {
+                        block_instructions.push(Instruction::Jump(Rc::clone(label)));
+                    }
+                    ast::Stmt::Label(label) => {
+                        block_instructions.push(Instruction::Label(Rc::clone(label)));
+                    }
+                    ast::Stmt::If {
+                        condition,
+                        then,
+                        r#else,
+                    } => {
+                        let (else_label, end_label) = {
+                            let label = make_temp_var();
+                            // This isn't needed and can be simplified... To Bad!
+                            let Some((name, count)) = label.as_str().split_once('.') else {
+                                unreachable!("label should always be name.count");
+                            };
+                            let else_label = format!("{name}.{count}.else");
+                            let end_label = format!("{name}.{count}.end");
+                            (Rc::new(else_label), Rc::new(end_label))
                         };
-                        let else_label = format!("{name}.{count}.else");
-                        let end_label = format!("{name}.{count}.end");
-                        (Rc::new(else_label), Rc::new(end_label))
-                    };
-                    let Expr {
-                        mut instructions,
-                        val,
-                    } = Expr::parse_with(condition, make_temp_var);
+                        let Expr {
+                            mut instructions,
+                            val,
+                        } = Expr::parse_with(condition, make_temp_var);
 
-                    instructions.push(Self::JumpIfZero {
-                        condition: val,
-                        target: Rc::clone(match r#else {
-                            Some(_) => &else_label,
-                            None => &end_label,
-                        }),
-                    });
+                        instructions.push(Self::JumpIfZero {
+                            condition: val,
+                            target: Rc::clone(match r#else {
+                                Some(_) => &else_label,
+                                None => &end_label,
+                            }),
+                        });
 
-                    instructions.extend(Instruction::parse_with(
-                        &ast::BlockItem::Stmt((**then).clone()),
-                        make_temp_var,
-                    ));
-
-                    if let Some(r#else) = r#else {
-                        instructions.push(Instruction::Jump(Rc::clone(&end_label)));
-                        instructions.push(Instruction::Label(Rc::clone(&else_label)));
                         instructions.extend(Instruction::parse_with(
-                            &ast::BlockItem::Stmt((**r#else).clone()),
+                            &ast::Block(vec![ast::BlockItem::Stmt((**then).clone())]),
                             make_temp_var,
                         ));
+
+                        if let Some(r#else) = r#else {
+                            instructions.push(Instruction::Jump(Rc::clone(&end_label)));
+                            instructions.push(Instruction::Label(Rc::clone(&else_label)));
+                            instructions.extend(Instruction::parse_with(
+                                &ast::Block(vec![ast::BlockItem::Stmt((**r#else).clone())]),
+                                make_temp_var,
+                            ));
+                        }
+
+                        instructions.push(Instruction::Label(Rc::clone(&end_label)));
+                        block_instructions.extend(instructions);
                     }
-
-                    instructions.push(Instruction::Label(Rc::clone(&end_label)));
-
-                    instructions
-                }
-                ast::Stmt::Expr(expr) => {
-                    let Expr { instructions, .. } = Expr::parse_with(expr, make_temp_var);
-                    instructions
-                }
-                ast::Stmt::Goto(label) => vec![Instruction::Jump(Rc::clone(label))],
-                ast::Stmt::Label(label) => vec![Instruction::Label(Rc::clone(label))],
-            },
+                },
+            }
         }
+        block_instructions
     }
 }
 
@@ -584,9 +591,9 @@ mod tests {
 
     #[test]
     fn test_return_literal() {
-        let ast = ast::BlockItem::Stmt(ast::Stmt::Return(Some(ast::Expr::Literal(
-            ast::Literal::Int(2),
-        ))));
+        let ast = ast::Block(vec![ast::BlockItem::Stmt(ast::Stmt::Return(Some(
+            ast::Expr::Literal(ast::Literal::Int(2)),
+        )))]);
         let mut counter = 0;
         let mut make_temp_var = Function::make_temp_var(Rc::new("test".to_string()), &mut counter);
         let actual = Instruction::parse_with(&ast, &mut make_temp_var);
@@ -596,10 +603,12 @@ mod tests {
 
     #[test]
     fn test_return_unary() {
-        let ast = ast::BlockItem::Stmt(ast::Stmt::Return(Some(ast::Expr::Unary {
-            op: ast::UnaryOp::Complement,
-            expr: Box::new(ast::Expr::Literal(ast::Literal::Int(2))),
-        })));
+        let ast = ast::Block(vec![ast::BlockItem::Stmt(ast::Stmt::Return(Some(
+            ast::Expr::Unary {
+                op: ast::UnaryOp::Complement,
+                expr: Box::new(ast::Expr::Literal(ast::Literal::Int(2))),
+            },
+        )))]);
         let mut counter = 0;
         let mut make_temp_var = Function::make_temp_var(Rc::new("test".to_string()), &mut counter);
         let actual = Instruction::parse_with(&ast, &mut make_temp_var);
@@ -615,16 +624,18 @@ mod tests {
     }
     #[test]
     fn test_return_nested_unary() {
-        let ast = ast::BlockItem::Stmt(ast::Stmt::Return(Some(ast::Expr::Unary {
-            op: ast::UnaryOp::Negate,
-            expr: Box::new(ast::Expr::Unary {
-                op: ast::UnaryOp::Complement,
+        let ast = ast::Block(vec![ast::BlockItem::Stmt(ast::Stmt::Return(Some(
+            ast::Expr::Unary {
+                op: ast::UnaryOp::Negate,
                 expr: Box::new(ast::Expr::Unary {
-                    op: ast::UnaryOp::Negate,
-                    expr: Box::new(ast::Expr::Literal(ast::Literal::Int(2))),
+                    op: ast::UnaryOp::Complement,
+                    expr: Box::new(ast::Expr::Unary {
+                        op: ast::UnaryOp::Negate,
+                        expr: Box::new(ast::Expr::Literal(ast::Literal::Int(2))),
+                    }),
                 }),
-            }),
-        })));
+            },
+        )))]);
         let mut counter = 0;
         let mut make_temp_var = Function::make_temp_var(Rc::new("test".to_string()), &mut counter);
         let actual = Instruction::parse_with(&ast, &mut make_temp_var);

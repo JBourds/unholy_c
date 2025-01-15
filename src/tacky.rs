@@ -7,9 +7,9 @@ pub struct Program {
     pub function: Function,
 }
 
-impl TryFrom<&ast::Program<'_>> for Program {
+impl TryFrom<&ast::Program> for Program {
     type Error = anyhow::Error;
-    fn try_from(node: &ast::Program<'_>) -> Result<Self> {
+    fn try_from(node: &ast::Program) -> Result<Self> {
         Ok(Self {
             function: Function::try_from(&node.function)
                 .context("Failed to parse \"main\" function into TACKY representation")?,
@@ -33,13 +33,13 @@ impl Function {
     }
 }
 
-impl TryFrom<&ast::Function<'_>> for Function {
+impl TryFrom<&ast::Function> for Function {
     type Error = anyhow::Error;
     // TODO: Use the return type and arguments for something.
     //  This is a try_from even though it cannot fail right now, assuming that
     //  there wil actually be a possibility of failure once we use all of the
     //  function information.
-    fn try_from(node: &ast::Function<'_>) -> Result<Self> {
+    fn try_from(node: &ast::Function) -> Result<Self> {
         let ast::Function { name, block, .. } = node;
         let mut temp_var_counter = 0;
         let mut make_temp_var =

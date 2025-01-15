@@ -7,14 +7,14 @@ use anyhow::{bail, Result};
 // current scope as well as the string variable name
 type FrameEntry = (bool, Rc<String>);
 
-pub fn validate<'a>(program: &ast::Program<'a>) -> Result<ast::Program<'a>> {
+pub fn validate(program: &ast::Program) -> Result<ast::Program> {
     let valid_function = validate_function(&program.function)?;
     validate_gotos(&ast::Program {
         function: valid_function,
     })
 }
 
-fn validate_function<'a>(function: &ast::Function<'a>) -> Result<ast::Function<'a>> {
+fn validate_function(function: &ast::Function) -> Result<ast::Function> {
     let mut variable_map = HashMap::new();
     let mut count = 0;
     let mut unique_name_generator = move |name: &str| -> String {
@@ -34,7 +34,7 @@ fn validate_function<'a>(function: &ast::Function<'a>) -> Result<ast::Function<'
 
     Ok(ast::Function {
         ret_t: function.ret_t,
-        name: function.name,
+        name: Rc::clone(&function.name),
         signature: function.signature.clone(),
         block,
     })
@@ -191,7 +191,7 @@ fn resolve_expr(
     }
 }
 
-pub fn validate_gotos<'a>(program: &ast::Program<'a>) -> Result<ast::Program<'a>> {
+pub fn validate_gotos(program: &ast::Program) -> Result<ast::Program> {
     let mut label_map = HashMap::new();
 
     let block = if let Some(block) = &program.function.block {
@@ -206,7 +206,7 @@ pub fn validate_gotos<'a>(program: &ast::Program<'a>) -> Result<ast::Program<'a>
 
             let fixed = match block_item {
                 ast::BlockItem::Stmt(stmt) => ast::BlockItem::Stmt(resolve_gotos_stmt(
-                    program.function.name,
+                    &program.function.name,
                     stmt,
                     &mut label_map,
                 )?),
@@ -237,7 +237,7 @@ pub fn validate_gotos<'a>(program: &ast::Program<'a>) -> Result<ast::Program<'a>
     Ok(ast::Program {
         function: ast::Function {
             ret_t: program.function.ret_t,
-            name: program.function.name,
+            name: Rc::clone(&program.function.name),
             signature: program.function.signature.clone(),
             block,
         },
@@ -245,7 +245,7 @@ pub fn validate_gotos<'a>(program: &ast::Program<'a>) -> Result<ast::Program<'a>
 }
 
 pub fn resolve_gotos_stmt(
-    func_name: &str,
+    func_name: &Rc<String>,
     stmt: &ast::Stmt,
     label_map: &mut HashMap<Rc<String>, Rc<String>>,
 ) -> Result<ast::Stmt> {

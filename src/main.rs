@@ -87,8 +87,8 @@ fn preprocess(args: &Args) -> Result<&'static str> {
     Ok(contents.leak())
 }
 
-type LexTokens = &'static [lexer::Token<'static>];
-type AstNodes = &'static ast::Program<'static>;
+type LexTokens = &'static [lexer::Token];
+type AstNodes = &'static ast::Program;
 type AsmNodes = &'static codegen::Program;
 type TackyNodes = &'static tacky::Program;
 
@@ -97,8 +97,7 @@ fn lex_parse_codegen_tacky(
     contents: &'static str,
 ) -> Result<Option<(LexTokens, AstNodes, AsmNodes, TackyNodes)>> {
     // Lex
-    let tokens: &'static [lexer::Token<'static>] =
-        Box::leak(Box::new(lexer::Lexer::lex(contents)?));
+    let tokens: &'static [lexer::Token] = Box::leak(Box::new(lexer::Lexer::lex(contents)?));
 
     if args.lex {
         println!("Lexed tokens:\n{:#?}", tokens);
@@ -106,14 +105,14 @@ fn lex_parse_codegen_tacky(
     }
 
     // Parse
-    let ast: &'static ast::Program<'static> = Box::leak(Box::new(ast::parse(tokens)?));
+    let ast: &'static ast::Program = Box::leak(Box::new(ast::parse(tokens)?));
     if args.parse {
         println!("Parsed AST:\n{:#?}", ast);
         return Ok(None);
     }
 
     // Semantical Analysis
-    let ast_valid: &'static ast::Program<'static> = Box::leak(Box::new(sema::validate(ast)?));
+    let ast_valid: &'static ast::Program = Box::leak(Box::new(sema::validate(ast)?));
     if args.validate {
         println!("Post sema:\n{:#?}", ast_valid);
         return Ok(None);

@@ -10,9 +10,9 @@ pub struct Program {
     pub function: Function,
 }
 
-impl TryFrom<&tacky::Program> for Program {
+impl TryFrom<tacky::Program> for Program {
     type Error = anyhow::Error;
-    fn try_from(node: &tacky::Program) -> Result<Self> {
+    fn try_from(node: tacky::Program) -> Result<Self> {
         let function = Function::try_from(&node.function)
             .context("Failed to compile intermediate representation into assembly nodes.")?;
         Ok(Program { function })

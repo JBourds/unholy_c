@@ -6,23 +6,23 @@ use std::rc::Rc;
 pub struct Lexer;
 
 impl Lexer {
-    #[allow(dead_code)]
-    pub fn lex(mut stream: &str) -> Result<Vec<Token>> {
+    pub fn lex(stream: String) -> Result<Vec<Token>> {
         let mut line = 1;
         let mut character = 0;
         let mut tokens = vec![];
+        let mut current_stream = stream.as_str();
         loop {
-            match Token::consume(stream, &mut line, &mut character) {
+            match Token::consume(current_stream, &mut line, &mut character) {
                 Ok((token, s)) if token != Token::Eof => {
                     tokens.push(token);
-                    stream = s;
+                    current_stream = s;
                 }
                 Err(_) => {
                     bail!(
                         "Invalid token encountered at line {}, character {} starting at:\n\"\"\"\n{}\n\"\"\"",
                         line,
                         character,
-                        &stream[..100],
+                        &current_stream,
                     );
                 }
                 _ => {
@@ -478,7 +478,7 @@ mod tests {
     fn test_return2() {
         let file = get_path(1, "return_2.c");
         let contents = preprocess_file(&file).unwrap();
-        let tokens = Lexer::lex(&contents).unwrap();
+        let tokens = Lexer::lex(contents).unwrap();
         let expected = vec![
             Token::Int,
             Token::Ident(Rc::new("main".to_string())),
@@ -500,6 +500,6 @@ mod tests {
         let preprocessed_contents = preprocess_file(&file).unwrap();
         // Don't match on exact contents but make sure it can successfully
         // parse a fairly complex C file
-        let _ = Lexer::lex(&preprocessed_contents).unwrap();
+        let _ = Lexer::lex(preprocessed_contents).unwrap();
     }
 }

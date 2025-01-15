@@ -4,7 +4,6 @@ mod codegen;
 mod lexer;
 mod sema;
 mod tacky;
-
 use std::{ffi::OsStr, io::Write, process::Command};
 
 use anyhow::{anyhow, bail, ensure, Context, Result};
@@ -15,6 +14,9 @@ use asm::AsmGen;
 #[derive(Parser, Debug)]
 struct Args {
     file: String,
+
+    #[arg(long)]
+    preprocess: bool,
 
     #[arg(long)]
     lex: bool,
@@ -37,27 +39,28 @@ struct Args {
 
 fn main() -> Result<()> {
     let args = Args::parse();
+    macro_rules! early_exit_call {
+        ($func:ident, $($args:expr),*) => {{
+            let v = $func($($args),*)?;
+            if let Some(v) = v {
+                v
+            } else {
+                return Ok(());
+            }
+        }};
+    }
 
-    // Step 1: Run the preprocesser on the source file
-    let contents = preprocess(&args)?;
-
-    // Step 2: Compile the preprocessed source file
-    let Some((_, _, asm_nodes, _)) = lex_parse_codegen_tacky(&args, contents)? else {
-        return Ok(());
-    };
-
-    // Step 2.5: Turn AsmNodes to asm text
-    let Some(asm) = gen_asm::<std::string::String, asm::x64::Generator>(&args, asm_nodes)? else {
-        return Ok(());
-    };
-
-    // Step 3: Assemble and link the file
-    assemble_and_link(&args, &asm)?;
-
-    Ok(())
+    let contents = early_exit_call!(preprocess, &args);
+    let tokens = early_exit_call!(tokenize, &args, contents);
+    let ast = early_exit_call!(parse_ast, &args, tokens);
+    let ast_valid = early_exit_call!(validate_ast, &args, ast);
+    let ir = early_exit_call!(generate_ir, &args, ast_valid);
+    let codegen = early_exit_call!(generate_code, &args, ir);
+    let asm = early_exit_call!(generate_asm, &args, codegen);
+    assemble_and_link(&args, asm)
 }
 
-fn preprocess(args: &Args) -> Result<&'static str> {
+fn preprocess(args: &Args) -> Result<Option<String>> {
     if !std::fs::exists(&args.file)
         .with_context(|| format!("Checking file \"{}\" failed", args.file))?
     {
@@ -84,74 +87,76 @@ fn preprocess(args: &Args) -> Result<&'static str> {
     std::fs::remove_file(&preproccesed_file)
         .with_context(|| format!("Failed to remove temp file \"{}\"", preproccesed_file))?;
 
-    Ok(contents.leak())
+    if args.preprocess {
+        println!("Preprocessed file:\n{}", contents);
+        Ok(None)
+    } else {
+        Ok(Some(contents))
+    }
 }
 
-type LexTokens = &'static [lexer::Token];
-type AstNodes = &'static ast::Program;
-type AsmNodes = &'static codegen::Program;
-type TackyNodes = &'static tacky::Program;
-
-fn lex_parse_codegen_tacky(
-    args: &Args,
-    contents: &'static str,
-) -> Result<Option<(LexTokens, AstNodes, AsmNodes, TackyNodes)>> {
-    // Lex
-    let tokens: &'static [lexer::Token] = Box::leak(Box::new(lexer::Lexer::lex(contents)?));
-
+fn tokenize(args: &Args, contents: String) -> Result<Option<Vec<lexer::Token>>> {
+    let tokens = lexer::Lexer::lex(contents)?;
     if args.lex {
         println!("Lexed tokens:\n{:#?}", tokens);
-        return Ok(None);
+        Ok(None)
+    } else {
+        Ok(Some(tokens))
     }
+}
 
-    // Parse
-    let ast: &'static ast::Program = Box::leak(Box::new(ast::parse(tokens)?));
+fn parse_ast(args: &Args, tokens: Vec<lexer::Token>) -> Result<Option<ast::Program>> {
+    let ast = ast::parse(&tokens)?;
     if args.parse {
         println!("Parsed AST:\n{:#?}", ast);
-        return Ok(None);
+        Ok(None)
+    } else {
+        Ok(Some(ast))
     }
+}
 
-    // Semantical Analysis
-    let ast_valid: &'static ast::Program = Box::leak(Box::new(sema::validate(ast)?));
+fn validate_ast(args: &Args, ast: ast::Program) -> Result<Option<ast::Program>> {
+    let ast_valid = sema::validate(ast)?;
     if args.validate {
-        println!("Post sema:\n{:#?}", ast_valid);
-        return Ok(None);
+        println!("Validated AST:\n{:#?}", ast_valid);
+        Ok(None)
+    } else {
+        Ok(Some(ast_valid))
     }
+}
 
-    // Tacky
-    let tacky: &'static tacky::Program = Box::leak(Box::new(tacky::Program::try_from(ast_valid)?));
+fn generate_ir(args: &Args, ast: ast::Program) -> Result<Option<tacky::Program>> {
+    let tacky = tacky::Program::try_from(ast)?;
     if args.tacky {
-        println!("Tacky Generation:\n{:#?}", tacky);
-        return Ok(None);
+        println!("Generated Intermediate Representation:\n{:#?}", tacky);
+        Ok(None)
+    } else {
+        Ok(Some(tacky))
     }
+}
 
-    // Codegen
-    let asm: &'static codegen::Program = Box::leak(Box::new(codegen::Program::try_from(tacky)?));
+fn generate_code(args: &Args, tacky: tacky::Program) -> Result<Option<codegen::Program>> {
+    let codegen = codegen::Program::try_from(tacky)?;
     if args.codegen {
-        println!("Generated asm nodes:\n{:#?}", asm);
-        return Ok(None);
+        println!("Codegen:\n{:#?}", codegen);
+        Ok(None)
+    } else {
+        Ok(Some(codegen))
     }
-
-    Ok(Some((tokens, ast_valid, asm, tacky)))
 }
 
-fn gen_asm<W: std::fmt::Write, T: AsmGen<W>>(
-    args: &Args,
-    asm: &'static codegen::Program,
-) -> Result<Option<String>> {
-    let mut asm_txt = String::new();
-
-    asm::x64::Generator::gen(&mut asm_txt, asm)?;
-
+fn generate_asm(args: &Args, codegen: codegen::Program) -> Result<Option<String>> {
+    let mut asm_text = String::new();
+    asm::x64::Generator::gen(&mut asm_text, codegen)?;
     if args.asm {
-        println!("Generated asm:\n{asm_txt}");
-        return Ok(None);
+        println!("Assembly:\n{}", asm_text);
+        Ok(None)
+    } else {
+        Ok(Some(asm_text))
     }
-
-    Ok(Some(asm_txt))
 }
 
-fn assemble_and_link(args: &Args, asm: &str) -> Result<()> {
+fn assemble_and_link(args: &Args, asm: String) -> Result<()> {
     let asm_path = std::path::Path::new(&args.file).with_extension("s");
     // Ensure that the file is closed
     {

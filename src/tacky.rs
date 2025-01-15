@@ -7,9 +7,9 @@ pub struct Program {
     pub function: Function,
 }
 
-impl TryFrom<&ast::Program> for Program {
+impl TryFrom<ast::Program> for Program {
     type Error = anyhow::Error;
-    fn try_from(node: &ast::Program) -> Result<Self> {
+    fn try_from(node: ast::Program) -> Result<Self> {
         Ok(Self {
             function: Function::try_from(&node.function)
                 .context("Failed to parse \"main\" function into TACKY representation")?,

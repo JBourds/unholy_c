@@ -7,7 +7,7 @@ use anyhow::{bail, Result};
 // current scope as well as the string variable name
 type FrameEntry = (bool, Rc<String>);
 
-pub fn validate(program: &ast::Program) -> Result<ast::Program> {
+pub fn validate(program: ast::Program) -> Result<ast::Program> {
     let valid_function = validate_function(&program.function)?;
     validate_gotos(&ast::Program {
         function: valid_function,

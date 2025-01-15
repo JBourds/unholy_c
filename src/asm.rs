@@ -3,7 +3,7 @@ use anyhow::Result;
 use std::fmt::Write;
 
 pub trait AsmGen<W> {
-    fn gen(writer: W, program: &codegen::Program) -> Result<()>
+    fn gen(writer: W, program: codegen::Program) -> Result<()>
     where
         W: Write;
 }
@@ -17,7 +17,7 @@ pub mod x64 {
     pub struct Generator;
 
     impl<W> AsmGen<W> for Generator {
-        fn gen(mut writer: W, program: &crate::codegen::Program) -> Result<()>
+        fn gen(mut writer: W, program: crate::codegen::Program) -> Result<()>
         where
             W: std::fmt::Write,
         {
@@ -26,7 +26,7 @@ pub mod x64 {
         }
     }
 
-    fn gen_program(w: &mut impl Write, program: &codegen::Program) -> Result<()> {
+    fn gen_program(w: &mut impl Write, program: codegen::Program) -> Result<()> {
         w.write_str("\t.intel_syntax noprefix\n\n")?;
 
         gen_function(w, &program.function)?;

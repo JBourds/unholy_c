@@ -13,7 +13,7 @@ pub struct Program {
 impl TryFrom<tacky::Program> for Program {
     type Error = anyhow::Error;
     fn try_from(node: tacky::Program) -> Result<Self> {
-        let function = Function::try_from(&node.function)
+        let function = Function::try_from(node.function)
             .context("Failed to compile intermediate representation into assembly nodes.")?;
         Ok(Program { function })
     }
@@ -25,12 +25,12 @@ pub struct Function {
     pub instructions: Vec<Instruction<Final>>,
 }
 
-impl TryFrom<&tacky::Function> for Function {
+impl TryFrom<tacky::Function> for Function {
     type Error = anyhow::Error;
-    fn try_from(node: &tacky::Function) -> Result<Self> {
+    fn try_from(node: tacky::Function) -> Result<Self> {
         let mut instructions: Vec<Instruction<Initial>> = node
             .instructions
-            .iter()
+            .into_iter()
             .map(Vec::<Instruction<Initial>>::try_from)
             .try_fold(
                 vec![Instruction::<Initial>::new(InstructionType::AllocStack(0))],
@@ -84,8 +84,8 @@ impl fmt::Display for UnaryOp {
     }
 }
 
-impl From<&tacky::UnaryOp> for UnaryOp {
-    fn from(node: &tacky::UnaryOp) -> Self {
+impl From<tacky::UnaryOp> for UnaryOp {
+    fn from(node: tacky::UnaryOp) -> Self {
         match node {
             tacky::UnaryOp::Negate => Self::Negate,
             tacky::UnaryOp::Complement => Self::Complement,
@@ -106,8 +106,8 @@ pub enum BinaryOp {
     RShift,
 }
 
-impl From<&tacky::BinaryOp> for BinaryOp {
-    fn from(node: &tacky::BinaryOp) -> Self {
+impl From<tacky::BinaryOp> for BinaryOp {
+    fn from(node: tacky::BinaryOp) -> Self {
         match node {
             tacky::BinaryOp::Add => Self::Add,
             tacky::BinaryOp::Subtract => Self::Subtract,
@@ -291,8 +291,8 @@ impl fmt::Display for CondCode {
     }
 }
 
-impl From<&tacky::BinaryOp> for CondCode {
-    fn from(value: &tacky::BinaryOp) -> Self {
+impl From<tacky::BinaryOp> for CondCode {
+    fn from(value: tacky::BinaryOp) -> Self {
         match value {
             tacky::BinaryOp::Equal => Self::E,
             tacky::BinaryOp::NotEqual => Self::NE,
@@ -572,8 +572,8 @@ impl From<Instruction<Offset>> for Vec<Instruction<Final>> {
     }
 }
 
-impl From<&tacky::Instruction> for Vec<Instruction<Initial>> {
-    fn from(instruction: &tacky::Instruction) -> Vec<Instruction<Initial>> {
+impl From<tacky::Instruction> for Vec<Instruction<Initial>> {
+    fn from(instruction: tacky::Instruction) -> Vec<Instruction<Initial>> {
         let new_instr = |op| Instruction::<Initial> {
             op,
             phantom: PhantomData::<Initial>,
@@ -582,7 +582,7 @@ impl From<&tacky::Instruction> for Vec<Instruction<Initial>> {
             tacky::Instruction::Return(None) => {
                 vec![new_instr(InstructionType::Ret)]
             }
-            tacky::Instruction::Return(Some(ref val)) => vec![
+            tacky::Instruction::Return(Some(val)) => vec![
                 new_instr(InstructionType::Mov {
                     src: Operand::from(val),
                     dst: Operand::Reg(Reg::X86 {
@@ -600,7 +600,7 @@ impl From<&tacky::Instruction> for Vec<Instruction<Initial>> {
                     }),
                     new_instr(InstructionType::Mov {
                         src: Operand::Imm(0),
-                        dst: dst.into(),
+                        dst: dst.clone().into(),
                     }),
                     new_instr(InstructionType::SetCC {
                         cond_code: CondCode::E,
@@ -618,7 +618,7 @@ impl From<&tacky::Instruction> for Vec<Instruction<Initial>> {
                 _ => vec![
                     new_instr(InstructionType::Mov {
                         src: src.into(),
-                        dst: dst.into(),
+                        dst: dst.clone().into(),
                     }),
                     new_instr(InstructionType::Unary {
                         op: op.into(),
@@ -640,7 +640,7 @@ impl From<&tacky::Instruction> for Vec<Instruction<Initial>> {
                     vec![
                         new_instr(InstructionType::Mov {
                             src: src1.into(),
-                            dst: dst.into(),
+                            dst: dst.clone().into(),
                         }),
                         new_instr(InstructionType::Binary {
                             op: op.into(),
@@ -714,7 +714,7 @@ impl From<&tacky::Instruction> for Vec<Instruction<Initial>> {
                 op @ tacky::BinaryOp::LShift | op @ tacky::BinaryOp::RShift => {
                     let mut v = vec![];
                     let src = match src2 {
-                        tacky::Val::Constant(v) => Operand::Imm(*v),
+                        tacky::Val::Constant(v) => Operand::Imm(v),
                         _ => {
                             let cl_reg = Operand::Reg(Reg::X86 {
                                 reg: X86Reg::Cx,
@@ -729,7 +729,7 @@ impl From<&tacky::Instruction> for Vec<Instruction<Initial>> {
                     };
                     v.push(new_instr(InstructionType::Mov {
                         src: src1.into(),
-                        dst: dst.into(),
+                        dst: dst.clone().into(),
                     }));
                     v.push(new_instr(InstructionType::Binary {
                         op: op.into(),
@@ -750,7 +750,7 @@ impl From<&tacky::Instruction> for Vec<Instruction<Initial>> {
                     }),
                     new_instr(InstructionType::Mov {
                         src: Operand::Imm(0),
-                        dst: dst.into(),
+                        dst: dst.clone().into(),
                     }),
                     new_instr(InstructionType::SetCC {
                         cond_code: op.into(),
@@ -774,7 +774,7 @@ impl From<&tacky::Instruction> for Vec<Instruction<Initial>> {
                 }),
                 new_instr(InstructionType::JmpCC {
                     cond_code: CondCode::E,
-                    identifier: Rc::clone(target),
+                    identifier: target,
                 }),
             ],
             tacky::Instruction::JumpIfNotZero { condition, target } => vec![
@@ -784,18 +784,18 @@ impl From<&tacky::Instruction> for Vec<Instruction<Initial>> {
                 }),
                 new_instr(InstructionType::JmpCC {
                     cond_code: CondCode::NE,
-                    identifier: Rc::clone(target),
+                    identifier: target,
                 }),
             ],
             tacky::Instruction::Jump(label) => {
-                vec![new_instr(InstructionType::Jmp(Rc::clone(label)))]
+                vec![new_instr(InstructionType::Jmp(label))]
             }
             tacky::Instruction::Copy { src, dst } => vec![new_instr(InstructionType::Mov {
                 src: src.into(),
                 dst: dst.into(),
             })],
             tacky::Instruction::Label(label) => {
-                vec![new_instr(InstructionType::Label(Rc::clone(label)))]
+                vec![new_instr(InstructionType::Label(label))]
             }
         }
     }
@@ -822,14 +822,11 @@ impl Operand {
 }
 
 // FIXME: Unhardcode size of 4
-impl From<&tacky::Val> for Operand {
-    fn from(val: &tacky::Val) -> Self {
+impl From<tacky::Val> for Operand {
+    fn from(val: tacky::Val) -> Self {
         match val {
-            tacky::Val::Constant(i) => Self::Imm(*i),
-            tacky::Val::Var(r) => Self::Pseudo {
-                name: Rc::clone(r),
-                size: 4,
-            },
+            tacky::Val::Constant(i) => Self::Imm(i),
+            tacky::Val::Var(r) => Self::Pseudo { name: r, size: 4 },
         }
     }
 }
@@ -867,7 +864,7 @@ mod tests {
         .into_iter()
         .map(Instruction::<Initial>::new)
         .collect();
-        let actual = Vec::<Instruction<Initial>>::from(&tacky);
+        let actual = Vec::<Instruction<Initial>>::from(tacky);
         assert_eq!(expected, actual);
     }
 
@@ -898,7 +895,7 @@ mod tests {
         .into_iter()
         .map(Instruction::<Initial>::new)
         .collect();
-        let actual = Vec::<Instruction<Initial>>::from(&tacky);
+        let actual = Vec::<Instruction<Initial>>::from(tacky);
         assert_eq!(expected, actual);
     }
 
@@ -929,7 +926,7 @@ mod tests {
         .into_iter()
         .map(Instruction::<Initial>::new)
         .collect();
-        let actual = Vec::<Instruction<Initial>>::from(&tacky);
+        let actual = Vec::<Instruction<Initial>>::from(tacky);
 
         assert_eq!(expected, actual);
     }
@@ -961,7 +958,7 @@ mod tests {
         .into_iter()
         .map(Instruction::<Initial>::new)
         .collect();
-        let actual = Vec::<Instruction<Initial>>::from(&tacky);
+        let actual = Vec::<Instruction<Initial>>::from(tacky);
         assert_eq!(expected, actual);
     }
 
@@ -997,6 +994,6 @@ mod tests {
             ],
         };
         // Because the resulting AST is huge just check that it parses
-        let _ = Function::try_from(&tacky_fn).unwrap();
+        let _ = Function::try_from(tacky_fn).unwrap();
     }
 }

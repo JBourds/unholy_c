@@ -177,6 +177,9 @@ impl Block {
     pub fn items(&self) -> &Vec<BlockItem> {
         &self.0
     }
+    pub fn into_items(self) -> Vec<BlockItem> {
+        self.0
+    }
 }
 
 impl AstNode for Block {

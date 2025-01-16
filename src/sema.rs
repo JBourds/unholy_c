@@ -90,7 +90,7 @@ mod variables {
             ast::BlockItem::Decl(ast::Declaration { typ, name, init }) => {
                 if variable_map
                     .get(&name)
-                    .map_or(false, |(from_this_frame, _)| *from_this_frame)
+                    .is_some_and(|(from_this_frame, _)| *from_this_frame)
                 {
                     bail!("Duplicate variable declaration '{name}'");
                 }
@@ -243,7 +243,7 @@ mod gotos {
         func_name: &Rc<String>,
         label_map: &mut HashMap<Rc<String>, Rc<String>>,
     ) -> Result<ast::Block> {
-        let mut new_blocks = Vec::with_capacity(block.items().len());
+        let mut block_items = Vec::with_capacity(block.items().len());
 
         let mut last_thing_was_a_label = (false, false);
         for block_item in block.into_items().into_iter() {
@@ -261,13 +261,13 @@ mod gotos {
                 _ if last_thing_was_a_label.0 => bail!("A label most be followed by a statement, not expression. To get around this, add a null statement i.e: (label: ;)"),
                 _ => block_item,
             };
-            new_blocks.push(fixed);
+            block_items.push(fixed);
         }
         if last_thing_was_a_label.1 {
             bail!("Label must be followed by a statement. To get around this, add a null statement i.e: (label: ;)")
         }
 
-        Ok(ast::Block(new_blocks))
+        Ok(ast::Block(block_items))
     }
 
     pub fn resolve_stmt(
@@ -308,19 +308,17 @@ mod gotos {
         block: ast::Block,
         label_map: &HashMap<Rc<String>, Rc<String>>,
     ) -> Result<ast::Block> {
-        let mut blockitems = Vec::with_capacity(block.items().len());
+        let mut block_items = Vec::with_capacity(block.items().len());
 
         for block_item in block.into_items().into_iter() {
             let fixed = match block_item {
-                ast::BlockItem::Stmt(stmt) => {
-                    ast::BlockItem::Stmt(validate_stmt(stmt, &label_map)?)
-                }
-                _ => block_item.clone(),
+                ast::BlockItem::Stmt(stmt) => ast::BlockItem::Stmt(validate_stmt(stmt, label_map)?),
+                _ => block_item,
             };
-            blockitems.push(fixed);
+            block_items.push(fixed);
         }
 
-        Ok(ast::Block(blockitems))
+        Ok(ast::Block(block_items))
     }
 
     pub fn validate_stmt(

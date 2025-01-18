@@ -260,6 +260,17 @@ pub enum Stmt {
         body: Box<Stmt>,
         label: Option<Rc<String>>,
     },
+    Case {
+        value: Expr,
+        body: Box<Stmt>,
+        label: Option<Rc<String>>,
+    },
+    Default(Option<Rc<String>>),
+    Switch {
+        condition: Expr,
+        body: Box<Stmt>,
+        label: Option<Rc<String>>,
+    },
     Goto(Rc<String>),
     Label(Rc<String>),
     Null,
@@ -381,7 +392,46 @@ impl AstNode for Stmt {
                     tokens,
                 ))
             }
+            [Token::Case, tokens @ ..] => {
+                let (expr, tokens) =
+                    Expr::parse(tokens, 0).context("Case statement needs associated expression")?;
 
+                let tokens = if let Some(Token::Colon) = tokens.first() {
+                    &tokens[1..]
+                } else {
+                    bail!("Case statement should end with a colon");
+                };
+                let (body, tokens) = Stmt::consume(tokens).context("Failed to parse case body")?;
+
+                Ok((
+                    Self::Case {
+                        value: expr,
+                        body: Box::new(body),
+                        label: None,
+                    },
+                    tokens,
+                ))
+            }
+            [Token::Default, Token::Colon, tokens @ ..] => Ok((Self::Default(None), tokens)),
+            [Token::Switch, Token::LParen, tokens @ ..] => {
+                let (condition, tokens) = Expr::parse(tokens, 0)
+                    .context("Failed to parse expression for switch statement conditional")?;
+                let tokens = if let Some(Token::RParen) = tokens.first() {
+                    &tokens[1..]
+                } else {
+                    bail!("Switch statment conditional must be closed with right paren");
+                };
+                let (body, tokens) =
+                    Stmt::consume(tokens).context("Failed to parse body of switch statement")?;
+                Ok((
+                    Self::Switch {
+                        condition,
+                        body: Box::new(body),
+                        label: None,
+                    },
+                    tokens,
+                ))
+            }
             [Token::Return, Token::Semi, tokens @ ..] => Ok((Self::Return(None), tokens)),
             [Token::Return, tokens @ ..] => {
                 let (expr, tokens) = comma_terminated_expr(tokens)?;

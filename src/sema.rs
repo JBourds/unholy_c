@@ -245,6 +245,21 @@ mod variables {
             }
             ast::Stmt::Goto(label) => Ok(ast::Stmt::Goto(label)),
             ast::Stmt::Label(label) => Ok(ast::Stmt::Label(label)),
+            ast::Stmt::Default(label) => Ok(ast::Stmt::Default(label)),
+            ast::Stmt::Switch {
+                condition,
+                body,
+                label,
+            } => Ok(ast::Stmt::Switch {
+                condition: resolve_expr(condition, variable_map)?,
+                body: Box::new(resolve_stmt(*body, variable_map, make_temporary)?),
+                label,
+            }),
+            ast::Stmt::Case { value, body, label } => Ok(ast::Stmt::Case {
+                value: resolve_expr(value, variable_map)?,
+                body: Box::new(resolve_stmt(*body, variable_map, make_temporary)?),
+                label,
+            }),
         }
     }
 

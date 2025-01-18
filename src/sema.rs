@@ -182,25 +182,61 @@ mod variables {
                     None => None,
                 },
             }),
-            ast::Stmt::Break(label) => todo!(),
-            ast::Stmt::Continue(label) => todo!(),
+            ast::Stmt::Break(label) => Ok(ast::Stmt::Break(label)),
+            ast::Stmt::Continue(label) => Ok(ast::Stmt::Continue(label)),
             ast::Stmt::While {
                 condition,
                 body,
                 label,
-            } => todo!(),
+            } => Ok(ast::Stmt::While {
+                condition: resolve_expr(condition, variable_map)?,
+                body: Box::new(resolve_stmt(*body, variable_map, make_temporary)?),
+                label,
+            }),
             ast::Stmt::DoWhile {
                 body,
                 condition,
                 label,
-            } => todo!(),
+            } => Ok(ast::Stmt::DoWhile {
+                condition: resolve_expr(condition, variable_map)?,
+                body: Box::new(resolve_stmt(*body, variable_map, make_temporary)?),
+                label,
+            }),
             ast::Stmt::For {
                 init,
                 condition,
                 post,
                 body,
                 label,
-            } => todo!(),
+            } => {
+                let mut new_map = make_new_scope(variable_map);
+                let init = match init {
+                    ast::ForInit::Decl(decl) => {
+                        ast::ForInit::Decl(resolve_decl(decl, &mut new_map, make_temporary)?)
+                    }
+                    ast::ForInit::Expr(Some(expr)) => {
+                        ast::ForInit::Expr(Some(resolve_expr(expr, &new_map)?))
+                    }
+                    init => init,
+                };
+                let condition = if let Some(expr) = condition {
+                    Some(resolve_expr(expr, &new_map)?)
+                } else {
+                    None
+                };
+                let post = if let Some(expr) = post {
+                    Some(resolve_expr(expr, &new_map)?)
+                } else {
+                    None
+                };
+                Ok(ast::Stmt::For {
+                    init,
+                    condition,
+                    post,
+                    body: Box::new(resolve_stmt(*body, &new_map, make_temporary)?),
+                    label,
+                })
+            }
             ast::Stmt::Null => Ok(ast::Stmt::Null),
             ast::Stmt::Compound(block) => {
                 let mut new_map = make_new_scope(variable_map);
@@ -544,6 +580,29 @@ mod loops {
             (ast::Stmt::While { label: Some(_), .. }, _) => unreachable!(),
             (ast::Stmt::DoWhile { label: Some(_), .. }, _) => unreachable!(),
             (ast::Stmt::For { label: Some(_), .. }, _) => unreachable!(),
+            (ast::Stmt::Compound(block), label) => Ok(ast::Stmt::Compound(resolve_block(
+                block, label, make_label,
+            )?)),
+            (
+                ast::Stmt::If {
+                    condition,
+                    then,
+                    r#else,
+                },
+                label,
+            ) => {
+                let then = Box::new(resolve_stmt(*then, label.clone(), make_label)?);
+                let r#else = if let Some(r#else) = r#else {
+                    Some(Box::new(resolve_stmt(*r#else, label, make_label)?))
+                } else {
+                    None
+                };
+                Ok(ast::Stmt::If {
+                    condition,
+                    then,
+                    r#else,
+                })
+            }
             (stmt, _) => Ok(stmt),
         }
     }

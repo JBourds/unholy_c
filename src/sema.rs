@@ -419,28 +419,28 @@ mod loops {
 
     pub fn validate(stage: SemaStage<SwitchLabelling>) -> Result<SemaStage<LoopLabelling>> {
         let SemaStage { program, .. } = stage;
-        if let Some(block) = program.function.block {
+        Ok(SemaStage {
+            program: ast::Program {
+                function: resolve_function(program.function)?,
+            },
+            stage: PhantomData::<LoopLabelling>,
+        })
+    }
+
+    fn resolve_function(function: ast::Function) -> Result<ast::Function> {
+        if let Some(block) = function.block {
             let mut count = 0;
-            let mut unique_name_generator = move |name: &str| -> String {
-                let new_name = format!("{name}.{count}");
+            let mut unique_name_generator = |name: &str| -> String {
+                let new_name = format!("{}.{name}.{count}", Rc::clone(&function.name));
                 count += 1;
                 new_name
             };
-            let block = resolve_block(block, None, &mut unique_name_generator)?;
-            Ok(SemaStage {
-                program: ast::Program {
-                    function: ast::Function {
-                        block: Some(block),
-                        ..program.function
-                    },
-                },
-                stage: PhantomData::<LoopLabelling>,
+            Ok(ast::Function {
+                block: Some(resolve_block(block, None, &mut unique_name_generator)?),
+                ..function
             })
         } else {
-            Ok(SemaStage {
-                program,
-                stage: PhantomData::<LoopLabelling>,
-            })
+            Ok(function)
         }
     }
 
@@ -472,6 +472,69 @@ mod loops {
         loop_label: Option<Rc<String>>,
         make_label: &mut impl FnMut(&str) -> String,
     ) -> Result<ast::Stmt> {
-        Ok(stmt)
+        match (stmt, loop_label) {
+            (ast::Stmt::Break(_), None) => {
+                bail!("Cannot use 'break' outside of a loop or switch statement.")
+            }
+            // Break has not been associated with a loop label yet
+            (ast::Stmt::Break(None), Some(label)) => Ok(ast::Stmt::Break(Some(label))),
+            // Break is already associated with a switch case, don't change anything
+            (ast::Stmt::Break(Some(label)), _) => Ok(ast::Stmt::Break(Some(label))),
+            (ast::Stmt::Continue(_), None) => bail!("Cannot use 'continue' outside of a loop."),
+            (ast::Stmt::Continue(None), Some(label)) => Ok(ast::Stmt::Continue(Some(label))),
+            (
+                ast::Stmt::While {
+                    condition,
+                    body,
+                    label: None,
+                },
+                _,
+            ) => {
+                let label = Rc::new(make_label("while"));
+                Ok(ast::Stmt::While {
+                    condition,
+                    body: Box::new(resolve_stmt(*body, Some(Rc::clone(&label)), make_label)?),
+                    label: Some(label),
+                })
+            }
+            (
+                ast::Stmt::DoWhile {
+                    body,
+                    condition,
+                    label: None,
+                },
+                _,
+            ) => {
+                let label = Rc::new(make_label("do_while"));
+                Ok(ast::Stmt::DoWhile {
+                    condition,
+                    body: Box::new(resolve_stmt(*body, Some(Rc::clone(&label)), make_label)?),
+                    label: Some(label),
+                })
+            }
+            (
+                ast::Stmt::For {
+                    init,
+                    condition,
+                    post,
+                    body,
+                    label: None,
+                },
+                _,
+            ) => {
+                let label = Rc::new(make_label("for"));
+                Ok(ast::Stmt::For {
+                    init,
+                    condition,
+                    post,
+                    body: Box::new(resolve_stmt(*body, Some(Rc::clone(&label)), make_label)?),
+                    label: Some(label),
+                })
+            }
+            (ast::Stmt::While { label: Some(_), .. }, _) => unreachable!(),
+            (ast::Stmt::DoWhile { label: Some(_), .. }, _) => unreachable!(),
+            (ast::Stmt::For { label: Some(_), .. }, _) => unreachable!(),
+            (stmt, _) => Ok(stmt),
+        }
     }
 }

@@ -26,6 +26,7 @@ pub fn validate(program: ast::Program) -> Result<SemaStage<Final>> {
     };
     let stage = variables::validate(stage)?;
     let stage = gotos::validate(stage)?;
+    let stage = switch::validate(stage)?;
     let stage = loops::validate(stage)?;
 
     Ok(SemaStage {
@@ -402,10 +403,21 @@ mod gotos {
     }
 }
 
+mod switch {
+    use super::*;
+
+    pub fn validate(stage: SemaStage<GotoValidation>) -> Result<SemaStage<SwitchLabelling>> {
+        Ok(SemaStage {
+            program: stage.program,
+            stage: PhantomData::<SwitchLabelling>,
+        })
+    }
+}
+
 mod loops {
     use super::*;
 
-    pub fn validate(stage: SemaStage<GotoValidation>) -> Result<SemaStage<LoopLabelling>> {
+    pub fn validate(stage: SemaStage<SwitchLabelling>) -> Result<SemaStage<LoopLabelling>> {
         let SemaStage { program, .. } = stage;
         if let Some(block) = program.function.block {
             let mut count = 0;

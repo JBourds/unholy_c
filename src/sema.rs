@@ -408,7 +408,13 @@ mod loops {
     pub fn validate(stage: SemaStage<GotoValidation>) -> Result<SemaStage<LoopLabelling>> {
         let SemaStage { program, .. } = stage;
         if let Some(block) = program.function.block {
-            let block = resolve_block(block)?;
+            let mut count = 0;
+            let mut unique_name_generator = move |name: &str| -> String {
+                let new_name = format!("{name}.{count}");
+                count += 1;
+                new_name
+            };
+            let block = resolve_block(block, None, &mut unique_name_generator)?;
             Ok(SemaStage {
                 program: ast::Program {
                     function: ast::Function {
@@ -426,12 +432,20 @@ mod loops {
         }
     }
 
-    fn resolve_block(block: ast::Block) -> Result<ast::Block> {
+    fn resolve_block(
+        block: ast::Block,
+        loop_label: Option<Rc<String>>,
+        make_label: &mut impl FnMut(&str) -> String,
+    ) -> Result<ast::Block> {
         let mut resolved_block_items = Vec::with_capacity(block.items().len());
         for item in block.into_items().into_iter() {
             match item {
                 ast::BlockItem::Stmt(stmt) => {
-                    resolved_block_items.push(ast::BlockItem::Stmt(resolve_stmt(stmt)?));
+                    resolved_block_items.push(ast::BlockItem::Stmt(resolve_stmt(
+                        stmt,
+                        loop_label.clone(),
+                        make_label,
+                    )?));
                 }
                 item => {
                     resolved_block_items.push(item);
@@ -441,7 +455,11 @@ mod loops {
         Ok(ast::Block(resolved_block_items))
     }
 
-    fn resolve_stmt(stmt: ast::Stmt) -> Result<ast::Stmt> {
+    fn resolve_stmt(
+        stmt: ast::Stmt,
+        loop_label: Option<Rc<String>>,
+        make_label: &mut impl FnMut(&str) -> String,
+    ) -> Result<ast::Stmt> {
         Ok(stmt)
     }
 }

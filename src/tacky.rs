@@ -10,7 +10,7 @@ pub struct Program {
 
 impl TryFrom<sema::SemaStage<sema::Final>> for Program {
     type Error = anyhow::Error;
-    fn try_from(stage: sema::SemaStage::<sema::Final>) -> Result<Self> {
+    fn try_from(stage: sema::SemaStage<sema::Final>) -> Result<Self> {
         Ok(Self {
             function: Function::try_from(stage.program.function)
                 .context("Failed to parse \"main\" function into TACKY representation")?,
@@ -133,17 +133,138 @@ impl Instruction {
                     ast::Stmt::Label(label) => {
                         block_instructions.push(Instruction::Label(label));
                     }
-                    ast::Stmt::Break(label) => todo!(),
-                    ast::Stmt::Continue(label) => todo!(),
-                    ast::Stmt::While { condition, body, label, } => todo!(),
-                    ast::Stmt::DoWhile { body, condition, label, } => todo!(),
+                    ast::Stmt::Break(label) => {
+                        let label = Rc::new(format!("{}.break", label.unwrap()));
+                        block_instructions.push(Instruction::Jump(label));
+                    }
+                    ast::Stmt::Continue(label) => {
+                        let label = Rc::new(format!("{}.continue", label.unwrap()));
+                        block_instructions.push(Instruction::Jump(label));
+                    }
+                    ast::Stmt::While {
+                        condition,
+                        body,
+                        label,
+                    } => {
+                        let label = label.unwrap();
+                        let label_continue = Rc::new(format!("{label}.continue"));
+                        let label_break = Rc::new(format!("{label}.break"));
+
+                        // Label(continue_label)
+                        block_instructions.push(Instruction::Label(Rc::clone(&label_continue)));
+                        // <instructions for condition>
+                        // v = <result of condition>
+                        let Expr { instructions, val } = Expr::parse_with(condition, make_temp_var);
+                        block_instructions.extend(instructions);
+                        // JumpIfZero(v, break_label)
+                        block_instructions.push(Self::JumpIfZero {
+                            condition: val,
+                            target: Rc::clone(&label_break),
+                        });
+                        // <instructions for body>
+                        block_instructions.extend(Instruction::parse_with(
+                            ast::Block(vec![ast::BlockItem::Stmt(*body)]),
+                            make_temp_var,
+                        ));
+                        // Jump(continue_label)
+                        block_instructions.push(Instruction::Jump(label_continue));
+                        // Label(break_label)
+                        block_instructions.push(Instruction::Label(label_break));
+                    }
+                    ast::Stmt::DoWhile {
+                        body,
+                        condition,
+                        label,
+                    } => {
+                        let label = label.unwrap();
+                        let label_start = Rc::new(format!("{label}.start"));
+                        let label_continue = Rc::new(format!("{label}.continue"));
+                        let label_break = Rc::new(format!("{label}.break"));
+
+                        // Label(start)
+                        block_instructions.push(Instruction::Label(Rc::clone(&label_start)));
+                        // <instructions for body>
+                        block_instructions.extend(Instruction::parse_with(
+                            ast::Block(vec![ast::BlockItem::Stmt(*body)]),
+                            make_temp_var,
+                        ));
+                        // Label(continue_label)
+                        block_instructions.push(Instruction::Label(label_continue));
+                        // <instructions for condition>
+                        // v = <result of condition>
+                        let Expr { instructions, val } = Expr::parse_with(condition, make_temp_var);
+                        block_instructions.extend(instructions);
+                        // JumpIfNotZero(v, start)
+                        block_instructions.push(Instruction::JumpIfNotZero {
+                            condition: val,
+                            target: label_start,
+                        });
+                        // Label(break_label)
+                        block_instructions.push(Instruction::Label(label_break));
+                    }
                     ast::Stmt::For {
                         init,
                         condition,
                         post,
                         body,
                         label,
-                    } => todo!(),
+                    } => {
+                        let label = label.unwrap();
+                        let label_start = Rc::new(format!("{label}.start"));
+                        let label_continue = Rc::new(format!("{label}.continue"));
+                        let label_break = Rc::new(format!("{label}.break"));
+
+                        // <instructions for init>
+                        match init {
+                            ast::ForInit::Decl(decl) => {
+                                block_instructions.extend(Instruction::parse_with(
+                                    ast::Block(vec![ast::BlockItem::Decl(decl)]),
+                                    make_temp_var,
+                                ));
+                            }
+                            ast::ForInit::Expr(Some(expr)) => {
+                                let Expr { instructions, .. } =
+                                    Expr::parse_with(expr, make_temp_var);
+                                block_instructions.extend(instructions);
+                            }
+                            ast::ForInit::Expr(None) => {}
+                        }
+                        // Label(start)
+                        block_instructions.push(Instruction::Label(Rc::clone(&label_start)));
+                        // <instructions for condition>
+                        // v = <result of condition>
+                        if let Some(cond) = condition {
+                            let Expr {
+                                instructions: instructions_condition,
+                                val: val_condition,
+                            } = Expr::parse_with(cond, make_temp_var);
+                            block_instructions.extend(instructions_condition);
+                            // JumpIfZero(v, break_label)
+                            block_instructions.push(Instruction::JumpIfZero {
+                                condition: val_condition,
+                                target: Rc::clone(&label_break),
+                            });
+                        }
+                        // <instructions for body>
+                        block_instructions.extend(Instruction::parse_with(
+                            ast::Block(vec![ast::BlockItem::Stmt(*body)]),
+                            make_temp_var,
+                        ));
+                        // Label(continue_label)
+                        block_instructions.push(Instruction::Label(label_continue));
+                        // <instructions for post>
+                        if let Some(post) = post {
+                            let Expr {
+                                instructions: instructions_post,
+                                ..
+                            } = Expr::parse_with(post, make_temp_var);
+                            block_instructions.extend(instructions_post);
+                        }
+                        // Jump(Start)
+                        block_instructions.push(Instruction::Jump(label_start));
+                        // Label(break_label)
+                        block_instructions.push(Instruction::Label(label_break));
+                    }
                     ast::Stmt::If {
                         condition,
                         then,

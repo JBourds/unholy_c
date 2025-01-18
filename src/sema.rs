@@ -102,6 +102,32 @@ mod variables {
         Ok(ast::Block(valid_items))
     }
 
+    fn resolve_decl(
+        decl: ast::Declaration,
+        variable_map: &mut HashMap<Rc<String>, FrameEntry>,
+        make_temporary: &mut impl FnMut(&str) -> String,
+    ) -> Result<ast::Declaration> {
+        if variable_map
+            .get(&decl.name)
+            .is_some_and(|(from_this_frame, _)| *from_this_frame)
+        {
+            bail!("Duplicate variable declaration '{}'", decl.name);
+        }
+        let unique_name = Rc::new(make_temporary(&decl.name));
+        variable_map.insert(Rc::clone(&decl.name), (true, Rc::clone(&unique_name)));
+
+        let init = match decl.init {
+            Some(expr) => Some(resolve_expr(expr, variable_map)?),
+            None => None,
+        };
+
+        Ok(ast::Declaration {
+            name: unique_name,
+            init,
+            ..decl
+        })
+    }
+
     fn validate_blockitem(
         instruction: ast::BlockItem,
         variable_map: &mut HashMap<Rc<String>, FrameEntry>,
@@ -113,27 +139,11 @@ mod variables {
                 variable_map,
                 make_temporary,
             )?)),
-            ast::BlockItem::Decl(ast::Declaration { typ, name, init }) => {
-                if variable_map
-                    .get(&name)
-                    .is_some_and(|(from_this_frame, _)| *from_this_frame)
-                {
-                    bail!("Duplicate variable declaration '{name}'");
-                }
-                let unique_name = Rc::new(make_temporary(&name));
-                variable_map.insert(Rc::clone(&name), (true, Rc::clone(&unique_name)));
-
-                let init = match init {
-                    Some(expr) => Some(resolve_expr(expr, variable_map)?),
-                    None => None,
-                };
-
-                Ok(ast::BlockItem::Decl(ast::Declaration {
-                    typ,
-                    name: unique_name,
-                    init,
-                }))
-            }
+            ast::BlockItem::Decl(decl) => Ok(ast::BlockItem::Decl(resolve_decl(
+                decl,
+                variable_map,
+                make_temporary,
+            )?)),
         }
     }
 

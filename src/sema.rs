@@ -23,6 +23,7 @@ mod variables {
             function: valid_function,
         })
     }
+
     fn validate_function(function: ast::Function) -> Result<ast::Function> {
         let mut variable_map = HashMap::new();
         let mut count = 0;
@@ -116,6 +117,14 @@ mod variables {
         variable_map: &HashMap<Rc<String>, FrameEntry>,
         make_temporary: &mut impl FnMut(&str) -> String,
     ) -> Result<ast::Stmt> {
+        let make_new_scope = |variable_map: &HashMap<Rc<String>, FrameEntry>| {
+            variable_map
+                .iter()
+                .fold(HashMap::new(), |mut map, (key, (_, var))| {
+                    map.insert(Rc::clone(key), (false, Rc::clone(var)));
+                    map
+                })
+        };
         match stmt {
             ast::Stmt::Return(Some(expr)) => {
                 Ok(ast::Stmt::Return(Some(resolve_expr(expr, variable_map)?)))
@@ -150,13 +159,7 @@ mod variables {
             } => todo!(),
             ast::Stmt::Null => Ok(ast::Stmt::Null),
             ast::Stmt::Compound(block) => {
-                let mut new_map =
-                    variable_map
-                        .iter()
-                        .fold(HashMap::new(), |mut map, (key, (_, var))| {
-                            map.insert(Rc::clone(key), (false, Rc::clone(var)));
-                            map
-                        });
+                let mut new_map = make_new_scope(variable_map);
                 let block = validate_block(block, &mut new_map, make_temporary)?;
                 Ok(ast::Stmt::Compound(block))
             }

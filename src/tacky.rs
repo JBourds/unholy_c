@@ -132,6 +132,16 @@ impl Instruction {
                     ast::Stmt::Label(label) => {
                         block_instructions.push(Instruction::Label(label));
                     }
+                    ast::Stmt::Break => todo!(),
+                    ast::Stmt::Continue => todo!(),
+                    ast::Stmt::While { condition, body } => todo!(),
+                    ast::Stmt::DoWhile { body, condition } => todo!(),
+                    ast::Stmt::For {
+                        init,
+                        condition,
+                        post,
+                        body,
+                    } => todo!(),
                     ast::Stmt::If {
                         condition,
                         then,

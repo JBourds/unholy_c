@@ -1,4 +1,4 @@
-use std::{collections::HashMap, rc::Rc};
+use std::{collections::HashMap, marker::PhantomData, rc::Rc};
 
 use crate::ast;
 use anyhow::{bail, Result};
@@ -7,20 +7,43 @@ use anyhow::{bail, Result};
 // current scope as well as the string variable name
 type FrameEntry = (bool, Rc<String>);
 
-pub fn validate(program: ast::Program) -> Result<ast::Program> {
-    let program = variables::validate(program)?;
-    let program = gotos::validate(program)?;
-    Ok(program)
+pub enum Initial {}
+pub enum VariableResolution {}
+pub enum GotoValidation {}
+pub enum LoopLabelling {}
+pub enum SwitchLabelling {}
+pub enum Final {}
+
+pub struct SemaStage<T> {
+    pub program: ast::Program,
+    stage: PhantomData<T>,
+}
+
+pub fn validate(program: ast::Program) -> Result<SemaStage<Final>> {
+    let stage = SemaStage {
+        program,
+        stage: PhantomData::<Initial>,
+    };
+    let stage = variables::validate(stage)?;
+    let stage = gotos::validate(stage)?;
+
+    Ok(SemaStage {
+        program: stage.program,
+        stage: PhantomData::<Final>,
+    })
 }
 
 mod variables {
     use super::*;
 
-    pub fn validate(program: ast::Program) -> Result<ast::Program> {
-        let valid_function = validate_function(program.function)?;
+    pub fn validate(stage: SemaStage<Initial>) -> Result<SemaStage<VariableResolution>> {
+        let valid_function = validate_function(stage.program.function)?;
 
-        Ok(ast::Program {
-            function: valid_function,
+        Ok(SemaStage {
+            program: ast::Program {
+                function: valid_function,
+            },
+            stage: PhantomData::<VariableResolution>,
         })
     }
 
@@ -233,13 +256,13 @@ mod variables {
 
 mod gotos {
     use super::*;
-    pub fn validate(program: ast::Program) -> Result<ast::Program> {
+    pub fn validate(stage: SemaStage<VariableResolution>) -> Result<SemaStage<GotoValidation>> {
         let ast::Function {
             ret_t,
             name,
             signature,
             block,
-        } = program.function;
+        } = stage.program.function;
 
         let mut label_map = HashMap::new();
         let block = if let Some(block) = block {
@@ -250,13 +273,16 @@ mod gotos {
             None
         };
 
-        Ok(ast::Program {
-            function: ast::Function {
-                ret_t,
-                name,
-                signature,
-                block,
+        Ok(SemaStage {
+            program: ast::Program {
+                function: ast::Function {
+                    ret_t,
+                    name,
+                    signature,
+                    block,
+                },
             },
+            stage: PhantomData::<GotoValidation>,
         })
     }
 

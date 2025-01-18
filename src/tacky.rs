@@ -1,4 +1,5 @@
 use crate::ast;
+use crate::sema;
 use anyhow::{Context, Result};
 use std::rc::Rc;
 
@@ -7,11 +8,11 @@ pub struct Program {
     pub function: Function,
 }
 
-impl TryFrom<ast::Program> for Program {
+impl TryFrom<sema::SemaStage<sema::Final>> for Program {
     type Error = anyhow::Error;
-    fn try_from(node: ast::Program) -> Result<Self> {
+    fn try_from(stage: sema::SemaStage::<sema::Final>) -> Result<Self> {
         Ok(Self {
-            function: Function::try_from(node.function)
+            function: Function::try_from(stage.program.function)
                 .context("Failed to parse \"main\" function into TACKY representation")?,
         })
     }

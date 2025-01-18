@@ -1,6 +1,7 @@
 use crate::lexer::{self, Token};
 use anyhow::{bail, Context, Result};
 use std::cmp;
+use std::collections::HashMap;
 use std::rc::Rc;
 
 pub fn parse(tokens: &[Token]) -> Result<Program> {
@@ -270,6 +271,7 @@ pub enum Stmt {
         condition: Expr,
         body: Box<Stmt>,
         label: Option<Rc<String>>,
+        cases: Option<Vec<(i32, Rc<String>)>>,
     },
     Goto(Rc<String>),
     Label {

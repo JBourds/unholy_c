@@ -457,11 +457,120 @@ mod gotos {
 mod switch {
     use super::*;
 
+    struct SwitchContext {
+        name: Option<Rc<String>>,
+        label_map: HashMap<i32, Rc<String>>,
+    }
+
+    impl SwitchContext {
+        pub fn new() -> Self {
+            Self {
+                name: None,
+                label_map: HashMap::new(),
+            }
+        }
+
+        pub fn with_name(name: Rc<String>) -> Self {
+            Self {
+                name: Some(name),
+                label_map: HashMap::new(),
+            }
+        }
+
+        pub fn bound(&self) -> bool {
+            self.name.is_some()
+        }
+    }
+
     pub fn validate(stage: SemaStage<GotoValidation>) -> Result<SemaStage<SwitchLabelling>> {
+        let SemaStage { program, .. } = stage;
         Ok(SemaStage {
-            program: stage.program,
+            program: ast::Program {
+                function: resolve_function(program.function)?,
+            },
             stage: PhantomData::<SwitchLabelling>,
         })
+    }
+
+    fn resolve_function(function: ast::Function) -> Result<ast::Function> {
+        if let Some(block) = function.block {
+            let mut count = 0;
+            let mut unique_name_generator = |name: &str| -> String {
+                let new_name = format!("{}.{name}.{count}", function.name);
+                count += 1;
+                new_name
+            };
+            Ok(ast::Function {
+                block: Some(resolve_block(
+                    block,
+                    &mut SwitchContext::new(),
+                    &mut unique_name_generator,
+                )?),
+                ..function
+            })
+        } else {
+            Ok(function)
+        }
+    }
+
+    fn resolve_block(
+        block: ast::Block,
+        switch_context: &mut SwitchContext,
+        make_label: &mut impl FnMut(&str) -> String,
+    ) -> Result<ast::Block> {
+        let mut resolved_block_items = Vec::with_capacity(block.items().len());
+        for item in block.into_items().into_iter() {
+            match item {
+                ast::BlockItem::Stmt(stmt) => {
+                    resolved_block_items.push(ast::BlockItem::Stmt(resolve_stmt(
+                        stmt,
+                        switch_context,
+                        make_label,
+                    )?));
+                }
+                item => {
+                    resolved_block_items.push(item);
+                }
+            }
+        }
+        Ok(ast::Block(resolved_block_items))
+    }
+
+    fn resolve_stmt(
+        stmt: ast::Stmt,
+        switch_context: &mut SwitchContext,
+        make_label: &mut impl FnMut(&str) -> String,
+    ) -> Result<ast::Stmt> {
+        match (stmt, switch_context.name.clone()) {
+            (ast::Stmt::Break(_), None) => Ok(stmt),
+            (ast::Stmt::Break(name), Some(label)) => Ok(ast::Stmt::Break(Some(label))),
+            (
+                ast::Stmt::Switch {
+                    condition,
+                    body,
+                    label,
+                    cases,
+                },
+                _,
+            ) => {
+                let label = Rc::new(make_label("switch"));
+                let switch_context = SwitchContext::with_name(Rc::clone(&label));
+                let body = resolve_stmt(*body, &mut switch_context, make_label)?;
+
+                let cases = switch_context
+                    .label_map
+                    .drain()
+                    .collect::<Vec<(i32, Rc<String>)>>();
+
+                Ok(ast::Stmt::Switch {
+                    condition,
+                    body: Box::new(body),
+                    label: Some(label),
+                    cases: Some(cases),
+                })
+            }
+            _ => {}
+        }
     }
 }
 

@@ -89,7 +89,10 @@ pub enum Instruction {
 }
 
 impl Instruction {
-    fn parse_decl_with(decl: ast::Declaration, make_temp_var: &mut impl FnMut() -> String) -> Vec<Self> {
+    fn parse_decl_with(
+        decl: ast::Declaration,
+        make_temp_var: &mut impl FnMut() -> String,
+    ) -> Vec<Self> {
         if let Some(init) = decl.init {
             let Expr {
                 mut instructions,
@@ -101,7 +104,9 @@ impl Instruction {
                 dst: dst.clone(),
             });
             instructions
-        } else { vec![] }
+        } else {
+            vec![]
+        }
     }
     fn parse_stmt_with(stmt: ast::Stmt, make_temp_var: &mut impl FnMut() -> String) -> Vec<Self> {
         let mut block_instructions = vec![];
@@ -161,10 +166,7 @@ impl Instruction {
                     target: Rc::clone(&label_break),
                 });
                 // <instructions for body>
-                block_instructions.extend(Instruction::parse_stmt_with(
-                    *body,
-                    make_temp_var,
-                ));
+                block_instructions.extend(Instruction::parse_stmt_with(*body, make_temp_var));
                 // Jump(continue_label)
                 block_instructions.push(Instruction::Jump(label_continue));
                 // Label(break_label)
@@ -183,10 +185,7 @@ impl Instruction {
                 // Label(start)
                 block_instructions.push(Instruction::Label(Rc::clone(&label_start)));
                 // <instructions for body>
-                block_instructions.extend(Instruction::parse_stmt_with(
-                    *body,
-                    make_temp_var,
-                ));
+                block_instructions.extend(Instruction::parse_stmt_with(*body, make_temp_var));
                 // Label(continue_label)
                 block_instructions.push(Instruction::Label(label_continue));
                 // <instructions for condition>
@@ -216,11 +215,11 @@ impl Instruction {
                 // <instructions for init>
                 match init {
                     ast::ForInit::Decl(decl) => {
-                        block_instructions.extend(Instruction::parse_decl_with(decl, make_temp_var));
+                        block_instructions
+                            .extend(Instruction::parse_decl_with(decl, make_temp_var));
                     }
                     ast::ForInit::Expr(Some(expr)) => {
-                        let Expr { instructions, .. } =
-                            Expr::parse_with(expr, make_temp_var);
+                        let Expr { instructions, .. } = Expr::parse_with(expr, make_temp_var);
                         block_instructions.extend(instructions);
                     }
                     ast::ForInit::Expr(None) => {}
@@ -242,10 +241,7 @@ impl Instruction {
                     });
                 }
                 // <instructions for body>
-                block_instructions.extend(Instruction::parse_stmt_with(
-                    *body,
-                    make_temp_var,
-                ));
+                block_instructions.extend(Instruction::parse_stmt_with(*body, make_temp_var));
                 // Label(continue_label)
                 block_instructions.push(Instruction::Label(label_continue));
                 // <instructions for post>
@@ -307,7 +303,12 @@ impl Instruction {
                 block_instructions.extend(instructions);
             }
             ast::Stmt::Case { value, body, label } => todo!(),
-            ast::Stmt::Switch { condition, body, label } => todo!(),
+            ast::Stmt::Switch {
+                condition,
+                body,
+                label,
+                cases,
+            } => todo!(),
             ast::Stmt::Default(label) => todo!(),
         }
         block_instructions
@@ -319,7 +320,9 @@ impl Instruction {
                 ast::BlockItem::Decl(decl) => {
                     block_instructions.extend(Self::parse_decl_with(decl, make_temp_var));
                 }
-                ast::BlockItem::Stmt(stmt) => { block_instructions.extend(Self::parse_stmt_with(stmt, make_temp_var)); }
+                ast::BlockItem::Stmt(stmt) => {
+                    block_instructions.extend(Self::parse_stmt_with(stmt, make_temp_var));
+                }
             }
         }
         block_instructions

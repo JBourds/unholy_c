@@ -427,11 +427,18 @@ mod loops {
     }
 
     fn resolve_block(block: ast::Block) -> Result<ast::Block> {
-        Ok(block)
-    }
-
-    fn resolve_block_item(item: ast::BlockItem) -> Result<ast::BlockItem> {
-        Ok(item)
+        let mut resolved_block_items = Vec::with_capacity(block.items().len());
+        for item in block.into_items().into_iter() {
+            match item {
+                ast::BlockItem::Stmt(stmt) => {
+                    resolved_block_items.push(ast::BlockItem::Stmt(resolve_stmt(stmt)?));
+                }
+                item => {
+                    resolved_block_items.push(item);
+                }
+            }
+        }
+        Ok(ast::Block(resolved_block_items))
     }
 
     fn resolve_stmt(stmt: ast::Stmt) -> Result<ast::Stmt> {

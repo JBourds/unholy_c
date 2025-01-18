@@ -7,11 +7,11 @@ use anyhow::{bail, Result};
 // current scope as well as the string variable name
 type FrameEntry = (bool, Rc<String>);
 
-pub enum Initial {}
-pub enum VariableResolution {}
-pub enum GotoValidation {}
-pub enum LoopLabelling {}
-pub enum SwitchLabelling {}
+enum Initial {}
+enum VariableResolution {}
+enum GotoValidation {}
+enum LoopLabelling {}
+enum SwitchLabelling {}
 pub enum Final {}
 
 pub struct SemaStage<T> {

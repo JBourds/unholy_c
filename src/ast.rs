@@ -205,6 +205,12 @@ impl AstNode for Block {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+pub enum ForInit {
+    Decl(Declaration),
+    Expr(Option<Expr>),
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub enum Stmt {
     Compound(Block),
     Return(Option<Expr>),
@@ -213,6 +219,22 @@ pub enum Stmt {
         condition: Expr,
         then: Box<Stmt>,
         r#else: Option<Box<Stmt>>,
+    },
+    Break,
+    Continue,
+    While {
+        condition: Expr,
+        body: Box<Stmt>,
+    },
+    DoWhile {
+        body: Box<Stmt>,
+        condition: Expr,
+    },
+    For {
+        init: ForInit,
+        condition: Option<Expr>,
+        post: Option<Expr>,
+        body: Box<Stmt>,
     },
     Goto(Rc<String>),
     Label(Rc<String>),

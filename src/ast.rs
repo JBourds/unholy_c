@@ -272,7 +272,10 @@ pub enum Stmt {
         label: Option<Rc<String>>,
     },
     Goto(Rc<String>),
-    Label(Rc<String>),
+    Label {
+        name: Rc<String>,
+        stmt: Box<Stmt>,
+    },
     Null,
 }
 
@@ -298,7 +301,14 @@ impl AstNode for Stmt {
                 Ok((Self::Goto(Rc::new(name.to_string())), tokens))
             }
             [Token::Ident(name), Token::Colon, tokens @ ..] => {
-                Ok((Self::Label(Rc::new(name.to_string())), tokens))
+                let (stmt, tokens) = Stmt::consume(tokens)?;
+                Ok((
+                    Self::Label {
+                        name: Rc::new(name.to_string()),
+                        stmt: Box::new(stmt),
+                    },
+                    tokens,
+                ))
             }
             [Token::Break, Token::Semi, tokens @ ..] => Ok((Self::Break(None), tokens)),
             [Token::Continue, Token::Semi, tokens @ ..] => Ok((Self::Continue(None), tokens)),

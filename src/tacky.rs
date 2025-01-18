@@ -128,8 +128,9 @@ impl Instruction {
             ast::Stmt::Goto(label) => {
                 block_instructions.push(Instruction::Jump(label));
             }
-            ast::Stmt::Label(label) => {
-                block_instructions.push(Instruction::Label(label));
+            ast::Stmt::Label { name, stmt } => {
+                block_instructions.push(Instruction::Label(name));
+                block_instructions.extend(Self::parse_stmt_with(*stmt, make_temp_var));
             }
             ast::Stmt::Break(label) => {
                 let label = Rc::new(format!("{}.break", label.unwrap()));

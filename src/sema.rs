@@ -244,7 +244,7 @@ mod variables {
                 Ok(ast::Stmt::Compound(block))
             }
             ast::Stmt::Goto(label) => Ok(ast::Stmt::Goto(label)),
-            ast::Stmt::Label(label) => Ok(ast::Stmt::Label(label)),
+            label @ ast::Stmt::Label { .. } => Ok(label),
             ast::Stmt::Default(label) => Ok(ast::Stmt::Default(label)),
             ast::Stmt::Switch {
                 condition,
@@ -355,27 +355,14 @@ mod gotos {
         label_map: &mut HashMap<Rc<String>, Rc<String>>,
     ) -> Result<ast::Block> {
         let mut block_items = Vec::with_capacity(block.items().len());
-
-        let mut last_thing_was_a_label = (false, false);
         for block_item in block.into_items().into_iter() {
-            last_thing_was_a_label = match block_item {
-                ast::BlockItem::Stmt(ast::Stmt::Label(_)) => (last_thing_was_a_label.1, true),
-                _ => (last_thing_was_a_label.1, false),
-            };
-
             let fixed = match block_item {
-                ast::BlockItem::Stmt(stmt) => ast::BlockItem::Stmt(resolve_stmt(
-                    stmt,
-                    func_name,
-                    label_map,
-                )?),
-                _ if last_thing_was_a_label.0 => bail!("A label most be followed by a statement, not expression. To get around this, add a null statement i.e: (label: ;)"),
+                ast::BlockItem::Stmt(stmt) => {
+                    ast::BlockItem::Stmt(resolve_stmt(stmt, func_name, label_map)?)
+                }
                 _ => block_item,
             };
             block_items.push(fixed);
-        }
-        if last_thing_was_a_label.1 {
-            bail!("Label must be followed by a statement. To get around this, add a null statement i.e: (label: ;)")
         }
 
         Ok(ast::Block(block_items))
@@ -402,13 +389,16 @@ mod gotos {
                     None => None,
                 },
             }),
-            ast::Stmt::Label(name) => {
+            ast::Stmt::Label { name, stmt } => {
                 if label_map.contains_key(&name) {
                     bail!("Duplicate labels {name}");
                 } else {
                     let new_name = Rc::new(format!("{func_name}.{name}"));
                     label_map.insert(Rc::clone(&name), Rc::clone(&new_name));
-                    Ok(ast::Stmt::Label(new_name))
+                    Ok(ast::Stmt::Label {
+                        name: new_name,
+                        stmt,
+                    })
                 }
             }
             _ => Ok(stmt.clone()),

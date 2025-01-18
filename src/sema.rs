@@ -286,7 +286,7 @@ mod gotos {
         })
     }
 
-    pub fn resolve_block(
+    fn resolve_block(
         block: ast::Block,
         func_name: &Rc<String>,
         label_map: &mut HashMap<Rc<String>, Rc<String>>,
@@ -318,7 +318,7 @@ mod gotos {
         Ok(ast::Block(block_items))
     }
 
-    pub fn resolve_stmt(
+    fn resolve_stmt(
         stmt: ast::Stmt,
         func_name: &Rc<String>,
         label_map: &mut HashMap<Rc<String>, Rc<String>>,
@@ -352,7 +352,7 @@ mod gotos {
         }
     }
 
-    pub fn validate_block(
+    fn validate_block(
         block: ast::Block,
         label_map: &HashMap<Rc<String>, Rc<String>>,
     ) -> Result<ast::Block> {
@@ -369,7 +369,7 @@ mod gotos {
         Ok(ast::Block(block_items))
     }
 
-    pub fn validate_stmt(
+    fn validate_stmt(
         stmt: ast::Stmt,
         label_map: &HashMap<Rc<String>, Rc<String>>,
     ) -> Result<ast::Stmt> {

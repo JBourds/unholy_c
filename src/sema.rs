@@ -7,298 +7,348 @@ use anyhow::{bail, Result};
 // current scope as well as the string variable name
 type FrameEntry = (bool, Rc<String>);
 
-pub fn validate<'a>(program: &ast::Program<'a>) -> Result<ast::Program<'a>> {
-    let valid_function = validate_function(&program.function)?;
-    validate_gotos(&ast::Program {
-        function: valid_function,
-    })
+pub fn validate(program: ast::Program) -> Result<ast::Program> {
+    let program = variables::validate(program)?;
+    let program = gotos::validate(program)?;
+    Ok(program)
 }
 
-fn validate_function<'a>(function: &ast::Function<'a>) -> Result<ast::Function<'a>> {
-    let mut variable_map = HashMap::new();
-    let mut count = 0;
-    let mut unique_name_generator = move |name: &str| -> String {
-        let new_name = format!("{name}.{count}");
-        count += 1;
-        new_name
-    };
-    let block = if let Some(block) = &function.block {
-        Some(validate_block(
+mod variables {
+    use super::*;
+
+    pub fn validate(program: ast::Program) -> Result<ast::Program> {
+        let valid_function = validate_function(program.function)?;
+
+        Ok(ast::Program {
+            function: valid_function,
+        })
+    }
+    fn validate_function(function: ast::Function) -> Result<ast::Function> {
+        let mut variable_map = HashMap::new();
+        let mut count = 0;
+        let mut unique_name_generator = move |name: &str| -> String {
+            let new_name = format!("{name}.{count}");
+            count += 1;
+            new_name
+        };
+        let ast::Function {
+            ret_t,
+            name,
+            signature,
             block,
-            &mut variable_map,
-            &mut unique_name_generator,
-        )?)
-    } else {
-        None
-    };
+        } = function;
 
-    Ok(ast::Function {
-        ret_t: function.ret_t,
-        name: function.name,
-        signature: function.signature.clone(),
-        block,
-    })
-}
+        let block = if let Some(block) = block {
+            Some(validate_block(
+                block,
+                &mut variable_map,
+                &mut unique_name_generator,
+            )?)
+        } else {
+            None
+        };
 
-fn validate_block(
-    block: &ast::Block,
-    variable_map: &mut HashMap<Rc<String>, FrameEntry>,
-    make_temporary: &mut impl FnMut(&str) -> String,
-) -> Result<ast::Block> {
-    let valid_items = block
-        .items()
-        .iter()
-        .try_fold(Vec::new(), |mut items, block_item| {
-            items.push(validate_blockitem(
-                block_item,
+        Ok(ast::Function {
+            ret_t,
+            name,
+            signature,
+            block,
+        })
+    }
+
+    fn validate_block(
+        block: ast::Block,
+        variable_map: &mut HashMap<Rc<String>, FrameEntry>,
+        make_temporary: &mut impl FnMut(&str) -> String,
+    ) -> Result<ast::Block> {
+        let valid_items =
+            block
+                .into_items()
+                .into_iter()
+                .try_fold(Vec::new(), |mut items, block_item| {
+                    items.push(validate_blockitem(
+                        block_item,
+                        variable_map,
+                        make_temporary,
+                    )?);
+                    Ok::<Vec<ast::BlockItem>, anyhow::Error>(items)
+                })?;
+        Ok(ast::Block(valid_items))
+    }
+
+    fn validate_blockitem(
+        instruction: ast::BlockItem,
+        variable_map: &mut HashMap<Rc<String>, FrameEntry>,
+        make_temporary: &mut impl FnMut(&str) -> String,
+    ) -> Result<ast::BlockItem> {
+        match instruction {
+            ast::BlockItem::Stmt(stmt) => Ok(ast::BlockItem::Stmt(resolve_stmt(
+                stmt,
                 variable_map,
                 make_temporary,
-            )?);
-            Ok::<Vec<ast::BlockItem>, anyhow::Error>(items)
-        })?;
-    Ok(ast::Block(valid_items))
-}
+            )?)),
+            ast::BlockItem::Decl(ast::Declaration { typ, name, init }) => {
+                if variable_map
+                    .get(&name)
+                    .is_some_and(|(from_this_frame, _)| *from_this_frame)
+                {
+                    bail!("Duplicate variable declaration '{name}'");
+                }
+                let unique_name = Rc::new(make_temporary(&name));
+                variable_map.insert(Rc::clone(&name), (true, Rc::clone(&unique_name)));
 
-fn validate_blockitem(
-    instruction: &ast::BlockItem,
-    variable_map: &mut HashMap<Rc<String>, FrameEntry>,
-    make_temporary: &mut impl FnMut(&str) -> String,
-) -> Result<ast::BlockItem> {
-    match instruction {
-        ast::BlockItem::Stmt(stmt) => Ok(ast::BlockItem::Stmt(resolve_stmt(
-            stmt,
-            variable_map,
-            make_temporary,
-        )?)),
-        ast::BlockItem::Decl(ast::Declaration { typ, name, init }) => {
-            if variable_map
-                .get(name)
-                .map_or(false, |(from_this_frame, _)| *from_this_frame)
-            {
-                bail!("Duplicate variable declaration '{name}'");
-            }
-            let unique_name = Rc::new(make_temporary(name));
-            variable_map.insert(Rc::clone(name), (true, Rc::clone(&unique_name)));
+                let init = match init {
+                    Some(expr) => Some(resolve_expr(expr, variable_map)?),
+                    None => None,
+                };
 
-            let init = match init {
-                Some(expr) => Some(resolve_expr(expr, variable_map)?),
-                None => None,
-            };
-
-            Ok(ast::BlockItem::Decl(ast::Declaration {
-                typ: *typ,
-                name: unique_name,
-                init,
-            }))
-        }
-    }
-}
-
-fn resolve_stmt(
-    stmt: &ast::Stmt,
-    variable_map: &HashMap<Rc<String>, FrameEntry>,
-    make_temporary: &mut impl FnMut(&str) -> String,
-) -> Result<ast::Stmt> {
-    match stmt {
-        ast::Stmt::Return(Some(expr)) => {
-            Ok(ast::Stmt::Return(Some(resolve_expr(expr, variable_map)?)))
-        }
-        ast::Stmt::Return(None) => Ok(ast::Stmt::Return(None)),
-        ast::Stmt::Expr(expr) => Ok(ast::Stmt::Expr(resolve_expr(expr, variable_map)?)),
-        ast::Stmt::If {
-            condition,
-            then,
-            r#else,
-        } => Ok(ast::Stmt::If {
-            condition: resolve_expr(condition, variable_map)?,
-            then: Box::new(resolve_stmt(then, variable_map, make_temporary)?),
-            r#else: r#else
-                .as_ref()
-                .map(Ok)
-                .map(
-                    |result_box_stmt: std::result::Result<&Box<ast::Stmt>, anyhow::Error>| {
-                        assert!(result_box_stmt.is_ok());
-                        resolve_stmt(result_box_stmt.unwrap(), variable_map, make_temporary)
-                    },
-                )
-                .transpose()?
-                .map(Box::new),
-        }),
-        ast::Stmt::Null => Ok(ast::Stmt::Null),
-        ast::Stmt::Compound(block) => {
-            let mut new_map =
-                variable_map
-                    .iter()
-                    .fold(HashMap::new(), |mut map, (key, (_, var))| {
-                        map.insert(Rc::clone(key), (false, Rc::clone(var)));
-                        map
-                    });
-            let block = validate_block(block, &mut new_map, make_temporary)?;
-            Ok(ast::Stmt::Compound(block))
-        }
-        ast::Stmt::Goto(label) => Ok(ast::Stmt::Goto(Rc::clone(label))),
-        ast::Stmt::Label(label) => Ok(ast::Stmt::Label(Rc::clone(label))),
-    }
-}
-
-fn resolve_expr(
-    expr: &ast::Expr,
-    variable_map: &HashMap<Rc<String>, FrameEntry>,
-) -> Result<ast::Expr> {
-    match expr {
-        ast::Expr::Assignment { lvalue, rvalue } => {
-            match **lvalue {
-                ast::Expr::Var(_) => (),
-                _ => bail!("Invalid lvalue '{:?}'", expr),
-            };
-            Ok(ast::Expr::Assignment {
-                lvalue: Box::new(resolve_expr(lvalue, variable_map)?),
-                rvalue: Box::new(resolve_expr(rvalue, variable_map)?),
-            })
-        }
-        ast::Expr::Var(var) => {
-            if let Some((_, name)) = variable_map.get(var) {
-                Ok(ast::Expr::Var(Rc::clone(name)))
-            } else {
-                bail!("Undeclared variable '{var}'")
+                Ok(ast::BlockItem::Decl(ast::Declaration {
+                    typ,
+                    name: unique_name,
+                    init,
+                }))
             }
         }
-        ast::Expr::Literal(lit) => Ok(ast::Expr::Literal(*lit)),
-        ast::Expr::Unary { op, expr } => {
-            if op.is_valid_for(expr) {
-                Ok(ast::Expr::Unary {
-                    op: *op,
-                    expr: Box::new(resolve_expr(expr, variable_map)?),
+    }
+
+    fn resolve_stmt(
+        stmt: ast::Stmt,
+        variable_map: &HashMap<Rc<String>, FrameEntry>,
+        make_temporary: &mut impl FnMut(&str) -> String,
+    ) -> Result<ast::Stmt> {
+        match stmt {
+            ast::Stmt::Return(Some(expr)) => {
+                Ok(ast::Stmt::Return(Some(resolve_expr(expr, variable_map)?)))
+            }
+            ast::Stmt::Return(None) => Ok(ast::Stmt::Return(None)),
+            ast::Stmt::Expr(expr) => Ok(ast::Stmt::Expr(resolve_expr(expr, variable_map)?)),
+            ast::Stmt::If {
+                condition,
+                then,
+                r#else,
+            } => Ok(ast::Stmt::If {
+                condition: resolve_expr(condition, variable_map)?,
+                then: Box::new(resolve_stmt(*then, variable_map, make_temporary)?),
+                r#else: match r#else {
+                    Some(r#else) => Some(Box::new(resolve_stmt(
+                        *r#else,
+                        variable_map,
+                        make_temporary,
+                    )?)),
+                    None => None,
+                },
+            }),
+            ast::Stmt::Null => Ok(ast::Stmt::Null),
+            ast::Stmt::Compound(block) => {
+                let mut new_map =
+                    variable_map
+                        .iter()
+                        .fold(HashMap::new(), |mut map, (key, (_, var))| {
+                            map.insert(Rc::clone(key), (false, Rc::clone(var)));
+                            map
+                        });
+                let block = validate_block(block, &mut new_map, make_temporary)?;
+                Ok(ast::Stmt::Compound(block))
+            }
+            ast::Stmt::Goto(label) => Ok(ast::Stmt::Goto(label)),
+            ast::Stmt::Label(label) => Ok(ast::Stmt::Label(label)),
+        }
+    }
+
+    fn resolve_expr(
+        expr: ast::Expr,
+        variable_map: &HashMap<Rc<String>, FrameEntry>,
+    ) -> Result<ast::Expr> {
+        match expr {
+            ast::Expr::Assignment { lvalue, rvalue } => {
+                let lvalue = match *lvalue {
+                    ast::Expr::Var(v) => ast::Expr::Var(v),
+                    _ => bail!(
+                        "Invalid lvalue '{:?}'",
+                        ast::Expr::Assignment { lvalue, rvalue }
+                    ),
+                };
+                Ok(ast::Expr::Assignment {
+                    lvalue: Box::new(resolve_expr(lvalue, variable_map)?),
+                    rvalue: Box::new(resolve_expr(*rvalue, variable_map)?),
                 })
-            } else {
-                bail!("Op {:?} is invalid for expression {:?}", op, expr)
             }
+            ast::Expr::Var(var) => {
+                if let Some((_, name)) = variable_map.get(&var) {
+                    Ok(ast::Expr::Var(Rc::clone(name)))
+                } else {
+                    bail!("Undeclared variable '{var}'")
+                }
+            }
+            ast::Expr::Literal(lit) => Ok(ast::Expr::Literal(lit)),
+            ast::Expr::Unary { op, expr } => {
+                if op.is_valid_for(&expr) {
+                    Ok(ast::Expr::Unary {
+                        op,
+                        expr: Box::new(resolve_expr(*expr, variable_map)?),
+                    })
+                } else {
+                    bail!("Op {:?} is invalid for expression {:?}", op, expr)
+                }
+            }
+            ast::Expr::Binary { op, left, right } => Ok(ast::Expr::Binary {
+                op,
+                left: Box::new(resolve_expr(*left, variable_map)?),
+                right: Box::new(resolve_expr(*right, variable_map)?),
+            }),
+            ast::Expr::Conditional {
+                condition,
+                then,
+                r#else,
+            } => Ok(ast::Expr::Conditional {
+                condition: Box::new(resolve_expr(*condition, variable_map)?),
+                then: Box::new(resolve_expr(*then, variable_map)?),
+                r#else: Box::new(resolve_expr(*r#else, variable_map)?),
+            }),
         }
-        ast::Expr::Binary { op, left, right } => Ok(ast::Expr::Binary {
-            op: *op,
-            left: Box::new(resolve_expr(left, variable_map)?),
-            right: Box::new(resolve_expr(right, variable_map)?),
-        }),
-        ast::Expr::Conditional {
-            condition,
-            then,
-            r#else,
-        } => Ok(ast::Expr::Conditional {
-            condition: Box::new(resolve_expr(condition, variable_map)?),
-            then: Box::new(resolve_expr(then, variable_map)?),
-            r#else: Box::new(resolve_expr(r#else, variable_map)?),
-        }),
     }
 }
 
-pub fn validate_gotos<'a>(program: &ast::Program<'a>) -> Result<ast::Program<'a>> {
-    let mut label_map = HashMap::new();
+mod gotos {
+    use super::*;
+    pub fn validate(program: ast::Program) -> Result<ast::Program> {
+        let ast::Function {
+            ret_t,
+            name,
+            signature,
+            block,
+        } = program.function;
 
-    let block = if let Some(block) = &program.function.block {
-        let mut new_blocks = Vec::with_capacity(block.items().len());
+        let mut label_map = HashMap::new();
+        let block = if let Some(block) = block {
+            let block = resolve_block(block, &name, &mut label_map)?;
+            let block = validate_block(block, &label_map)?;
+            Some(block)
+        } else {
+            None
+        };
+
+        Ok(ast::Program {
+            function: ast::Function {
+                ret_t,
+                name,
+                signature,
+                block,
+            },
+        })
+    }
+
+    pub fn resolve_block(
+        block: ast::Block,
+        func_name: &Rc<String>,
+        label_map: &mut HashMap<Rc<String>, Rc<String>>,
+    ) -> Result<ast::Block> {
+        let mut block_items = Vec::with_capacity(block.items().len());
 
         let mut last_thing_was_a_label = (false, false);
-        for block_item in block.items().iter() {
+        for block_item in block.into_items().into_iter() {
             last_thing_was_a_label = match block_item {
                 ast::BlockItem::Stmt(ast::Stmt::Label(_)) => (last_thing_was_a_label.1, true),
                 _ => (last_thing_was_a_label.1, false),
             };
 
             let fixed = match block_item {
-                ast::BlockItem::Stmt(stmt) => ast::BlockItem::Stmt(resolve_gotos_stmt(
-                    program.function.name,
+                ast::BlockItem::Stmt(stmt) => ast::BlockItem::Stmt(resolve_stmt(
                     stmt,
-                    &mut label_map,
+                    func_name,
+                    label_map,
                 )?),
                 _ if last_thing_was_a_label.0 => bail!("A label most be followed by a statement, not expression. To get around this, add a null statement i.e: (label: ;)"),
-                _ => block_item.clone(),
+                _ => block_item,
             };
-            new_blocks.push(fixed);
+            block_items.push(fixed);
         }
         if last_thing_was_a_label.1 {
             bail!("Label must be followed by a statement. To get around this, add a null statement i.e: (label: ;)")
         }
 
-        let mut new_blocks1 = Vec::with_capacity(new_blocks.len());
-        for block_item in new_blocks.into_iter() {
-            let fixed = match block_item {
-                ast::BlockItem::Stmt(stmt) => {
-                    ast::BlockItem::Stmt(validate_goto_stmt(&stmt, &label_map)?)
-                }
-                _ => block_item.clone(),
-            };
-            new_blocks1.push(fixed);
-        }
-        Some(ast::Block(new_blocks1))
-    } else {
-        None
-    };
-
-    Ok(ast::Program {
-        function: ast::Function {
-            ret_t: program.function.ret_t,
-            name: program.function.name,
-            signature: program.function.signature.clone(),
-            block,
-        },
-    })
-}
-
-pub fn resolve_gotos_stmt(
-    func_name: &str,
-    stmt: &ast::Stmt,
-    label_map: &mut HashMap<Rc<String>, Rc<String>>,
-) -> Result<ast::Stmt> {
-    match stmt {
-        ast::Stmt::If {
-            condition,
-            then,
-            r#else,
-        } => Ok(ast::Stmt::If {
-            condition: condition.clone(),
-            then: Box::new(resolve_gotos_stmt(func_name, then, label_map)?),
-            r#else: match r#else {
-                Some(r#else) => Some(Box::new(resolve_gotos_stmt(func_name, r#else, label_map)?)),
-                None => None,
-            },
-        }),
-        ast::Stmt::Label(name) => {
-            if label_map.contains_key(name) {
-                bail!("Duplicate labels {name}");
-            } else {
-                let new_name = Rc::new(format!("{func_name}.{name}"));
-                label_map.insert(Rc::clone(name), Rc::clone(&new_name));
-                Ok(ast::Stmt::Label(new_name))
-            }
-        }
-        _ => Ok(stmt.clone()),
+        Ok(ast::Block(block_items))
     }
-}
 
-pub fn validate_goto_stmt(
-    stmt: &ast::Stmt,
-    label_map: &HashMap<Rc<String>, Rc<String>>,
-) -> Result<ast::Stmt> {
-    match stmt {
-        ast::Stmt::If {
-            condition,
-            then,
-            r#else,
-        } => Ok(ast::Stmt::If {
-            condition: condition.clone(),
-            then: Box::new(validate_goto_stmt(then, label_map)?),
-            r#else: match r#else {
-                Some(r#else) => Some(Box::new(validate_goto_stmt(r#else, label_map)?)),
-                None => None,
-            },
-        }),
-        ast::Stmt::Goto(label) => {
-            if let Some(new_label) = label_map.get(label) {
-                Ok(ast::Stmt::Goto(Rc::clone(new_label)))
-            } else {
-                bail!("Goto label '{label}' does not exist");
+    pub fn resolve_stmt(
+        stmt: ast::Stmt,
+        func_name: &Rc<String>,
+        label_map: &mut HashMap<Rc<String>, Rc<String>>,
+    ) -> Result<ast::Stmt> {
+        match stmt {
+            ast::Stmt::Compound(block) => Ok(ast::Stmt::Compound(resolve_block(
+                block, func_name, label_map,
+            )?)),
+            ast::Stmt::If {
+                condition,
+                then,
+                r#else,
+            } => Ok(ast::Stmt::If {
+                condition: condition.clone(),
+                then: Box::new(resolve_stmt(*then, func_name, label_map)?),
+                r#else: match r#else {
+                    Some(r#else) => Some(Box::new(resolve_stmt(*r#else, func_name, label_map)?)),
+                    None => None,
+                },
+            }),
+            ast::Stmt::Label(name) => {
+                if label_map.contains_key(&name) {
+                    bail!("Duplicate labels {name}");
+                } else {
+                    let new_name = Rc::new(format!("{func_name}.{name}"));
+                    label_map.insert(Rc::clone(&name), Rc::clone(&new_name));
+                    Ok(ast::Stmt::Label(new_name))
+                }
             }
+            _ => Ok(stmt.clone()),
         }
-        _ => Ok(stmt.clone()),
+    }
+
+    pub fn validate_block(
+        block: ast::Block,
+        label_map: &HashMap<Rc<String>, Rc<String>>,
+    ) -> Result<ast::Block> {
+        let mut block_items = Vec::with_capacity(block.items().len());
+
+        for block_item in block.into_items().into_iter() {
+            let fixed = match block_item {
+                ast::BlockItem::Stmt(stmt) => ast::BlockItem::Stmt(validate_stmt(stmt, label_map)?),
+                _ => block_item,
+            };
+            block_items.push(fixed);
+        }
+
+        Ok(ast::Block(block_items))
+    }
+
+    pub fn validate_stmt(
+        stmt: ast::Stmt,
+        label_map: &HashMap<Rc<String>, Rc<String>>,
+    ) -> Result<ast::Stmt> {
+        match stmt {
+            ast::Stmt::Compound(block) => {
+                Ok(ast::Stmt::Compound(validate_block(block, label_map)?))
+            }
+            ast::Stmt::If {
+                condition,
+                then,
+                r#else,
+            } => Ok(ast::Stmt::If {
+                condition: condition.clone(),
+                then: Box::new(validate_stmt(*then, label_map)?),
+                r#else: match r#else {
+                    Some(r#else) => Some(Box::new(validate_stmt(*r#else, label_map)?)),
+                    None => None,
+                },
+            }),
+            ast::Stmt::Goto(label) => {
+                if let Some(new_label) = label_map.get(&label) {
+                    Ok(ast::Stmt::Goto(Rc::clone(new_label)))
+                } else {
+                    bail!("Goto label '{label}' does not exist");
+                }
+            }
+            _ => Ok(stmt.clone()),
+        }
     }
 }

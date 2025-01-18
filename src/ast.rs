@@ -1,8 +1,9 @@
 use crate::lexer::{self, Token};
 use anyhow::{bail, Context, Result};
+use std::cmp;
 use std::rc::Rc;
 
-pub fn parse<'a>(tokens: &'a [Token]) -> Result<Program<'a>> {
+pub fn parse(tokens: &[Token]) -> Result<Program> {
     let (program, tokens) = Program::consume(tokens)?;
     if !tokens.is_empty() {
         bail!("Found extra tokens when parsing main:\n{:#?}", tokens)
@@ -11,42 +12,39 @@ pub fn parse<'a>(tokens: &'a [Token]) -> Result<Program<'a>> {
     }
 }
 
-pub trait AstNode<'a> {
-    fn consume(tokens: &'a [Token<'a>]) -> Result<(Self, &'a [Token<'a>])>
+pub trait AstNode {
+    fn consume(tokens: &[Token]) -> Result<(Self, &[Token])>
     where
         Self: Sized;
 }
 
 #[derive(Debug, PartialEq)]
-pub struct Program<'a> {
-    pub function: Function<'a>,
+pub struct Program {
+    pub function: Function,
 }
-impl<'a> AstNode<'a> for Program<'a> {
-    fn consume(tokens: &'a [Token<'a>]) -> Result<(Program<'a>, &'a [Token<'a>])> {
+impl AstNode for Program {
+    fn consume(tokens: &[Token]) -> Result<(Program, &[Token])> {
         let (function, tokens) = Function::consume(tokens).context("Could not parse function.")?;
-        if let Function {
-            ret_t: Type::Int,
-            name: "main",
-            ..
-        } = function
-        {
-            Ok((Self { function }, tokens))
-        } else {
-            bail!("Could not find a \"main\" function.");
+        match (
+            function.ret_t,
+            function.name.as_ref().cmp(&"main".to_string()),
+        ) {
+            (Type::Int, cmp::Ordering::Equal) => Ok((Self { function }, tokens)),
+            _ => bail!("Could not find a \"main\" function."),
         }
     }
 }
 
 #[derive(Debug, PartialEq)]
-pub struct Function<'a> {
+pub struct Function {
     pub ret_t: Type,
-    pub name: &'a str,
-    pub signature: Vec<(Type, Option<&'a str>)>,
+    pub name: Rc<String>,
+    pub signature: Vec<(Type, Option<Rc<String>>)>,
     pub block: Option<Block>,
 }
 
-impl<'a> AstNode<'a> for Function<'a> {
-    fn consume(tokens: &'a [Token<'a>]) -> Result<(Function<'a>, &'a [Token<'a>])> {
+impl AstNode for Function {
+    fn consume(tokens: &[Token]) -> Result<(Function, &[Token])> {
         let (ret_t, tokens) = Type::consume(tokens)
             .context("No return type indicated for function. Add a return type, or mark the function as returning \"void\" to signal that it returns nothing.")?;
         if let [Token::Ident(name), Token::LParen, tokens @ ..] = tokens {
@@ -62,7 +60,7 @@ impl<'a> AstNode<'a> for Function<'a> {
                         match tokens {
                             [Token::Ident(s), Token::Comma, tokens @ ..]
                             | [Token::Ident(s), tokens @ ..] => {
-                                signature.push((param_t, Some(*s)));
+                                signature.push((param_t, Some(Rc::clone(s))));
                                 remaining = tokens;
                             }
                             [Token::Comma, tokens @ ..] => {
@@ -105,7 +103,7 @@ impl<'a> AstNode<'a> for Function<'a> {
             Ok((
                 Self {
                     ret_t,
-                    name,
+                    name: Rc::clone(name),
                     signature,
                     block,
                 },
@@ -123,8 +121,8 @@ pub enum BlockItem {
     Decl(Declaration),
 }
 
-impl<'a> AstNode<'a> for BlockItem {
-    fn consume(tokens: &'a [Token<'a>]) -> Result<(BlockItem, &'a [Token<'a>])> {
+impl AstNode for BlockItem {
+    fn consume(tokens: &[Token]) -> Result<(BlockItem, &[Token])> {
         if let Ok((decl, tokens)) = Declaration::consume(tokens) {
             Ok((Self::Decl(decl), tokens))
         } else {
@@ -141,8 +139,8 @@ pub struct Declaration {
     pub init: Option<Expr>,
 }
 
-impl<'a> AstNode<'a> for Declaration {
-    fn consume(tokens: &'a [Token<'a>]) -> Result<(Self, &'a [Token<'a>])> {
+impl AstNode for Declaration {
+    fn consume(tokens: &[Token]) -> Result<(Self, &[Token])> {
         let (typ, tokens) = Type::consume(tokens)?;
         match tokens {
             [lexer::Token::Ident(s), lexer::Token::Assign, tokens @ ..] => {
@@ -153,7 +151,7 @@ impl<'a> AstNode<'a> for Declaration {
                     Ok((
                         Self {
                             typ,
-                            name: Rc::new(String::from(*s)),
+                            name: Rc::clone(s),
                             init: Some(expr),
                         },
                         &tokens[1..],
@@ -163,7 +161,7 @@ impl<'a> AstNode<'a> for Declaration {
             [lexer::Token::Ident(s), lexer::Token::Semi, tokens @ ..] => Ok((
                 Self {
                     typ,
-                    name: Rc::new(String::from(*s)),
+                    name: Rc::clone(s),
                     init: None,
                 },
                 tokens,
@@ -179,10 +177,13 @@ impl Block {
     pub fn items(&self) -> &Vec<BlockItem> {
         &self.0
     }
+    pub fn into_items(self) -> Vec<BlockItem> {
+        self.0
+    }
 }
 
-impl<'a> AstNode<'a> for Block {
-    fn consume(tokens: &'a [Token<'a>]) -> Result<(Self, &'a [Token<'a>])> {
+impl AstNode for Block {
+    fn consume(tokens: &[Token]) -> Result<(Self, &[Token])> {
         match tokens.first() {
             Some(Token::LSquirly) => {
                 let mut remaining = &tokens[1..];
@@ -218,8 +219,8 @@ pub enum Stmt {
     Null,
 }
 
-impl<'a> AstNode<'a> for Stmt {
-    fn consume(tokens: &'a [Token<'a>]) -> Result<(Stmt, &'a [Token<'a>])> {
+impl AstNode for Stmt {
+    fn consume(tokens: &[Token]) -> Result<(Stmt, &[Token])> {
         let comma_terminated_expr = |tokens| {
             let (expr, tokens) = Expr::parse(tokens, 0).context(
                 "Expected return statement to return an expression but could not parse one.",
@@ -308,10 +309,7 @@ pub enum Expr {
 }
 
 impl Expr {
-    pub fn parse<'a>(
-        tokens: &'a [Token<'a>],
-        min_precedence: u32,
-    ) -> Result<(Expr, &'a [Token<'a>])> {
+    pub fn parse<'a>(tokens: &'a [Token], min_precedence: u32) -> Result<(Expr, &'a [Token])> {
         let (mut left, mut tokens) = Factor::parse(tokens)?;
         loop {
             let Some((operator, tokens_inner)) = BinaryOp::parse(tokens)? else {
@@ -340,7 +338,7 @@ impl Expr {
                 tokens = tokens_inner;
             } else if operator == BinaryOp::Ternary {
                 let parse_conditional_middle =
-                    |tokens: &'a [Token<'_>]| -> Result<(Expr, &'a [Token<'_>])> {
+                    |tokens: &'a [Token]| -> Result<(Expr, &'a [Token])> {
                         let (expr, tokens) = Expr::parse(tokens, 0)
                             .context("Failed to parse middle expression in ternary")?;
 
@@ -379,9 +377,9 @@ impl Expr {
 struct Factor;
 
 impl Factor {
-    pub fn parse<'a>(tokens: &'a [Token<'a>]) -> Result<(Expr, &'a [Token<'a>])> {
+    pub fn parse<'a>(tokens: &'a [Token]) -> Result<(Expr, &'a [Token])> {
         let check_for_postfix =
-            |expr: Expr, tokens: &'a [Token<'a>]| match UnaryOp::consume_postfix(tokens) {
+            |expr: Expr, tokens: &'a [Token]| match UnaryOp::consume_postfix(tokens) {
                 Ok((op, tokens)) => Ok((
                     Expr::Unary {
                         op,
@@ -409,7 +407,7 @@ impl Factor {
                     Ok((Expr::Literal(lit), tokens))
                 }
                 [lexer::Token::Ident(s), tokens @ ..] => {
-                    check_for_postfix(Expr::Var(Rc::new(String::from(*s))), tokens)
+                    check_for_postfix(Expr::Var(Rc::clone(s)), tokens)
                 }
                 [Token::LParen, tokens @ ..] => {
                     let (expr, tokens) = Expr::parse(tokens, 0)
@@ -430,8 +428,8 @@ pub enum Type {
     Int,
     Void,
 }
-impl<'a> AstNode<'a> for Type {
-    fn consume(tokens: &'a [Token<'a>]) -> Result<(Type, &'a [Token<'a>])> {
+impl AstNode for Type {
+    fn consume(tokens: &[Token]) -> Result<(Type, &[Token])> {
         if let Some(token) = tokens.first() {
             let t = match token {
                 Token::Int => Type::Int,
@@ -449,8 +447,8 @@ impl<'a> AstNode<'a> for Type {
 pub enum Literal {
     Int(i32),
 }
-impl<'a> AstNode<'a> for Literal {
-    fn consume(tokens: &'a [Token<'a>]) -> Result<(Literal, &'a [Token<'a>])> {
+impl AstNode for Literal {
+    fn consume(tokens: &[Token]) -> Result<(Literal, &[Token])> {
         if let Some(token) = tokens.first() {
             match token {
                 Token::Literal(s) => {
@@ -579,7 +577,7 @@ impl BinaryOp {
         }
     }
 
-    fn parse<'a>(tokens: &'a [Token<'a>]) -> Result<Option<(BinaryOp, &'a [Token<'a>])>> {
+    fn parse(tokens: &[Token]) -> Result<Option<(BinaryOp, &[Token])>> {
         let token = tokens.first().context("No remaining tokens")?;
         let tokens = &tokens[1..];
 
@@ -638,7 +636,7 @@ impl UnaryOp {
         ) || matches!(expr, Expr::Var(_))
     }
 
-    fn consume_prefix<'a>(tokens: &'a [Token<'a>]) -> Result<(Self, &'a [Token<'a>])> {
+    fn consume_prefix(tokens: &[Token]) -> Result<(Self, &[Token])> {
         if let Some(token) = tokens.first() {
             match tokens {
                 [Token::Minus, tokens @ ..] => Ok((Self::Negate, tokens)),
@@ -653,7 +651,7 @@ impl UnaryOp {
         }
     }
 
-    fn consume_postfix<'a>(tokens: &'a [Token<'a>]) -> Result<(Self, &'a [Token<'a>])> {
+    fn consume_postfix(tokens: &[Token]) -> Result<(Self, &[Token])> {
         if let Some(token) = tokens.first() {
             match tokens {
                 [Token::Increment, tokens @ ..] => Ok((Self::PostInc, tokens)),
@@ -674,13 +672,13 @@ mod tests {
     fn return_2() {
         let tokens = &[
             Token::Int,
-            Token::Ident("main"),
+            Token::Ident(Rc::new("main".to_string())),
             Token::LParen,
             Token::Void,
             Token::RParen,
             Token::LSquirly,
             Token::Return,
-            Token::Literal("2"),
+            Token::Literal(Rc::new("2".to_string())),
             Token::Semi,
             Token::RSquirly,
         ];
@@ -688,7 +686,7 @@ mod tests {
         let expected = Program {
             function: Function {
                 ret_t: Type::Int,
-                name: "main",
+                name: Rc::new("main".to_string()),
                 signature: vec![],
                 block: Some(Block(vec![BlockItem::Stmt(Stmt::Return(Some(
                     Expr::Literal(Literal::Int(2)),
@@ -702,30 +700,30 @@ mod tests {
     fn test_multiple_params() {
         let tokens = &[
             Token::Int,
-            Token::Ident("multiple_args"),
+            Token::Ident(Rc::new("multiple_args".to_string())),
             Token::LParen,
             Token::Int,
-            Token::Ident("x"),
+            Token::Ident(Rc::new("x".to_string())),
             Token::Comma,
             Token::Int,
             Token::Comma,
             Token::Int,
-            Token::Ident("z"),
+            Token::Ident(Rc::new("z".to_string())),
             Token::RParen,
             Token::LSquirly,
             Token::Return,
-            Token::Literal("2"),
+            Token::Literal(Rc::new("2".to_string())),
             Token::Semi,
             Token::RSquirly,
         ];
         let (function, _) = Function::consume(tokens).unwrap();
         let expected = Function {
             ret_t: Type::Int,
-            name: "multiple_args",
+            name: Rc::new("multiple_args".to_string()),
             signature: vec![
-                (Type::Int, Some("x")),
+                (Type::Int, Some(Rc::new("x".to_string()))),
                 (Type::Int, None),
-                (Type::Int, Some("z")),
+                (Type::Int, Some(Rc::new("z".to_string()))),
             ],
             block: Some(Block(vec![BlockItem::Stmt(Stmt::Return(Some(
                 Expr::Literal(Literal::Int(2)),
@@ -738,10 +736,10 @@ mod tests {
     fn rejects_trailing_comma() {
         let tokens = &[
             Token::Int,
-            Token::Ident("trailing_comma"),
+            Token::Ident(Rc::new("trailing_comma".to_string())),
             Token::LParen,
             Token::Int,
-            Token::Ident("x"),
+            Token::Ident(Rc::new("x".to_string())),
             Token::Comma,
             Token::RParen,
             Token::LSquirly,
@@ -755,7 +753,7 @@ mod tests {
     fn missing_return() {
         let tokens = &[
             Token::Int,
-            Token::Ident("main"),
+            Token::Ident(Rc::new("main".to_string())),
             Token::LParen,
             Token::Void,
             Token::RParen,
@@ -765,7 +763,7 @@ mod tests {
         let program = parse(tokens).unwrap();
         let expected = Program {
             function: Function {
-                name: "main",
+                name: Rc::new("main".to_string()),
                 block: Some(Block(vec![])),
                 signature: vec![],
                 ret_t: Type::Int,
@@ -776,7 +774,7 @@ mod tests {
 
     #[test]
     fn parse_unary_bitnot_empty() {
-        let tokens = &[Token::BitNot, Token::Literal("1")];
+        let tokens = &[Token::BitNot, Token::Literal(Rc::new("1".to_string()))];
 
         let (expr, tokens) = Factor::parse(tokens).unwrap();
 
@@ -793,7 +791,11 @@ mod tests {
 
     #[test]
     fn parse_unary_bitnot() {
-        let tokens = &[Token::BitNot, Token::Literal("1"), Token::Semi];
+        let tokens = &[
+            Token::BitNot,
+            Token::Literal(Rc::new("1".to_string())),
+            Token::Semi,
+        ];
 
         let (expr, tokens) = Factor::parse(tokens).unwrap();
 
@@ -809,7 +811,7 @@ mod tests {
 
     #[test]
     fn parse_unary_negate_empty() {
-        let tokens = &[Token::Minus, Token::Literal("1")];
+        let tokens = &[Token::Minus, Token::Literal(Rc::new("1".to_string()))];
 
         let (expr, tokens) = Factor::parse(tokens).unwrap();
 
@@ -826,7 +828,11 @@ mod tests {
 
     #[test]
     fn parse_unary_negate() {
-        let tokens = &[Token::Minus, Token::Literal("1"), Token::Semi];
+        let tokens = &[
+            Token::Minus,
+            Token::Literal(Rc::new("1".to_string())),
+            Token::Semi,
+        ];
 
         let (expr, tokens) = Factor::parse(tokens).unwrap();
 
@@ -846,7 +852,7 @@ mod tests {
             Token::LParen,
             Token::LParen,
             Token::LParen,
-            Token::Literal("1"),
+            Token::Literal(Rc::new("1".to_string())),
             Token::RParen,
             Token::RParen,
             Token::RParen,
@@ -866,7 +872,7 @@ mod tests {
             Token::LParen,
             Token::Minus,
             Token::LParen,
-            Token::Literal("2"),
+            Token::Literal(Rc::new("2".to_string())),
             Token::RParen,
             Token::RParen,
             Token::RParen,
@@ -892,7 +898,7 @@ mod tests {
     fn return_2_unary_edition() {
         let tokens = &[
             Token::Int,
-            Token::Ident("main"),
+            Token::Ident(Rc::new("main".to_string())),
             Token::LParen,
             Token::Void,
             Token::RParen,
@@ -901,7 +907,7 @@ mod tests {
             Token::Minus,
             Token::LParen,
             Token::Minus,
-            Token::Literal("2"),
+            Token::Literal(Rc::new("2".to_string())),
             Token::RParen,
             Token::Semi,
             Token::RSquirly,
@@ -910,7 +916,7 @@ mod tests {
         let expected = Program {
             function: Function {
                 ret_t: Type::Int,
-                name: "main",
+                name: Rc::new("main".to_string()),
                 signature: vec![],
                 block: Some(Block(vec![BlockItem::Stmt(Stmt::Return(Some(
                     Expr::Unary {
@@ -932,7 +938,7 @@ mod tests {
             Token::Minus,
             Token::LParen,
             Token::Minus,
-            Token::Literal("2"),
+            Token::Literal(Rc::new("2".to_string())),
             Token::RParen,
             Token::Semi,
         ];
@@ -960,7 +966,7 @@ mod tests {
             Token::Minus,
             Token::LParen,
             Token::Minus,
-            Token::Literal("2"),
+            Token::Literal(Rc::new("2".to_string())),
             Token::RParen,
             Token::Semi,
         ];

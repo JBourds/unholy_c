@@ -1,27 +1,28 @@
 use anyhow::{bail, Result};
 use regex::Regex;
+use std::rc::Rc;
 
 #[allow(dead_code)]
 pub struct Lexer;
 
 impl Lexer {
-    #[allow(dead_code)]
-    pub fn lex(mut stream: &str) -> Result<Vec<Token>> {
+    pub fn lex(stream: String) -> Result<Vec<Token>> {
         let mut line = 1;
         let mut character = 0;
         let mut tokens = vec![];
+        let mut current_stream = stream.as_str();
         loop {
-            match Token::consume(stream, &mut line, &mut character) {
+            match Token::consume(current_stream, &mut line, &mut character) {
                 Ok((token, s)) if token != Token::Eof => {
                     tokens.push(token);
-                    stream = s;
+                    current_stream = s;
                 }
                 Err(_) => {
                     bail!(
                         "Invalid token encountered at line {}, character {} starting at:\n\"\"\"\n{}\n\"\"\"",
                         line,
                         character,
-                        &stream[..100],
+                        &current_stream,
                     );
                 }
                 _ => {
@@ -33,11 +34,10 @@ impl Lexer {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
-#[allow(dead_code)]
-pub enum Token<'a> {
-    Ident(&'a str),
-    Literal(&'a str),
+#[derive(Clone, Debug, PartialEq)]
+pub enum Token {
+    Ident(Rc<String>),
+    Literal(Rc<String>),
     // Reserved
     Return,
     Typedef,
@@ -123,7 +123,7 @@ pub enum Token<'a> {
     SingleQuote,
 }
 
-impl<'a> std::fmt::Display for Token<'a> {
+impl std::fmt::Display for Token {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Ident(s) => write!(f, "Identifer: \"{}\"", s),
@@ -211,7 +211,7 @@ impl<'a> std::fmt::Display for Token<'a> {
     }
 }
 
-impl Token<'_> {
+impl Token {
     const IDENT: &'static str = r"^[a-zA-Z_]\w*\b";
     // TODO: Expand (e.g., Integer suffixes)
     const STRING: &'static str = r#""(?:[^"\\]|\\[\s\S])*""#;
@@ -219,7 +219,7 @@ impl Token<'_> {
     const FLOAT: &'static str = r"^[0-9]+\.[0-9]+";
     const INT: &'static str = r"^[0-9]+\b";
 
-    const KEYWORDS: &'static [(&'static str, Token<'static>)] = &[
+    const KEYWORDS: &'static [(&'static str, Token)] = &[
         ("return", Token::Return),
         ("typedef", Token::Typedef),
         ("sizeof", Token::SizeOf),
@@ -253,7 +253,7 @@ impl Token<'_> {
         ("union", Token::Union),
         ("enum", Token::Enum),
     ];
-    const SYMBOLS: &'static [(&'static str, Token<'static>)] = &[
+    const SYMBOLS: &'static [(&'static str, Token)] = &[
         ("...", Token::Ellipsis),
         ("<<=", Token::LShiftAssign),
         (">>=", Token::RShiftAssign),
@@ -303,7 +303,7 @@ impl Token<'_> {
         mut stream: &'a str,
         line: &mut usize,
         character: &mut usize,
-    ) -> Result<(Token<'a>, &'a str)> {
+    ) -> Result<(Token, &'a str)> {
         let mut chars_found = false;
         for (i, c) in stream.chars().enumerate() {
             match c {
@@ -355,18 +355,20 @@ impl Token<'_> {
         stream: &'a str,
         _line: &mut usize,
         character: &mut usize,
-    ) -> Option<(Token<'a>, &'a str)> {
+    ) -> Option<(Token, &'a str)> {
         if let Some((token, len)) = {
             match stream.chars().next() {
-                Some('\'') => Self::match_regex(stream, Self::CHAR)
-                    .map_or(None, |s| Some((Token::Literal(s), s.len()))),
-                Some('"') => Self::match_regex(stream, Self::STRING)
-                    .map_or(None, |s| Some((Token::Literal(s), s.len()))),
+                Some('\'') => Self::match_regex(stream, Self::CHAR).map_or(None, |s| {
+                    Some((Token::Literal(Rc::new(s.to_string())), s.len()))
+                }),
+                Some('"') => Self::match_regex(stream, Self::STRING).map_or(None, |s| {
+                    Some((Token::Literal(Rc::new(s.to_string())), s.len()))
+                }),
                 Some(c) if c.is_ascii_digit() => {
                     if let Ok(s) = Self::match_regex(stream, Self::FLOAT) {
-                        Some((Token::Literal(s), s.len()))
+                        Some((Token::Literal(Rc::new(s.to_string())), s.len()))
                     } else if let Ok(s) = Self::match_regex(stream, Self::INT) {
-                        Some((Token::Literal(s), s.len()))
+                        Some((Token::Literal(Rc::new(s.to_string())), s.len()))
                     } else {
                         None
                     }
@@ -386,7 +388,7 @@ impl Token<'_> {
         stream: &'a str,
         _line: &mut usize,
         character: &mut usize,
-    ) -> Option<(Token<'a>, &'a str)> {
+    ) -> Option<(Token, &'a str)> {
         if let Ok(ident) = Self::match_regex(stream, Self::IDENT) {
             match Self::KEYWORDS
                 .iter()
@@ -395,12 +397,12 @@ impl Token<'_> {
                 Some((keyword_str, token)) => {
                     let len = keyword_str.len();
                     *character += len;
-                    Some((*token, &stream[len..]))
+                    Some((token.clone(), &stream[len..]))
                 }
                 None => {
                     let len = ident.len();
                     *character += len;
-                    Some((Token::Ident(ident), &stream[len..]))
+                    Some((Token::Ident(Rc::new(ident.to_string())), &stream[len..]))
                 }
             }
         } else {
@@ -412,7 +414,7 @@ impl Token<'_> {
         stream: &'a str,
         _line: &mut usize,
         character: &mut usize,
-    ) -> Option<(Token<'a>, &'a str)> {
+    ) -> Option<(Token, &'a str)> {
         match Self::SYMBOLS
             .iter()
             .find(|(symbol_str, _)| stream.starts_with(symbol_str))
@@ -420,7 +422,7 @@ impl Token<'_> {
             Some((symbol_str, token)) => {
                 let len = symbol_str.len();
                 *character += len;
-                Some((*token, &stream[len..]))
+                Some((token.clone(), &stream[len..]))
             }
             None => None,
         }
@@ -476,16 +478,16 @@ mod tests {
     fn test_return2() {
         let file = get_path(1, "return_2.c");
         let contents = preprocess_file(&file).unwrap();
-        let tokens = Lexer::lex(&contents).unwrap();
+        let tokens = Lexer::lex(contents).unwrap();
         let expected = vec![
             Token::Int,
-            Token::Ident("main"),
+            Token::Ident(Rc::new("main".to_string())),
             Token::LParen,
             Token::Void,
             Token::RParen,
             Token::LSquirly,
             Token::Return,
-            Token::Literal("2"),
+            Token::Literal(Rc::new("2".to_string())),
             Token::Semi,
             Token::RSquirly,
         ];
@@ -498,6 +500,6 @@ mod tests {
         let preprocessed_contents = preprocess_file(&file).unwrap();
         // Don't match on exact contents but make sure it can successfully
         // parse a fairly complex C file
-        let _ = Lexer::lex(&preprocessed_contents).unwrap();
+        let _ = Lexer::lex(preprocessed_contents).unwrap();
     }
 }

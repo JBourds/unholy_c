@@ -7,11 +7,11 @@ pub struct Program {
     pub function: Function,
 }
 
-impl TryFrom<&ast::Program<'_>> for Program {
+impl TryFrom<ast::Program> for Program {
     type Error = anyhow::Error;
-    fn try_from(node: &ast::Program<'_>) -> Result<Self> {
+    fn try_from(node: ast::Program) -> Result<Self> {
         Ok(Self {
-            function: Function::try_from(&node.function)
+            function: Function::try_from(node.function)
                 .context("Failed to parse \"main\" function into TACKY representation")?,
         })
     }
@@ -33,18 +33,18 @@ impl Function {
     }
 }
 
-impl TryFrom<&ast::Function<'_>> for Function {
+impl TryFrom<ast::Function> for Function {
     type Error = anyhow::Error;
     // TODO: Use the return type and arguments for something.
     //  This is a try_from even though it cannot fail right now, assuming that
     //  there wil actually be a possibility of failure once we use all of the
     //  function information.
-    fn try_from(node: &ast::Function<'_>) -> Result<Self> {
+    fn try_from(node: ast::Function) -> Result<Self> {
         let ast::Function { name, block, .. } = node;
         let mut temp_var_counter = 0;
         let mut make_temp_var =
             Function::make_temp_var(Rc::new(name.to_string()), &mut temp_var_counter);
-        let mut instructions = block.as_ref().map_or(vec![], |block| {
+        let mut instructions = block.map_or(vec![], |block| {
             Instruction::parse_with(block, &mut make_temp_var)
         });
         // Temporary fix suggested by the book for the case where a function
@@ -88,12 +88,12 @@ pub enum Instruction {
 }
 
 impl Instruction {
-    fn parse_with(node: &ast::Block, make_temp_var: &mut impl FnMut() -> String) -> Vec<Self> {
+    fn parse_with(node: ast::Block, make_temp_var: &mut impl FnMut() -> String) -> Vec<Self> {
         let mut block_instructions = vec![];
-        for item in node.items().iter() {
+        for item in node.into_items().into_iter() {
             match item {
                 ast::BlockItem::Decl(decl) => {
-                    if let Some(init) = &decl.init {
+                    if let Some(init) = decl.init {
                         let Expr {
                             mut instructions,
                             val: src,
@@ -127,10 +127,10 @@ impl Instruction {
                         block_instructions.extend(Self::parse_with(block, make_temp_var));
                     }
                     ast::Stmt::Goto(label) => {
-                        block_instructions.push(Instruction::Jump(Rc::clone(label)));
+                        block_instructions.push(Instruction::Jump(label));
                     }
                     ast::Stmt::Label(label) => {
-                        block_instructions.push(Instruction::Label(Rc::clone(label)));
+                        block_instructions.push(Instruction::Label(label));
                     }
                     ast::Stmt::If {
                         condition,
@@ -161,7 +161,7 @@ impl Instruction {
                         });
 
                         instructions.extend(Instruction::parse_with(
-                            &ast::Block(vec![ast::BlockItem::Stmt((**then).clone())]),
+                            ast::Block(vec![ast::BlockItem::Stmt(*then)]),
                             make_temp_var,
                         ));
 
@@ -169,7 +169,7 @@ impl Instruction {
                             instructions.push(Instruction::Jump(Rc::clone(&end_label)));
                             instructions.push(Instruction::Label(Rc::clone(&else_label)));
                             instructions.extend(Instruction::parse_with(
-                                &ast::Block(vec![ast::BlockItem::Stmt((**r#else).clone())]),
+                                ast::Block(vec![ast::BlockItem::Stmt(*r#else)]),
                                 make_temp_var,
                             ));
                         }
@@ -191,7 +191,7 @@ pub struct Expr {
 }
 
 impl Expr {
-    fn parse_with(node: &ast::Expr, make_temp_var: &mut impl FnMut() -> String) -> Expr {
+    fn parse_with(node: ast::Expr, make_temp_var: &mut impl FnMut() -> String) -> Expr {
         match node {
             ast::Expr::Literal(v) => Self {
                 instructions: vec![],
@@ -201,7 +201,7 @@ impl Expr {
                 let Self {
                     mut instructions,
                     val,
-                } = Expr::parse_with(expr.as_ref(), make_temp_var);
+                } = Expr::parse_with(*expr, make_temp_var);
                 let dst = match op {
                     ast::UnaryOp::PreInc => {
                         instructions.push(Instruction::Binary {
@@ -272,7 +272,7 @@ impl Expr {
                     let Self {
                         mut instructions,
                         val: left_val,
-                    } = Self::parse_with(left.as_ref(), make_temp_var);
+                    } = Self::parse_with(*left, make_temp_var);
 
                     let label = {
                         let mut label = make_temp_var();
@@ -305,7 +305,7 @@ impl Expr {
                     let Self {
                         instructions: right_instructions,
                         val: right_val,
-                    } = Self::parse_with(right.as_ref(), make_temp_var);
+                    } = Self::parse_with(*right, make_temp_var);
                     instructions.extend(right_instructions);
 
                     let dst = Val::Var(make_temp_var().into());
@@ -360,7 +360,7 @@ impl Expr {
                         let Self {
                             mut instructions,
                             val: src,
-                        } = Self::parse_with(&binary, make_temp_var);
+                        } = Self::parse_with(binary, make_temp_var);
 
                         instructions.push(Instruction::Copy {
                             src,
@@ -377,11 +377,11 @@ impl Expr {
                     let Self {
                         mut instructions,
                         val: left_val,
-                    } = Self::parse_with(left.as_ref(), make_temp_var);
+                    } = Self::parse_with(*left, make_temp_var);
                     let Self {
                         instructions: right_instructions,
                         val: right_val,
-                    } = Self::parse_with(right.as_ref(), make_temp_var);
+                    } = Self::parse_with(*right, make_temp_var);
                     instructions.extend(right_instructions);
 
                     let dst = Val::Var(make_temp_var().into());
@@ -400,14 +400,14 @@ impl Expr {
             }
             ast::Expr::Var(name) => Self {
                 instructions: vec![],
-                val: Val::Var(Rc::clone(name)),
+                val: Val::Var(name),
             },
             ast::Expr::Assignment { lvalue, rvalue } => {
                 if let ast::Expr::Var(name) = lvalue.as_ref() {
                     let Self {
                         mut instructions,
                         val: src,
-                    } = Self::parse_with(rvalue, make_temp_var);
+                    } = Self::parse_with(*rvalue, make_temp_var);
                     let dst = Val::Var(Rc::clone(name));
                     instructions.push(Instruction::Copy {
                         src,
@@ -439,7 +439,7 @@ impl Expr {
                 let Expr {
                     mut instructions,
                     val,
-                } = Expr::parse_with(condition, make_temp_var);
+                } = Expr::parse_with(*condition, make_temp_var);
 
                 instructions.push(Instruction::JumpIfZero {
                     condition: val,
@@ -449,7 +449,7 @@ impl Expr {
                 let Expr {
                     instructions: e1_instructions,
                     val: e1_val,
-                } = Expr::parse_with(then, make_temp_var);
+                } = Expr::parse_with(*then, make_temp_var);
 
                 instructions.extend(e1_instructions);
                 instructions.push(Instruction::Copy {
@@ -463,7 +463,7 @@ impl Expr {
                 let Expr {
                     instructions: e2_instructions,
                     val: e2_val,
-                } = Expr::parse_with(r#else, make_temp_var);
+                } = Expr::parse_with(*r#else, make_temp_var);
 
                 instructions.extend(e2_instructions);
 
@@ -489,10 +489,10 @@ pub enum Val {
     Constant(i32),
     Var(Rc<String>),
 }
-impl From<&ast::Literal> for Val {
-    fn from(node: &ast::Literal) -> Self {
+impl From<ast::Literal> for Val {
+    fn from(node: ast::Literal) -> Self {
         match node {
-            ast::Literal::Int(i) => Self::Constant(*i),
+            ast::Literal::Int(i) => Self::Constant(i),
         }
     }
 }
@@ -504,8 +504,8 @@ pub enum UnaryOp {
     Not,
 }
 
-impl From<&ast::UnaryOp> for UnaryOp {
-    fn from(node: &ast::UnaryOp) -> Self {
+impl From<ast::UnaryOp> for UnaryOp {
+    fn from(node: ast::UnaryOp) -> Self {
         match node {
             ast::UnaryOp::Complement => Self::Complement,
             ast::UnaryOp::Negate => Self::Negate,
@@ -546,8 +546,8 @@ pub enum BinaryOp {
     RShiftAssign,
 }
 
-impl From<&ast::BinaryOp> for BinaryOp {
-    fn from(node: &ast::BinaryOp) -> Self {
+impl From<ast::BinaryOp> for BinaryOp {
+    fn from(node: ast::BinaryOp) -> Self {
         match node {
             ast::BinaryOp::Add => Self::Add,
             ast::BinaryOp::Subtract => Self::Subtract,
@@ -596,7 +596,7 @@ mod tests {
         )))]);
         let mut counter = 0;
         let mut make_temp_var = Function::make_temp_var(Rc::new("test".to_string()), &mut counter);
-        let actual = Instruction::parse_with(&ast, &mut make_temp_var);
+        let actual = Instruction::parse_with(ast, &mut make_temp_var);
         let expected = vec![Instruction::Return(Some(Val::Constant(2)))];
         assert_eq!(actual, expected);
     }
@@ -611,7 +611,7 @@ mod tests {
         )))]);
         let mut counter = 0;
         let mut make_temp_var = Function::make_temp_var(Rc::new("test".to_string()), &mut counter);
-        let actual = Instruction::parse_with(&ast, &mut make_temp_var);
+        let actual = Instruction::parse_with(ast, &mut make_temp_var);
         let expected = vec![
             Instruction::Unary {
                 op: UnaryOp::Complement,
@@ -638,7 +638,7 @@ mod tests {
         )))]);
         let mut counter = 0;
         let mut make_temp_var = Function::make_temp_var(Rc::new("test".to_string()), &mut counter);
-        let actual = Instruction::parse_with(&ast, &mut make_temp_var);
+        let actual = Instruction::parse_with(ast, &mut make_temp_var);
         let expected = vec![
             Instruction::Unary {
                 op: UnaryOp::Negate,
@@ -681,7 +681,7 @@ mod tests {
         };
         let mut counter = 0;
         let mut make_temp_var = Function::make_temp_var(Rc::new("test".to_string()), &mut counter);
-        let tacky_expr = Expr::parse_with(&ast_binary_expr, &mut make_temp_var);
+        let tacky_expr = Expr::parse_with(ast_binary_expr, &mut make_temp_var);
         let expected = Expr {
             instructions: vec![
                 Instruction::Binary {

@@ -281,7 +281,7 @@ pub enum Stmt {
 
 impl AstNode for Stmt {
     fn consume(tokens: &[Token]) -> Result<(Stmt, &[Token])> {
-        let comma_terminated_expr = |tokens| {
+        let semi_terminated_expr = |tokens| {
             let (expr, tokens) = Expr::parse(tokens, 0).context(
                 "Expected return statement to return an expression but could not parse one.",
             )?;
@@ -444,7 +444,7 @@ impl AstNode for Stmt {
             }
             [Token::Return, Token::Semi, tokens @ ..] => Ok((Self::Return(None), tokens)),
             [Token::Return, tokens @ ..] => {
-                let (expr, tokens) = comma_terminated_expr(tokens)?;
+                let (expr, tokens) = semi_terminated_expr(tokens)?;
                 Ok((Self::Return(Some(expr)), tokens))
             }
             [Token::If, Token::LParen, tokens @ ..] => {
@@ -476,7 +476,7 @@ impl AstNode for Stmt {
                 ))
             }
             _ => {
-                let (expr, tokens) = comma_terminated_expr(tokens)?;
+                let (expr, tokens) = semi_terminated_expr(tokens)?;
                 Ok((Self::Expr(expr), tokens))
             }
         }
@@ -576,19 +576,20 @@ impl Expr {
 struct Factor;
 
 impl Factor {
-    pub fn parse<'a>(tokens: &'a [Token]) -> Result<(Expr, &'a [Token])> {
-        let check_for_postfix =
-            |expr: Expr, tokens: &'a [Token]| match UnaryOp::consume_postfix(tokens) {
-                Ok((op, tokens)) => Ok((
-                    Expr::Unary {
-                        op,
-                        expr: Box::new(expr),
-                    },
-                    tokens,
-                )),
-                _ => Ok((expr, tokens)),
-            };
+    fn check_for_postfix(expr: Expr, tokens: &[Token]) -> Result<(Expr, &[Token])> {
+        match UnaryOp::consume_postfix(tokens) {
+            Ok((op, tokens)) => Self::check_for_postfix(
+                Expr::Unary {
+                    op,
+                    expr: Box::new(expr),
+                },
+                tokens,
+            ),
+            _ => Ok((expr, tokens)),
+        }
+    }
 
+    pub fn parse<'a>(tokens: &'a [Token]) -> Result<(Expr, &'a [Token])> {
         match UnaryOp::consume_prefix(tokens) {
             Ok((op, tokens)) => {
                 let (expr, tokens) = Factor::parse(tokens)?;
@@ -606,13 +607,13 @@ impl Factor {
                     Ok((Expr::Literal(lit), tokens))
                 }
                 [lexer::Token::Ident(s), tokens @ ..] => {
-                    check_for_postfix(Expr::Var(Rc::clone(s)), tokens)
+                    Self::check_for_postfix(Expr::Var(Rc::clone(s)), tokens)
                 }
                 [Token::LParen, tokens @ ..] => {
                     let (expr, tokens) = Expr::parse(tokens, 0)
                         .context("Parsing grammer rule: \"(\" <exp> \")\" failed")?;
                     match tokens {
-                        [Token::RParen, tokens @ ..] => check_for_postfix(expr, tokens),
+                        [Token::RParen, tokens @ ..] => Self::check_for_postfix(expr, tokens),
                         _ => bail!("Could not find matching right parenthesis"),
                     }
                 }

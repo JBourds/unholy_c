@@ -26,6 +26,7 @@ pub fn validate(program: ast::Program) -> Result<SemaStage<Final>> {
     };
     let stage = variables::validate(stage)?;
     let stage = gotos::validate(stage)?;
+    let stage = loops::validate(stage)?;
 
     Ok(SemaStage {
         program: stage.program,
@@ -398,5 +399,42 @@ mod gotos {
             }
             _ => Ok(stmt.clone()),
         }
+    }
+}
+
+mod loops {
+    use super::*;
+
+    pub fn validate(stage: SemaStage<GotoValidation>) -> Result<SemaStage<LoopLabelling>> {
+        let SemaStage { program, .. } = stage;
+        if let Some(block) = program.function.block {
+            let block = resolve_block(block)?;
+            Ok(SemaStage {
+                program: ast::Program {
+                    function: ast::Function {
+                        block: Some(block),
+                        ..program.function
+                    },
+                },
+                stage: PhantomData::<LoopLabelling>,
+            })
+        } else {
+            Ok(SemaStage {
+                program,
+                stage: PhantomData::<LoopLabelling>,
+            })
+        }
+    }
+
+    fn resolve_block(block: ast::Block) -> Result<ast::Block> {
+        Ok(block)
+    }
+
+    fn resolve_block_item(item: ast::BlockItem) -> Result<ast::BlockItem> {
+        Ok(item)
+    }
+
+    fn resolve_stmt(stmt: ast::Stmt) -> Result<ast::Stmt> {
+        Ok(stmt)
     }
 }

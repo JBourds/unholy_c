@@ -210,6 +210,27 @@ pub enum ForInit {
     Expr(Option<Expr>),
 }
 
+impl AstNode for ForInit {
+    fn consume(tokens: &[Token]) -> Result<(Self, &[Token])> {
+        match tokens {
+            [Token::Semi, tokens @ ..] => Ok((ForInit::Expr(None), tokens)),
+            tokens => {
+                if let Ok((decl, tokens)) = Declaration::consume(tokens) {
+                    Ok((ForInit::Decl(decl), tokens))
+                } else {
+                    let (expr, tokens) = Expr::parse(tokens, 0)
+                        .context("Expected decleration or expression but failed to parse both")?;
+                    if let Some(Token::Semi) = tokens.first() {
+                        Ok((ForInit::Expr(Some(expr)), &tokens[1..]))
+                    } else {
+                        bail!("Missing semicolon after init expression.")
+                    }
+                }
+            }
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum Stmt {
     Compound(Block),
@@ -265,6 +286,96 @@ impl AstNode for Stmt {
             [Token::Ident(name), Token::Colon, tokens @ ..] => {
                 Ok((Self::Label(Rc::new(name.to_string())), tokens))
             }
+            [Token::Break, Token::Semi, tokens @ ..] => Ok((Self::Break, tokens)),
+            [Token::Continue, Token::Semi, tokens @ ..] => Ok((Self::Continue, tokens)),
+            [Token::While, Token::LParen, tokens @ ..] => {
+                let (condition, tokens) = Expr::parse(tokens, 0)
+                    .context("Failed to parse expression for while statement conditional")?;
+
+                let tokens = if let Some(Token::RParen) = tokens.first() {
+                    &tokens[1..]
+                } else {
+                    bail!("While statment conditional must be closed with right paren");
+                };
+                let (body, tokens) = Stmt::consume(tokens).context("Failed to parse while body")?;
+
+                Ok((
+                    Self::While {
+                        condition,
+                        body: Box::new(body),
+                    },
+                    tokens,
+                ))
+            }
+            [Token::Do, tokens @ ..] => {
+                let (body, tokens) = Stmt::consume(tokens).context("Failed to parse while body")?;
+                match tokens {
+                    [Token::While, Token::LParen, tokens @ ..] => {
+                        let (condition, tokens) = Expr::parse(tokens, 0).context(
+                            "Failed to parse expression for do while statement conditional",
+                        )?;
+
+                        let tokens = if let Some(Token::RParen) = tokens.first() {
+                            &tokens[1..]
+                        } else {
+                            bail!("Do-while statment conditional must be closed with right paren");
+                        };
+                        let tokens = if let Some(Token::Semi) = tokens.first() {
+                            &tokens[1..]
+                        } else {
+                            bail!("Do-while statment conditional must end with semi colon");
+                        };
+                        Ok((
+                            Self::DoWhile {
+                                body: Box::new(body),
+                                condition,
+                            },
+                            tokens,
+                        ))
+                    }
+                    _ => bail!("Failed to reach while part of do-while"),
+                }
+            }
+            [Token::For, Token::LParen, tokens @ ..] => {
+                let (init, tokens) =
+                    ForInit::consume(tokens).context("Failed to parse ForInit for for-loop")?;
+                let (condition, tokens) = match tokens {
+                    [Token::Semi, tokens @ ..] => (None, tokens),
+                    tokens => {
+                        let (expr, tokens) = Expr::parse(tokens, 0)
+                            .context("Expected expression but failed to parse one")?;
+                        if let Some(Token::Semi) = tokens.first() {
+                            (Some(expr), &tokens[1..])
+                        } else {
+                            bail!("Missing semicolon after condtition expression.")
+                        }
+                    }
+                };
+                let (post, tokens) = if let Ok((expr, tokens)) = Expr::parse(tokens, 0) {
+                    (Some(expr), tokens)
+                } else {
+                    (None, tokens)
+                };
+
+                let tokens = if let Some(Token::RParen) = tokens.first() {
+                    &tokens[1..]
+                } else {
+                    bail!("For statment must be closed with right paren");
+                };
+                let (body, tokens) =
+                    Stmt::consume(tokens).context("Failed to parse for-loop body")?;
+
+                Ok((
+                    Self::For {
+                        init,
+                        condition,
+                        post,
+                        body: Box::new(body),
+                    },
+                    tokens,
+                ))
+            }
+
             [Token::Return, Token::Semi, tokens @ ..] => Ok((Self::Return(None), tokens)),
             [Token::Return, tokens @ ..] => {
                 let (expr, tokens) = comma_terminated_expr(tokens)?;

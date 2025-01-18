@@ -241,21 +241,24 @@ pub enum Stmt {
         then: Box<Stmt>,
         r#else: Option<Box<Stmt>>,
     },
-    Break,
-    Continue,
+    Break(Option<Rc<String>>),
+    Continue(Option<Rc<String>>),
     While {
         condition: Expr,
         body: Box<Stmt>,
+        label: Option<Rc<String>>,
     },
     DoWhile {
         body: Box<Stmt>,
         condition: Expr,
+        label: Option<Rc<String>>,
     },
     For {
         init: ForInit,
         condition: Option<Expr>,
         post: Option<Expr>,
         body: Box<Stmt>,
+        label: Option<Rc<String>>,
     },
     Goto(Rc<String>),
     Label(Rc<String>),
@@ -286,8 +289,8 @@ impl AstNode for Stmt {
             [Token::Ident(name), Token::Colon, tokens @ ..] => {
                 Ok((Self::Label(Rc::new(name.to_string())), tokens))
             }
-            [Token::Break, Token::Semi, tokens @ ..] => Ok((Self::Break, tokens)),
-            [Token::Continue, Token::Semi, tokens @ ..] => Ok((Self::Continue, tokens)),
+            [Token::Break, Token::Semi, tokens @ ..] => Ok((Self::Break(None), tokens)),
+            [Token::Continue, Token::Semi, tokens @ ..] => Ok((Self::Continue(None), tokens)),
             [Token::While, Token::LParen, tokens @ ..] => {
                 let (condition, tokens) = Expr::parse(tokens, 0)
                     .context("Failed to parse expression for while statement conditional")?;
@@ -303,6 +306,7 @@ impl AstNode for Stmt {
                     Self::While {
                         condition,
                         body: Box::new(body),
+                        label: None,
                     },
                     tokens,
                 ))
@@ -329,6 +333,7 @@ impl AstNode for Stmt {
                             Self::DoWhile {
                                 body: Box::new(body),
                                 condition,
+                                label: None,
                             },
                             tokens,
                         ))
@@ -371,6 +376,7 @@ impl AstNode for Stmt {
                         condition,
                         post,
                         body: Box::new(body),
+                        label: None,
                     },
                     tokens,
                 ))

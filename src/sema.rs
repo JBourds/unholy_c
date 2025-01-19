@@ -251,11 +251,13 @@ mod variables {
                 body,
                 label,
                 cases,
+                default,
             } => Ok(ast::Stmt::Switch {
                 condition: resolve_expr(condition, variable_map)?,
                 body: Box::new(resolve_stmt(*body, variable_map, make_temporary)?),
                 label,
                 cases,
+                default,
             }),
             ast::Stmt::Case { value, body, label } => Ok(ast::Stmt::Case {
                 value: resolve_expr(value, variable_map)?,
@@ -457,7 +459,9 @@ mod gotos {
 }
 
 mod switch {
-    use anyhow::ensure;
+    use std::ops::{BitAnd, BitOr, BitXor};
+
+    use anyhow::{ensure, Context};
     use ast::Literal;
 
     use super::*;
@@ -466,6 +470,7 @@ mod switch {
         name: Option<Rc<String>>,
         label_map: HashMap<ast::Literal, Rc<String>>,
         active: bool,
+        default: Option<Rc<String>>,
     }
 
     impl SwitchContext {
@@ -474,6 +479,7 @@ mod switch {
                 name: None,
                 label_map: HashMap::new(),
                 active: false,
+                default: None,
             }
         }
 
@@ -482,6 +488,7 @@ mod switch {
                 name: Some(name),
                 label_map: HashMap::new(),
                 active: true,
+                default: None,
             }
         }
 
@@ -555,17 +562,37 @@ mod switch {
                 Ok(ast::Stmt::Break(Some(switch_context.name.clone().unwrap())))
             }
             (ast::Stmt::Break(Some(_)), _) => unreachable!(),
+            (ast::Stmt::Default(label), _) => {
+                ensure!(label.is_none());
+                let name = match switch_context.name.clone() {
+                    Some(name) => name,
+                    None => bail!("Encountered default statement outside of switch statement"),
+                };
+                let label = Rc::new(format!("{name}.case-default"));
+
+                if switch_context.default.is_some() {
+                    bail!("Duplicate default statement");
+                }
+                switch_context.default = Some(Rc::clone(&label));
+                Ok(ast::Stmt::Default(Some(label)))
+            }
             (ast::Stmt::Case { value, body, label }, _) => {
-                let const_value = todo!(); // const_eval(value)
-                let name = match switch_context.name {
-                    Some(name) => Rc::clone(&name),
+                ensure!(label.is_none());
+                let const_value = const_eval(value.clone())?;
+                let name = match switch_context.name.clone() {
+                    Some(name) => name,
                     None => bail!("Encountered case statement outside of switch statement"),
                 };
                 let label = Rc::new(format!("{name}.case{const_value}"));
-                if switch_context.label_map.contains_key(const_value) {
+                if switch_context.label_map.contains_key(&const_value) {
                     bail!("Duplicate case statement: {const_value}");
                 }
-                ensure!(switch_context.label_map.insert(*const_value, label) == None);
+                ensure!(
+                    switch_context
+                        .label_map
+                        .insert(const_value, Rc::clone(&label))
+                        == None
+                );
                 let body = resolve_stmt(*body, switch_context, make_label)?;
                 Ok(ast::Stmt::Case {
                     value,
@@ -579,6 +606,7 @@ mod switch {
                     body,
                     label: None,
                     cases: None,
+                    default: None,
                 },
                 _,
             ) => {
@@ -591,22 +619,12 @@ mod switch {
                     .drain()
                     .collect::<Vec<(Literal, Rc<String>)>>();
 
-                // FIXME: This should look at the type of condition
-                // and typecheck each case based on that
-                if let Some((first, _)) = cases.first() {
-                    for (literal, _) in cases.iter() {
-                        ensure!(
-                            std::mem::discriminant(&first) == std::mem::discriminant(&literal),
-                            "Switch cases must be of the same type"
-                        );
-                    }
-                }
-
                 Ok(ast::Stmt::Switch {
                     condition,
                     body: Box::new(body),
                     label: Some(label),
                     cases: Some(cases),
+                    default: switch_context.default,
                 })
             }
             (ast::Stmt::Switch { .. }, _) => unreachable!(),
@@ -698,15 +716,183 @@ mod switch {
     fn const_eval(expr: ast::Expr) -> Result<ast::Literal> {
         match expr {
             ast::Expr::Var(_) => bail!("Variables cannot be constant evaluated"),
-            ast::Expr::Assignment { lvalue, rvalue } => bail!("Assignment cannot be constant evaluated"),
+            ast::Expr::Assignment { .. } => {
+                bail!("Assignment cannot be constant evaluated")
+            }
             ast::Expr::Literal(literal) => Ok(literal),
             ast::Expr::Unary { op, expr } => {
-                match op, expr {
-                    ast::UnaryOp::Complement => match expr {
-                        ast::Literal
-                    }
+                const_eval_unary(op, *expr).context("UnaryOp const eval failed")
+            }
+            ast::Expr::Binary { op, left, right } => {
+                const_eval_binary(op, *left, *right).context("BinaryOp const eval failed")
+            }
+            ast::Expr::Conditional {
+                condition,
+                then,
+                r#else,
+            } => {
+                let condition = const_eval(*condition)?;
+                let val = match condition {
+                    ast::Literal::Int(v) => v,
+                };
+                if val > 0 {
+                    const_eval(*then)
+                } else {
+                    const_eval(*r#else)
                 }
             }
+        }
+    }
+
+    fn const_eval_unary(op: ast::UnaryOp, expr: ast::Expr) -> Result<ast::Literal> {
+        let literal = const_eval(expr)?;
+        let val = match literal {
+            ast::Literal::Int(v) => v,
+        };
+        let new_val = match op {
+            ast::UnaryOp::Complement => !val,
+            ast::UnaryOp::Negate => -val,
+            ast::UnaryOp::Not => !val,
+            ast::UnaryOp::PreInc
+            | ast::UnaryOp::PreDec
+            | ast::UnaryOp::PostInc
+            | ast::UnaryOp::PostDec => bail!("{op:#?} is not allowed in const expresion"),
+        };
+        Ok(ast::Literal::Int(new_val))
+    }
+
+    fn const_eval_binary(
+        op: ast::BinaryOp,
+        left: ast::Expr,
+        right: ast::Expr,
+    ) -> Result<ast::Literal> {
+        match op {
+            ast::BinaryOp::And => {
+                let left_val = get_value(const_eval(left)?);
+                if left_val == 0 {
+                    return Ok(ast::Literal::Int(0));
+                }
+                let right_val = get_value(const_eval(right)?);
+                Ok(ast::Literal::Int(if right_val > 0 { 1 } else { 0 }))
+            }
+            ast::BinaryOp::Or => {
+                let left_val = get_value(const_eval(left)?);
+                if left_val > 0 {
+                    return Ok(ast::Literal::Int(1));
+                }
+                let right_val = get_value(const_eval(right)?);
+                Ok(ast::Literal::Int(if right_val > 0 { 1 } else { 0 }))
+            }
+            ast::BinaryOp::Add => {
+                let left_val = get_value(const_eval(left)?);
+                let right_val = get_value(const_eval(right)?);
+                Ok(ast::Literal::Int(left_val.wrapping_add(right_val)))
+            }
+            ast::BinaryOp::Subtract => {
+                let left_val = get_value(const_eval(left)?);
+                let right_val = get_value(const_eval(right)?);
+                Ok(ast::Literal::Int(left_val.wrapping_sub(right_val)))
+            }
+            ast::BinaryOp::Multiply => {
+                let left_val = get_value(const_eval(left)?);
+                let right_val = get_value(const_eval(right)?);
+                Ok(ast::Literal::Int(left_val.wrapping_mul(right_val)))
+            }
+            ast::BinaryOp::Divide => {
+                let left_val = get_value(const_eval(left)?);
+                let right_val = get_value(const_eval(right)?);
+                Ok(ast::Literal::Int(left_val.wrapping_div(right_val)))
+            }
+            ast::BinaryOp::Remainder => {
+                let left_val = get_value(const_eval(left)?);
+                let right_val = get_value(const_eval(right)?);
+                Ok(ast::Literal::Int(left_val.wrapping_rem(right_val)))
+            }
+            ast::BinaryOp::BitAnd => {
+                let left_val = get_value(const_eval(left)?);
+                let right_val = get_value(const_eval(right)?);
+                Ok(ast::Literal::Int(left_val.bitand(right_val)))
+            }
+            ast::BinaryOp::BitOr => {
+                let left_val = get_value(const_eval(left)?);
+                let right_val = get_value(const_eval(right)?);
+                Ok(ast::Literal::Int(left_val.bitor(right_val)))
+            }
+            ast::BinaryOp::Xor => {
+                let left_val = get_value(const_eval(left)?);
+                let right_val = get_value(const_eval(right)?);
+                Ok(ast::Literal::Int(left_val.bitxor(right_val)))
+            }
+            ast::BinaryOp::LShift => {
+                let left_val = get_value(const_eval(left)?);
+                let right_val = get_value(const_eval(right)?);
+                Ok(ast::Literal::Int(
+                    left_val.rotate_left(
+                        right_val
+                            .try_into()
+                            .context("Cannot use negative to bitshift")?,
+                    ),
+                ))
+            }
+            ast::BinaryOp::RShift => {
+                let left_val = get_value(const_eval(left)?);
+                let right_val = get_value(const_eval(right)?);
+                Ok(ast::Literal::Int(
+                    left_val.rotate_right(
+                        right_val
+                            .try_into()
+                            .context("Cannot use negative to bitshift")?,
+                    ),
+                ))
+            }
+            ast::BinaryOp::Equal => {
+                let left_val = get_value(const_eval(left)?);
+                let right_val = get_value(const_eval(right)?);
+                Ok(ast::Literal::Int(if left_val == right_val { 1 } else { 0 }))
+            }
+            ast::BinaryOp::NotEqual => {
+                let left_val = get_value(const_eval(left)?);
+                let right_val = get_value(const_eval(right)?);
+                Ok(ast::Literal::Int(if left_val != right_val { 1 } else { 0 }))
+            }
+            ast::BinaryOp::LessThan => {
+                let left_val = get_value(const_eval(left)?);
+                let right_val = get_value(const_eval(right)?);
+                Ok(ast::Literal::Int((left_val < right_val) as i32))
+            }
+            ast::BinaryOp::LessOrEqual => {
+                let left_val = get_value(const_eval(left)?);
+                let right_val = get_value(const_eval(right)?);
+                Ok(ast::Literal::Int((left_val <= right_val) as i32))
+            }
+            ast::BinaryOp::GreaterThan => {
+                let left_val = get_value(const_eval(left)?);
+                let right_val = get_value(const_eval(right)?);
+                Ok(ast::Literal::Int((left_val > right_val) as i32))
+            }
+            ast::BinaryOp::GreaterOrEqual => {
+                let left_val = get_value(const_eval(left)?);
+                let right_val = get_value(const_eval(right)?);
+                Ok(ast::Literal::Int((left_val >= right_val) as i32))
+            }
+            ast::BinaryOp::Assign
+            | ast::BinaryOp::AddAssign
+            | ast::BinaryOp::SubAssign
+            | ast::BinaryOp::MultAssign
+            | ast::BinaryOp::DivAssign
+            | ast::BinaryOp::ModAssign
+            | ast::BinaryOp::AndAssign
+            | ast::BinaryOp::OrAssign
+            | ast::BinaryOp::XorAssign
+            | ast::BinaryOp::LShiftAssign
+            | ast::BinaryOp::RShiftAssign => bail!("Assignment cannot happen in const expression"),
+            ast::BinaryOp::Ternary => todo!("I dont know how to implement this"),
+        }
+    }
+
+    fn get_value(lit: ast::Literal) -> i32 {
+        match lit {
+            ast::Literal::Int(v) => v,
         }
     }
 }

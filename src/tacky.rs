@@ -308,6 +308,7 @@ impl Instruction {
                 body,
                 label,
                 cases,
+                default,
             } => todo!(),
             ast::Stmt::Default(label) => todo!(),
         }

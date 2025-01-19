@@ -250,10 +250,12 @@ mod variables {
                 condition,
                 body,
                 label,
+                cases,
             } => Ok(ast::Stmt::Switch {
                 condition: resolve_expr(condition, variable_map)?,
                 body: Box::new(resolve_stmt(*body, variable_map, make_temporary)?),
                 label,
+                cases,
             }),
             ast::Stmt::Case { value, body, label } => Ok(ast::Stmt::Case {
                 value: resolve_expr(value, variable_map)?,
@@ -455,11 +457,15 @@ mod gotos {
 }
 
 mod switch {
+    use anyhow::ensure;
+    use ast::Literal;
+
     use super::*;
 
     struct SwitchContext {
         name: Option<Rc<String>>,
-        label_map: HashMap<i32, Rc<String>>,
+        label_map: HashMap<ast::Literal, Rc<String>>,
+        active: bool,
     }
 
     impl SwitchContext {
@@ -467,6 +473,7 @@ mod switch {
             Self {
                 name: None,
                 label_map: HashMap::new(),
+                active: false,
             }
         }
 
@@ -474,6 +481,7 @@ mod switch {
             Self {
                 name: Some(name),
                 label_map: HashMap::new(),
+                active: true,
             }
         }
 
@@ -541,26 +549,58 @@ mod switch {
         switch_context: &mut SwitchContext,
         make_label: &mut impl FnMut(&str) -> String,
     ) -> Result<ast::Stmt> {
-        match (stmt, switch_context.name.clone()) {
-            (ast::Stmt::Break(_), None) => Ok(stmt),
-            (ast::Stmt::Break(name), Some(label)) => Ok(ast::Stmt::Break(Some(label))),
+        match (stmt, switch_context.active) {
+            (ast::Stmt::Break(label), false) => Ok(ast::Stmt::Break(label)),
+            (ast::Stmt::Break(None), true) => {
+                Ok(ast::Stmt::Break(Some(switch_context.name.clone().unwrap())))
+            }
+            (ast::Stmt::Break(Some(_)), _) => unreachable!(),
+            (ast::Stmt::Case { value, body, label }, _) => {
+                let const_value = todo!(); // const_eval(value)
+                let name = match switch_context.name {
+                    Some(name) => Rc::clone(&name),
+                    None => bail!("Encountered case statement outside of switch statement"),
+                };
+                let label = Rc::new(format!("{name}.case{const_value}"));
+                if switch_context.label_map.contains_key(const_value) {
+                    bail!("Duplicate case statement: {const_value}");
+                }
+                ensure!(switch_context.label_map.insert(*const_value, label) == None);
+                let body = resolve_stmt(*body, switch_context, make_label)?;
+                Ok(ast::Stmt::Case {
+                    value,
+                    body: Box::new(body),
+                    label: Some(label),
+                })
+            }
             (
                 ast::Stmt::Switch {
                     condition,
                     body,
-                    label,
-                    cases,
+                    label: None,
+                    cases: None,
                 },
                 _,
             ) => {
                 let label = Rc::new(make_label("switch"));
-                let switch_context = SwitchContext::with_name(Rc::clone(&label));
+                let mut switch_context = SwitchContext::with_name(Rc::clone(&label));
                 let body = resolve_stmt(*body, &mut switch_context, make_label)?;
 
                 let cases = switch_context
                     .label_map
                     .drain()
-                    .collect::<Vec<(i32, Rc<String>)>>();
+                    .collect::<Vec<(Literal, Rc<String>)>>();
+
+                // FIXME: This should look at the type of condition
+                // and typecheck each case based on that
+                if let Some((first, _)) = cases.first() {
+                    for (literal, _) in cases.iter() {
+                        ensure!(
+                            std::mem::discriminant(&first) == std::mem::discriminant(&literal),
+                            "Switch cases must be of the same type"
+                        );
+                    }
+                }
 
                 Ok(ast::Stmt::Switch {
                     condition,
@@ -569,7 +609,104 @@ mod switch {
                     cases: Some(cases),
                 })
             }
-            _ => {}
+            (ast::Stmt::Switch { .. }, _) => unreachable!(),
+            (ast::Stmt::Compound(block), _) => Ok(ast::Stmt::Compound(resolve_block(
+                block,
+                switch_context,
+                make_label,
+            )?)),
+            (
+                ast::Stmt::If {
+                    condition,
+                    then,
+                    r#else,
+                },
+                _,
+            ) => {
+                let then = Box::new(resolve_stmt(*then, switch_context, make_label)?);
+                let r#else = match r#else {
+                    Some(r#else) => {
+                        Some(Box::new(resolve_stmt(*r#else, switch_context, make_label)?))
+                    }
+                    None => None,
+                };
+                Ok(ast::Stmt::If {
+                    condition,
+                    then,
+                    r#else,
+                })
+            }
+            (
+                ast::Stmt::While {
+                    condition,
+                    body,
+                    label,
+                },
+                active,
+            ) => {
+                switch_context.active = false;
+                let body = resolve_stmt(*body, switch_context, make_label)?;
+                switch_context.active = active;
+                Ok(ast::Stmt::While {
+                    condition,
+                    body: Box::new(body),
+                    label,
+                })
+            }
+            (
+                ast::Stmt::DoWhile {
+                    body,
+                    condition,
+                    label,
+                },
+                active,
+            ) => {
+                switch_context.active = false;
+                let body = resolve_stmt(*body, switch_context, make_label)?;
+                switch_context.active = active;
+                Ok(ast::Stmt::DoWhile {
+                    body: Box::new(body),
+                    condition,
+                    label,
+                })
+            }
+            (
+                ast::Stmt::For {
+                    init,
+                    condition,
+                    post,
+                    body,
+                    label,
+                },
+                active,
+            ) => {
+                switch_context.active = false;
+                let body = resolve_stmt(*body, switch_context, make_label)?;
+                switch_context.active = active;
+                Ok(ast::Stmt::For {
+                    init,
+                    condition,
+                    post,
+                    body: Box::new(body),
+                    label,
+                })
+            }
+            (stmt, _) => Ok(stmt),
+        }
+    }
+
+    fn const_eval(expr: ast::Expr) -> Result<ast::Literal> {
+        match expr {
+            ast::Expr::Var(_) => bail!("Variables cannot be constant evaluated"),
+            ast::Expr::Assignment { lvalue, rvalue } => bail!("Assignment cannot be constant evaluated"),
+            ast::Expr::Literal(literal) => Ok(literal),
+            ast::Expr::Unary { op, expr } => {
+                match op, expr {
+                    ast::UnaryOp::Complement => match expr {
+                        ast::Literal
+                    }
+                }
+            }
         }
     }
 }

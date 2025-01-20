@@ -1,13 +1,14 @@
 int main() {
-    switch (1) {
+    int a = 6;
+    switch (a - 2) {
     case 2 - 1:
         return 1;
-        break;
     case 2:
         return 2;
-        break;
+    case 4:
+        return 4;
     default:
-        return 0;
+        break;
     }
 
 }

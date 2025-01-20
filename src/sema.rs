@@ -494,10 +494,6 @@ mod switch {
                 default: None,
             }
         }
-
-        pub fn bound(&self) -> bool {
-            self.name.is_some()
-        }
     }
 
     pub fn validate(stage: SemaStage<GotoValidation>) -> Result<SemaStage<SwitchLabelling>> {
@@ -571,7 +567,7 @@ mod switch {
                     Some(name) => name,
                     None => bail!("Encountered default statement outside of switch statement"),
                 };
-                let label = Rc::new(format!("{name}.case-default"));
+                let label = Rc::new(format!("{name}.case.default"));
 
                 if switch_context.default.is_some() {
                     bail!("Duplicate default statement");
@@ -623,6 +619,11 @@ mod switch {
                     .label_map
                     .drain()
                     .collect::<Vec<(Literal, Rc<String>)>>();
+                let condition = if let Ok(cond) = const_eval(condition.clone()) {
+                    ast::Expr::Literal(cond)
+                } else {
+                    condition
+                };
 
                 Ok(ast::Stmt::Switch {
                     condition,
@@ -737,9 +738,7 @@ mod switch {
                 r#else,
             } => {
                 let condition = const_eval(*condition)?;
-                let val = match condition {
-                    ast::Literal::Int(v) => v,
-                };
+                let ast::Literal::Int(val) = condition;
                 if val > 0 {
                     const_eval(*then)
                 } else {
@@ -751,9 +750,7 @@ mod switch {
 
     fn const_eval_unary(op: ast::UnaryOp, expr: ast::Expr) -> Result<ast::Literal> {
         let literal = const_eval(expr)?;
-        let val = match literal {
-            ast::Literal::Int(v) => v,
-        };
+        let ast::Literal::Int(val) = literal;
         let new_val = match op {
             ast::UnaryOp::Complement => !val,
             ast::UnaryOp::Negate => -val,

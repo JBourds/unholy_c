@@ -302,19 +302,81 @@ impl Instruction {
                 instructions.push(Instruction::Label(Rc::clone(&end_label)));
                 block_instructions.extend(instructions);
             }
-            ast::Stmt::Case { value: _, stmt, label } => {
+            ast::Stmt::Case {
+                value: _,
+                stmt,
+                label,
+            } => {
                 let label = label.expect("Case must have label");
                 block_instructions.push(Instruction::Label(Rc::clone(&label)));
                 block_instructions.extend(Self::parse_stmt_with(*stmt, make_temp_var));
-            },
+            }
+            ast::Stmt::Default { label, stmt } => {
+                let label = label.expect("Default must have label");
+                block_instructions.push(Instruction::Label(Rc::clone(&label)));
+                block_instructions.extend(Self::parse_stmt_with(*stmt, make_temp_var));
+            }
             ast::Stmt::Switch {
                 condition,
                 body,
                 label,
                 cases,
                 default,
-            } => todo!(),
-            ast::Stmt::Default { label, stmt } => todo!(),
+            } => {
+                let label = label.expect("Switch statement must be labelled.");
+                let break_label = Rc::new(format!("{label}.break"));
+                // If our condition has been const-evaluated we can directly
+                // jump to the correct label. Otherwise, we must do comparisons
+                // against the value of every case statement at runtime.
+                // NOTE: We still need to emit all the other case code because
+                // they could condition labels which get jumped to even if they
+                // never get jumped to from the switch statement.
+                if let ast::Expr::Literal(cond) = condition {
+                    let jump_label = cases
+                        .unwrap_or(vec![])
+                        .iter()
+                        .find(|&&(case, _)| case == cond)
+                        .map_or(default, |(_, label)| Some(Rc::clone(label)));
+                    let has_jump_label = jump_label.is_some();
+                    let jump_label = jump_label.unwrap_or(break_label.clone());
+                    block_instructions.push(Instruction::Jump(jump_label.clone()));
+                    block_instructions.extend(Self::parse_stmt_with(*body, make_temp_var));
+                    if !has_jump_label {
+                        block_instructions.push(Instruction::Label(jump_label));
+                    }
+                } else {
+                    // Linear comparison with every switch branch
+                    let Expr {
+                        instructions,
+                        val: switch_val,
+                    } = Expr::parse_with(condition, make_temp_var);
+                    block_instructions.extend(instructions);
+                    for (case, label) in cases.unwrap_or(vec![]).iter() {
+                        let Expr {
+                            instructions,
+                            val: case_val,
+                        } = Expr::parse_with(ast::Expr::Literal(*case), make_temp_var);
+                        block_instructions.extend(instructions);
+                        let dst = Val::Var(Rc::new(make_temp_var()));
+                        block_instructions.push(Self::Binary {
+                            op: BinaryOp::Equal,
+                            src1: switch_val.clone(),
+                            src2: case_val,
+                            dst: dst.clone(),
+                        });
+                        block_instructions.push(Self::JumpIfNotZero {
+                            condition: dst,
+                            target: Rc::clone(label),
+                        });
+                    }
+                    if let Some(default_label) = default {
+                        block_instructions.push(Instruction::Jump(default_label));
+                    }
+                    // Switch body and label afterward where it breaks to
+                    block_instructions.extend(Self::parse_stmt_with(*body, make_temp_var));
+                }
+                block_instructions.push(Instruction::Label(break_label));
+            }
         }
         block_instructions
     }

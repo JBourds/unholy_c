@@ -324,16 +324,25 @@ impl Instruction {
                 default,
             } => {
                 let label = label.expect("Switch statement must be labelled.");
+                let cases = cases.expect("Cases must have been populated.");
                 let break_label = Rc::new(format!("{label}.break"));
-                // If our condition has been const-evaluated we can directly
-                // jump to the correct label. Otherwise, we must do comparisons
-                // against the value of every case statement at runtime.
-                // NOTE: We still need to emit all the other case code because
-                // they could condition labels which get jumped to even if they
-                // never get jumped to from the switch statement.
-                if let ast::Expr::Literal(cond) = condition {
+                // Cases:
+                // 1. There are no cases: Still evaluate the condition and make
+                //  instructions in case a goto jumps to a label in them.
+                // 2. The switch value is a literal (or has been const-evaled):
+                //  Perform a compile time comparison to all the cases and make
+                //  a single jump to the right location.
+                // 3. Perform a linear comparison for each case and jump if the
+                //  value matches.
+                if cases.is_empty() {
+                    let Expr { instructions, .. } = Expr::parse_with(condition, make_temp_var);
+                    block_instructions.extend(instructions);
+                    block_instructions.push(Instruction::Jump(
+                        default.unwrap_or(Rc::clone(&break_label)),
+                    ));
+                    block_instructions.extend(Self::parse_stmt_with(*body, make_temp_var));
+                } else if let ast::Expr::Literal(cond) = condition {
                     let jump_label = cases
-                        .unwrap_or(vec![])
                         .iter()
                         .find(|&&(case, _)| case == cond)
                         .map_or(default, |(_, label)| Some(Rc::clone(label)));
@@ -345,13 +354,12 @@ impl Instruction {
                         block_instructions.push(Instruction::Label(jump_label));
                     }
                 } else {
-                    // Linear comparison with every switch branch
                     let Expr {
                         instructions,
                         val: switch_val,
                     } = Expr::parse_with(condition, make_temp_var);
                     block_instructions.extend(instructions);
-                    for (case, label) in cases.unwrap_or(vec![]).iter() {
+                    for (case, label) in cases.iter() {
                         let Expr {
                             instructions,
                             val: case_val,
@@ -369,12 +377,12 @@ impl Instruction {
                             target: Rc::clone(label),
                         });
                     }
-                    if let Some(default_label) = default {
-                        block_instructions.push(Instruction::Jump(default_label));
-                    }
-                    // Switch body and label afterward where it breaks to
+                    block_instructions.push(Instruction::Jump(
+                        default.unwrap_or(Rc::clone(&break_label)),
+                    ));
                     block_instructions.extend(Self::parse_stmt_with(*body, make_temp_var));
                 }
+                // Break label always goes after all instructions
                 block_instructions.push(Instruction::Label(break_label));
             }
         }

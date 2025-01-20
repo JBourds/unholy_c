@@ -1,7 +1,7 @@
 use std::{collections::HashMap, marker::PhantomData, rc::Rc};
 
 use crate::ast;
-use anyhow::{bail, Result};
+use anyhow::{bail, ensure, Result};
 
 // Frame entry consists of a bool for whether the variable value is from the
 // current scope as well as the string variable name
@@ -340,7 +340,7 @@ mod gotos {
         let mut label_map = HashMap::new();
         let block = if let Some(block) = block {
             let block = resolve_block(block, &name, &mut label_map)?;
-            let block = validate_block(block, &label_map)?;
+            let block = validate_block(block, &mut label_map)?;
             Some(block)
         } else {
             None
@@ -400,24 +400,78 @@ mod gotos {
                 },
             }),
             ast::Stmt::Label { name, stmt } => {
-                if label_map.contains_key(&name) {
-                    bail!("Duplicate labels {name}");
-                } else {
-                    let new_name = Rc::new(format!("{func_name}.{name}"));
-                    label_map.insert(Rc::clone(&name), Rc::clone(&new_name));
-                    Ok(ast::Stmt::Label {
-                        name: new_name,
-                        stmt: Box::new(resolve_stmt(*stmt, func_name, label_map)?),
-                    })
-                }
+                let new_name = Rc::new(format!("{func_name}.{name}"));
+                ensure!(
+                    label_map
+                        .insert(Rc::clone(&name), Rc::clone(&new_name))
+                        .is_none(),
+                    "Duplicate labels {name}."
+                );
+                Ok(ast::Stmt::Label {
+                    name: new_name,
+                    stmt: Box::new(resolve_stmt(*stmt, func_name, label_map)?),
+                })
             }
+            ast::Stmt::Case { value, stmt, label } => Ok(ast::Stmt::Case {
+                value,
+                stmt: Box::new(resolve_stmt(*stmt, func_name, label_map)?),
+                label,
+            }),
+            ast::Stmt::Default { label, stmt } => Ok(ast::Stmt::Default {
+                label,
+                stmt: Box::new(resolve_stmt(*stmt, func_name, label_map)?),
+            }),
+            ast::Stmt::DoWhile {
+                body,
+                condition,
+                label,
+            } => Ok(ast::Stmt::DoWhile {
+                body: Box::new(resolve_stmt(*body, func_name, label_map)?),
+                condition,
+                label,
+            }),
+            ast::Stmt::While {
+                body,
+                condition,
+                label,
+            } => Ok(ast::Stmt::While {
+                body: Box::new(resolve_stmt(*body, func_name, label_map)?),
+                condition,
+                label,
+            }),
+            ast::Stmt::For {
+                init,
+                condition,
+                post,
+                body,
+                label,
+            } => Ok(ast::Stmt::For {
+                init,
+                condition,
+                post,
+                body: Box::new(resolve_stmt(*body, func_name, label_map)?),
+                label,
+            }),
+            ast::Stmt::Switch {
+                condition,
+                body,
+                label,
+                cases,
+                default,
+            } => Ok(ast::Stmt::Switch {
+                condition,
+                body: Box::new(resolve_stmt(*body, func_name, label_map)?),
+                label,
+                cases,
+                default,
+            }),
             _ => Ok(stmt.clone()),
         }
     }
 
     fn validate_block(
         block: ast::Block,
-        label_map: &HashMap<Rc<String>, Rc<String>>,
+        label_map: &mut HashMap<Rc<String>, Rc<String>>,
     ) -> Result<ast::Block> {
         let mut block_items = Vec::with_capacity(block.items().len());
 
@@ -434,9 +488,16 @@ mod gotos {
 
     fn validate_stmt(
         stmt: ast::Stmt,
-        label_map: &HashMap<Rc<String>, Rc<String>>,
+        label_map: &mut HashMap<Rc<String>, Rc<String>>,
     ) -> Result<ast::Stmt> {
         match stmt {
+            ast::Stmt::Goto(label) => {
+                if let Some(new_label) = label_map.get(&label) {
+                    Ok(ast::Stmt::Goto(Rc::clone(new_label)))
+                } else {
+                    bail!("Goto label '{label}' does not exist");
+                }
+            }
             ast::Stmt::Compound(block) => {
                 Ok(ast::Stmt::Compound(validate_block(block, label_map)?))
             }
@@ -456,13 +517,59 @@ mod gotos {
                 name,
                 stmt: Box::new(validate_stmt(*stmt, label_map)?),
             }),
-            ast::Stmt::Goto(label) => {
-                if let Some(new_label) = label_map.get(&label) {
-                    Ok(ast::Stmt::Goto(Rc::clone(new_label)))
-                } else {
-                    bail!("Goto label '{label}' does not exist");
-                }
-            }
+            ast::Stmt::Case { value, stmt, label } => Ok(ast::Stmt::Case {
+                value,
+                stmt: Box::new(validate_stmt(*stmt, label_map)?),
+                label,
+            }),
+            ast::Stmt::Default { label, stmt } => Ok(ast::Stmt::Default {
+                label,
+                stmt: Box::new(validate_stmt(*stmt, label_map)?),
+            }),
+            ast::Stmt::DoWhile {
+                body,
+                condition,
+                label,
+            } => Ok(ast::Stmt::DoWhile {
+                body: Box::new(validate_stmt(*body, label_map)?),
+                condition,
+                label,
+            }),
+            ast::Stmt::While {
+                body,
+                condition,
+                label,
+            } => Ok(ast::Stmt::While {
+                body: Box::new(validate_stmt(*body, label_map)?),
+                condition,
+                label,
+            }),
+            ast::Stmt::For {
+                init,
+                condition,
+                post,
+                body,
+                label,
+            } => Ok(ast::Stmt::For {
+                init,
+                condition,
+                post,
+                body: Box::new(validate_stmt(*body, label_map)?),
+                label,
+            }),
+            ast::Stmt::Switch {
+                condition,
+                body,
+                label,
+                cases,
+                default,
+            } => Ok(ast::Stmt::Switch {
+                condition,
+                body: Box::new(validate_stmt(*body, label_map)?),
+                label,
+                cases,
+                default,
+            }),
             _ => Ok(stmt.clone()),
         }
     }
@@ -949,6 +1056,11 @@ mod loops {
         Ok(ast::Block(resolved_block_items))
     }
 
+    /// Function which resolves any unlabeled continue or break statements with
+    /// their associated function, erroring out if there is not one.
+    /// Assumes that the previous stage of switch labelling has worked correctly
+    /// and has not incorrectly labelled any break statements as belonging to
+    /// a switch statement if they are closer to a loop context.
     fn resolve_stmt(
         stmt: ast::Stmt,
         loop_label: Option<Rc<String>>,
@@ -958,12 +1070,12 @@ mod loops {
             (ast::Stmt::Break(_), None) => {
                 bail!("Cannot use 'break' outside of a loop or switch statement.")
             }
-            // Break has not been associated with a loop label yet
-            (ast::Stmt::Break(None), Some(label)) => Ok(ast::Stmt::Break(Some(label))),
-            // Break is already associated with a switch case, don't change anything
-            (ast::Stmt::Break(Some(label)), _) => Ok(ast::Stmt::Break(Some(label))),
+            (ast::Stmt::Break(None), Some(loop_label)) => Ok(ast::Stmt::Break(Some(loop_label))),
+            (ast::Stmt::Break(Some(switch_label)), _) => Ok(ast::Stmt::Break(Some(switch_label))),
             (ast::Stmt::Continue(_), None) => bail!("Cannot use 'continue' outside of a loop."),
-            (ast::Stmt::Continue(None), Some(label)) => Ok(ast::Stmt::Continue(Some(label))),
+            (ast::Stmt::Continue(None), Some(loop_label)) => {
+                Ok(ast::Stmt::Continue(Some(loop_label)))
+            }
             (
                 ast::Stmt::While {
                     condition,
@@ -972,11 +1084,15 @@ mod loops {
                 },
                 _,
             ) => {
-                let label = Rc::new(make_label("while"));
+                let loop_label = Rc::new(make_label("while"));
                 Ok(ast::Stmt::While {
                     condition,
-                    body: Box::new(resolve_stmt(*body, Some(Rc::clone(&label)), make_label)?),
-                    label: Some(label),
+                    body: Box::new(resolve_stmt(
+                        *body,
+                        Some(Rc::clone(&loop_label)),
+                        make_label,
+                    )?),
+                    label: Some(loop_label),
                 })
             }
             (
@@ -987,11 +1103,15 @@ mod loops {
                 },
                 _,
             ) => {
-                let label = Rc::new(make_label("do_while"));
+                let loop_label = Rc::new(make_label("do_while"));
                 Ok(ast::Stmt::DoWhile {
                     condition,
-                    body: Box::new(resolve_stmt(*body, Some(Rc::clone(&label)), make_label)?),
-                    label: Some(label),
+                    body: Box::new(resolve_stmt(
+                        *body,
+                        Some(Rc::clone(&loop_label)),
+                        make_label,
+                    )?),
+                    label: Some(loop_label),
                 })
             }
             (
@@ -1004,20 +1124,24 @@ mod loops {
                 },
                 _,
             ) => {
-                let label = Rc::new(make_label("for"));
+                let loop_label = Rc::new(make_label("for"));
                 Ok(ast::Stmt::For {
                     init,
                     condition,
                     post,
-                    body: Box::new(resolve_stmt(*body, Some(Rc::clone(&label)), make_label)?),
-                    label: Some(label),
+                    body: Box::new(resolve_stmt(
+                        *body,
+                        Some(Rc::clone(&loop_label)),
+                        make_label,
+                    )?),
+                    label: Some(loop_label),
                 })
             }
             (ast::Stmt::While { label: Some(_), .. }, _) => unreachable!(),
             (ast::Stmt::DoWhile { label: Some(_), .. }, _) => unreachable!(),
             (ast::Stmt::For { label: Some(_), .. }, _) => unreachable!(),
-            (ast::Stmt::Compound(block), label) => Ok(ast::Stmt::Compound(resolve_block(
-                block, label, make_label,
+            (ast::Stmt::Compound(block), loop_label) => Ok(ast::Stmt::Compound(resolve_block(
+                block, loop_label, make_label,
             )?)),
             (
                 ast::Stmt::If {
@@ -1025,11 +1149,11 @@ mod loops {
                     then,
                     r#else,
                 },
-                label,
+                loop_label,
             ) => {
-                let then = Box::new(resolve_stmt(*then, label.clone(), make_label)?);
+                let then = Box::new(resolve_stmt(*then, loop_label.clone(), make_label)?);
                 let r#else = if let Some(r#else) = r#else {
-                    Some(Box::new(resolve_stmt(*r#else, label, make_label)?))
+                    Some(Box::new(resolve_stmt(*r#else, loop_label, make_label)?))
                 } else {
                     None
                 };
@@ -1039,6 +1163,35 @@ mod loops {
                     r#else,
                 })
             }
+            (ast::Stmt::Label { name, stmt }, loop_label) => Ok(ast::Stmt::Label {
+                name,
+                stmt: Box::new(resolve_stmt(*stmt, loop_label, make_label)?),
+            }),
+            (ast::Stmt::Default { label, stmt }, loop_label) => Ok(ast::Stmt::Default {
+                label,
+                stmt: Box::new(resolve_stmt(*stmt, loop_label, make_label)?),
+            }),
+            (ast::Stmt::Case { value, label, stmt }, loop_label) => Ok(ast::Stmt::Case {
+                value,
+                label,
+                stmt: Box::new(resolve_stmt(*stmt, loop_label, make_label)?),
+            }),
+            (
+                ast::Stmt::Switch {
+                    condition,
+                    body,
+                    label,
+                    cases,
+                    default,
+                },
+                loop_label,
+            ) => Ok(ast::Stmt::Switch {
+                condition,
+                body: Box::new(resolve_stmt(*body, loop_label, make_label)?),
+                label,
+                cases,
+                default,
+            }),
             (stmt, _) => Ok(stmt),
         }
     }

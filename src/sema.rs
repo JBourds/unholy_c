@@ -244,7 +244,10 @@ mod variables {
                 Ok(ast::Stmt::Compound(block))
             }
             ast::Stmt::Goto(label) => Ok(ast::Stmt::Goto(label)),
-            label @ ast::Stmt::Label { .. } => Ok(label),
+            ast::Stmt::Label { name, stmt } => Ok(ast::Stmt::Label {
+                name,
+                stmt: Box::new(resolve_stmt(*stmt, variable_map, make_temporary)?),
+            }),
             ast::Stmt::Default { stmt, label } => Ok(ast::Stmt::Default {
                 stmt: Box::new(resolve_stmt(*stmt, variable_map, make_temporary)?),
                 label,
@@ -404,7 +407,7 @@ mod gotos {
                     label_map.insert(Rc::clone(&name), Rc::clone(&new_name));
                     Ok(ast::Stmt::Label {
                         name: new_name,
-                        stmt,
+                        stmt: Box::new(resolve_stmt(*stmt, func_name, label_map)?),
                     })
                 }
             }
@@ -448,6 +451,10 @@ mod gotos {
                     Some(r#else) => Some(Box::new(validate_stmt(*r#else, label_map)?)),
                     None => None,
                 },
+            }),
+            ast::Stmt::Label { name, stmt } => Ok(ast::Stmt::Label {
+                name,
+                stmt: Box::new(validate_stmt(*stmt, label_map)?),
             }),
             ast::Stmt::Goto(label) => {
                 if let Some(new_label) = label_map.get(&label) {

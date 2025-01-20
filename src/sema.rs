@@ -1067,7 +1067,7 @@ mod loops {
         make_label: &mut impl FnMut(&str) -> String,
     ) -> Result<ast::Stmt> {
         match (stmt, loop_label) {
-            (ast::Stmt::Break(_), None) => {
+            (ast::Stmt::Break(None), None) => {
                 bail!("Cannot use 'break' outside of a loop or switch statement.")
             }
             (ast::Stmt::Break(None), Some(loop_label)) => Ok(ast::Stmt::Break(Some(loop_label))),

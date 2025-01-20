@@ -585,7 +585,7 @@ mod switch {
             }
             (ast::Stmt::Case { value, stmt, label }, _) => {
                 ensure!(label.is_none());
-                let const_value = const_eval(value.clone())?;
+                let const_value = const_eval(value)?;
                 let name = match switch_context.name.clone() {
                     Some(name) => name,
                     None => bail!("Encountered case statement outside of switch statement"),

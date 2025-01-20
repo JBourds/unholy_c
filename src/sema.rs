@@ -593,7 +593,7 @@ mod switch {
                     .is_none());
                 let body = resolve_stmt(*body, switch_context, make_label)?;
                 Ok(ast::Stmt::Case {
-                    value,
+                    value: ast::Expr::Literal(const_value),
                     body: Box::new(body),
                     label: Some(label),
                 })

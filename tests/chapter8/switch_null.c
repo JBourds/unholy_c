@@ -1,3 +1,3 @@
 int main() {
-    switch 0;
+    switch (0);
 }

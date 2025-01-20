@@ -302,7 +302,11 @@ impl Instruction {
                 instructions.push(Instruction::Label(Rc::clone(&end_label)));
                 block_instructions.extend(instructions);
             }
-            ast::Stmt::Case { value, body, label } => todo!(),
+            ast::Stmt::Case { value: _, stmt, label } => {
+                let label = label.expect("Case must have label");
+                block_instructions.push(Instruction::Label(Rc::clone(&label)));
+                block_instructions.extend(Self::parse_stmt_with(*stmt, make_temp_var));
+            },
             ast::Stmt::Switch {
                 condition,
                 body,
@@ -310,7 +314,7 @@ impl Instruction {
                 cases,
                 default,
             } => todo!(),
-            ast::Stmt::Default(label) => todo!(),
+            ast::Stmt::Default { label, stmt } => todo!(),
         }
         block_instructions
     }

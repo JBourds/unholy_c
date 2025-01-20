@@ -245,7 +245,10 @@ mod variables {
             }
             ast::Stmt::Goto(label) => Ok(ast::Stmt::Goto(label)),
             label @ ast::Stmt::Label { .. } => Ok(label),
-            ast::Stmt::Default(label) => Ok(ast::Stmt::Default(label)),
+            ast::Stmt::Default { stmt, label } => Ok(ast::Stmt::Default {
+                stmt: Box::new(resolve_stmt(*stmt, variable_map, make_temporary)?),
+                label,
+            }),
             ast::Stmt::Switch {
                 condition,
                 body,
@@ -259,9 +262,9 @@ mod variables {
                 cases,
                 default,
             }),
-            ast::Stmt::Case { value, body, label } => Ok(ast::Stmt::Case {
+            ast::Stmt::Case { value, stmt, label } => Ok(ast::Stmt::Case {
                 value: resolve_expr(value, variable_map)?,
-                body: Box::new(resolve_stmt(*body, variable_map, make_temporary)?),
+                stmt: Box::new(resolve_stmt(*stmt, variable_map, make_temporary)?),
                 label,
             }),
         }
@@ -562,7 +565,7 @@ mod switch {
                 Ok(ast::Stmt::Break(Some(switch_context.name.clone().unwrap())))
             }
             (ast::Stmt::Break(Some(_)), _) => unreachable!(),
-            (ast::Stmt::Default(label), _) => {
+            (ast::Stmt::Default { label, stmt }, _) => {
                 ensure!(label.is_none());
                 let name = match switch_context.name.clone() {
                     Some(name) => name,
@@ -574,9 +577,13 @@ mod switch {
                     bail!("Duplicate default statement");
                 }
                 switch_context.default = Some(Rc::clone(&label));
-                Ok(ast::Stmt::Default(Some(label)))
+                let stmt = Box::new(resolve_stmt(*stmt, switch_context, make_label)?);
+                Ok(ast::Stmt::Default {
+                    label: Some(label),
+                    stmt,
+                })
             }
-            (ast::Stmt::Case { value, body, label }, _) => {
+            (ast::Stmt::Case { value, stmt, label }, _) => {
                 ensure!(label.is_none());
                 let const_value = const_eval(value.clone())?;
                 let name = match switch_context.name.clone() {
@@ -591,10 +598,10 @@ mod switch {
                     .label_map
                     .insert(const_value, Rc::clone(&label))
                     .is_none());
-                let body = resolve_stmt(*body, switch_context, make_label)?;
+                let stmt = resolve_stmt(*stmt, switch_context, make_label)?;
                 Ok(ast::Stmt::Case {
                     value: ast::Expr::Literal(const_value),
-                    body: Box::new(body),
+                    stmt: Box::new(stmt),
                     label: Some(label),
                 })
             }

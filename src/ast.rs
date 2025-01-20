@@ -260,12 +260,20 @@ pub enum Stmt {
         body: Box<Stmt>,
         label: Option<Rc<String>>,
     },
+    // In newer compilers these don't have to have a statement after them
+    Label {
+        name: Rc<String>,
+        stmt: Box<Stmt>,
+    },
     Case {
         value: Expr,
-        body: Box<Stmt>,
+        stmt: Box<Stmt>,
         label: Option<Rc<String>>,
     },
-    Default(Option<Rc<String>>),
+    Default {
+        label: Option<Rc<String>>,
+        stmt: Box<Stmt>,
+    },
     Switch {
         condition: Expr,
         body: Box<Stmt>,
@@ -274,10 +282,6 @@ pub enum Stmt {
         default: Option<Rc<String>>,
     },
     Goto(Rc<String>),
-    Label {
-        name: Rc<String>,
-        stmt: Box<Stmt>,
-    },
     Null,
 }
 
@@ -413,18 +417,29 @@ impl AstNode for Stmt {
                 } else {
                     bail!("Case statement should end with a colon");
                 };
-                let (body, tokens) = Stmt::consume(tokens).context("Failed to parse case body")?;
+                let (stmt, tokens) = Stmt::consume(tokens).context("Failed to parse case body")?;
 
                 Ok((
                     Self::Case {
                         value: expr,
-                        body: Box::new(body),
+                        stmt: Box::new(stmt),
                         label: None,
                     },
                     tokens,
                 ))
             }
-            [Token::Default, Token::Colon, tokens @ ..] => Ok((Self::Default(None), tokens)),
+            [Token::Default, Token::Colon, tokens @ ..] => {
+                let (stmt, tokens) =
+                    Stmt::consume(tokens).context("Failed to parse default body")?;
+
+                Ok((
+                    Self::Default {
+                        stmt: Box::new(stmt),
+                        label: None,
+                    },
+                    tokens,
+                ))
+            }
             [Token::Switch, Token::LParen, tokens @ ..] => {
                 let (condition, tokens) = Expr::parse(tokens, 0)
                     .context("Failed to parse expression for switch statement conditional")?;
@@ -593,7 +608,7 @@ impl Factor {
         }
     }
 
-    pub fn parse<'a>(tokens: &'a [Token]) -> Result<(Expr, &'a [Token])> {
+    pub fn parse(tokens: &[Token]) -> Result<(Expr, &[Token])> {
         match UnaryOp::consume_prefix(tokens) {
             Ok((op, tokens)) => {
                 let (expr, tokens) = Factor::parse(tokens)?;

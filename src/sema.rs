@@ -587,12 +587,10 @@ mod switch {
                 if switch_context.label_map.contains_key(&const_value) {
                     bail!("Duplicate case statement: {const_value}");
                 }
-                ensure!(
-                    switch_context
-                        .label_map
-                        .insert(const_value, Rc::clone(&label))
-                        == None
-                );
+                ensure!(switch_context
+                    .label_map
+                    .insert(const_value, Rc::clone(&label))
+                    .is_none());
                 let body = resolve_stmt(*body, switch_context, make_label)?;
                 Ok(ast::Stmt::Case {
                     value,
@@ -826,24 +824,12 @@ mod switch {
             ast::BinaryOp::LShift => {
                 let left_val = get_value(const_eval(left)?);
                 let right_val = get_value(const_eval(right)?);
-                Ok(ast::Literal::Int(
-                    left_val.rotate_left(
-                        right_val
-                            .try_into()
-                            .context("Cannot use negative to bitshift")?,
-                    ),
-                ))
+                Ok(ast::Literal::Int(left_val << right_val))
             }
             ast::BinaryOp::RShift => {
                 let left_val = get_value(const_eval(left)?);
                 let right_val = get_value(const_eval(right)?);
-                Ok(ast::Literal::Int(
-                    left_val.rotate_right(
-                        right_val
-                            .try_into()
-                            .context("Cannot use negative to bitshift")?,
-                    ),
-                ))
+                Ok(ast::Literal::Int(left_val << right_val))
             }
             ast::BinaryOp::Equal => {
                 let left_val = get_value(const_eval(left)?);
@@ -886,7 +872,9 @@ mod switch {
             | ast::BinaryOp::XorAssign
             | ast::BinaryOp::LShiftAssign
             | ast::BinaryOp::RShiftAssign => bail!("Assignment cannot happen in const expression"),
-            ast::BinaryOp::Ternary => todo!("I dont know how to implement this"),
+            ast::BinaryOp::Ternary => {
+                unreachable!("Ternary expressions are not true binary operands.")
+            }
         }
     }
 

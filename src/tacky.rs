@@ -1,4 +1,5 @@
 use crate::ast;
+use crate::sema;
 use anyhow::{Context, Result};
 use std::rc::Rc;
 
@@ -7,11 +8,11 @@ pub struct Program {
     pub function: Function,
 }
 
-impl TryFrom<ast::Program> for Program {
+impl TryFrom<sema::SemaStage<sema::Final>> for Program {
     type Error = anyhow::Error;
-    fn try_from(node: ast::Program) -> Result<Self> {
+    fn try_from(stage: sema::SemaStage<sema::Final>) -> Result<Self> {
         Ok(Self {
-            function: Function::try_from(node.function)
+            function: Function::try_from(stage.program.function)
                 .context("Failed to parse \"main\" function into TACKY representation")?,
         })
     }
@@ -45,7 +46,7 @@ impl TryFrom<ast::Function> for Function {
         let mut make_temp_var =
             Function::make_temp_var(Rc::new(name.to_string()), &mut temp_var_counter);
         let mut instructions = block.map_or(vec![], |block| {
-            Instruction::parse_with(block, &mut make_temp_var)
+            Instruction::parse_block_with(block, &mut make_temp_var)
         });
         // Temporary fix suggested by the book for the case where a function
         // is supposed to return something but does not.
@@ -88,96 +89,315 @@ pub enum Instruction {
 }
 
 impl Instruction {
-    fn parse_with(node: ast::Block, make_temp_var: &mut impl FnMut() -> String) -> Vec<Self> {
+    fn parse_decl_with(
+        decl: ast::Declaration,
+        make_temp_var: &mut impl FnMut() -> String,
+    ) -> Vec<Self> {
+        if let Some(init) = decl.init {
+            let Expr {
+                mut instructions,
+                val: src,
+            } = Expr::parse_with(init, make_temp_var);
+            let dst = Val::Var(Rc::clone(&decl.name));
+            instructions.push(Instruction::Copy {
+                src,
+                dst: dst.clone(),
+            });
+            instructions
+        } else {
+            vec![]
+        }
+    }
+    fn parse_stmt_with(stmt: ast::Stmt, make_temp_var: &mut impl FnMut() -> String) -> Vec<Self> {
+        let mut block_instructions = vec![];
+        match stmt {
+            ast::Stmt::Null => {}
+            ast::Stmt::Return(Some(expr)) => {
+                let Expr {
+                    mut instructions,
+                    val,
+                } = Expr::parse_with(expr, make_temp_var);
+                instructions.push(Instruction::Return(Some(val)));
+                block_instructions.extend(instructions);
+            }
+            ast::Stmt::Return(None) => {
+                block_instructions.push(Instruction::Return(None));
+            }
+            ast::Stmt::Expr(expr) => {
+                let Expr { instructions, .. } = Expr::parse_with(expr, make_temp_var);
+                block_instructions.extend(instructions);
+            }
+            ast::Stmt::Compound(block) => {
+                block_instructions.extend(Self::parse_block_with(block, make_temp_var));
+            }
+            ast::Stmt::Goto(label) => {
+                block_instructions.push(Instruction::Jump(label));
+            }
+            ast::Stmt::Label { name, stmt } => {
+                block_instructions.push(Instruction::Label(name));
+                block_instructions.extend(Self::parse_stmt_with(*stmt, make_temp_var));
+            }
+            ast::Stmt::Break(label) => {
+                let label = Rc::new(format!("{}.break", label.unwrap()));
+                block_instructions.push(Instruction::Jump(label));
+            }
+            ast::Stmt::Continue(label) => {
+                let label = Rc::new(format!("{}.continue", label.unwrap()));
+                block_instructions.push(Instruction::Jump(label));
+            }
+            ast::Stmt::While {
+                condition,
+                body,
+                label,
+            } => {
+                let label = label.unwrap();
+                let label_continue = Rc::new(format!("{label}.continue"));
+                let label_break = Rc::new(format!("{label}.break"));
+
+                // Label(continue_label)
+                block_instructions.push(Instruction::Label(Rc::clone(&label_continue)));
+                // <instructions for condition>
+                // v = <result of condition>
+                let Expr { instructions, val } = Expr::parse_with(condition, make_temp_var);
+                block_instructions.extend(instructions);
+                // JumpIfZero(v, break_label)
+                block_instructions.push(Self::JumpIfZero {
+                    condition: val,
+                    target: Rc::clone(&label_break),
+                });
+                // <instructions for body>
+                block_instructions.extend(Instruction::parse_stmt_with(*body, make_temp_var));
+                // Jump(continue_label)
+                block_instructions.push(Instruction::Jump(label_continue));
+                // Label(break_label)
+                block_instructions.push(Instruction::Label(label_break));
+            }
+            ast::Stmt::DoWhile {
+                body,
+                condition,
+                label,
+            } => {
+                let label = label.unwrap();
+                let label_start = Rc::new(format!("{label}.start"));
+                let label_continue = Rc::new(format!("{label}.continue"));
+                let label_break = Rc::new(format!("{label}.break"));
+
+                // Label(start)
+                block_instructions.push(Instruction::Label(Rc::clone(&label_start)));
+                // <instructions for body>
+                block_instructions.extend(Instruction::parse_stmt_with(*body, make_temp_var));
+                // Label(continue_label)
+                block_instructions.push(Instruction::Label(label_continue));
+                // <instructions for condition>
+                // v = <result of condition>
+                let Expr { instructions, val } = Expr::parse_with(condition, make_temp_var);
+                block_instructions.extend(instructions);
+                // JumpIfNotZero(v, start)
+                block_instructions.push(Instruction::JumpIfNotZero {
+                    condition: val,
+                    target: label_start,
+                });
+                // Label(break_label)
+                block_instructions.push(Instruction::Label(label_break));
+            }
+            ast::Stmt::For {
+                init,
+                condition,
+                post,
+                body,
+                label,
+            } => {
+                let label = label.unwrap();
+                let label_start = Rc::new(format!("{label}.start"));
+                let label_continue = Rc::new(format!("{label}.continue"));
+                let label_break = Rc::new(format!("{label}.break"));
+
+                // <instructions for init>
+                match init {
+                    ast::ForInit::Decl(decl) => {
+                        block_instructions
+                            .extend(Instruction::parse_decl_with(decl, make_temp_var));
+                    }
+                    ast::ForInit::Expr(Some(expr)) => {
+                        let Expr { instructions, .. } = Expr::parse_with(expr, make_temp_var);
+                        block_instructions.extend(instructions);
+                    }
+                    ast::ForInit::Expr(None) => {}
+                }
+                // Label(start)
+                block_instructions.push(Instruction::Label(Rc::clone(&label_start)));
+                // <instructions for condition>
+                // v = <result of condition>
+                if let Some(cond) = condition {
+                    let Expr {
+                        instructions: instructions_condition,
+                        val: val_condition,
+                    } = Expr::parse_with(cond, make_temp_var);
+                    block_instructions.extend(instructions_condition);
+                    // JumpIfZero(v, break_label)
+                    block_instructions.push(Instruction::JumpIfZero {
+                        condition: val_condition,
+                        target: Rc::clone(&label_break),
+                    });
+                }
+                // <instructions for body>
+                block_instructions.extend(Instruction::parse_stmt_with(*body, make_temp_var));
+                // Label(continue_label)
+                block_instructions.push(Instruction::Label(label_continue));
+                // <instructions for post>
+                if let Some(post) = post {
+                    let Expr {
+                        instructions: instructions_post,
+                        ..
+                    } = Expr::parse_with(post, make_temp_var);
+                    block_instructions.extend(instructions_post);
+                }
+                // Jump(Start)
+                block_instructions.push(Instruction::Jump(label_start));
+                // Label(break_label)
+                block_instructions.push(Instruction::Label(label_break));
+            }
+            ast::Stmt::If {
+                condition,
+                then,
+                r#else,
+            } => {
+                let (else_label, end_label) = {
+                    let label = make_temp_var();
+                    // This isn't needed and can be simplified... To Bad!
+                    let Some((name, count)) = label.as_str().split_once('.') else {
+                        unreachable!("label should always be name.count");
+                    };
+                    let else_label = format!("{name}.{count}.else");
+                    let end_label = format!("{name}.{count}.end");
+                    (Rc::new(else_label), Rc::new(end_label))
+                };
+                let Expr {
+                    mut instructions,
+                    val,
+                } = Expr::parse_with(condition, make_temp_var);
+
+                instructions.push(Self::JumpIfZero {
+                    condition: val,
+                    target: Rc::clone(match r#else {
+                        Some(_) => &else_label,
+                        None => &end_label,
+                    }),
+                });
+
+                instructions.extend(Instruction::parse_block_with(
+                    ast::Block(vec![ast::BlockItem::Stmt(*then)]),
+                    make_temp_var,
+                ));
+
+                if let Some(r#else) = r#else {
+                    instructions.push(Instruction::Jump(Rc::clone(&end_label)));
+                    instructions.push(Instruction::Label(Rc::clone(&else_label)));
+                    instructions.extend(Instruction::parse_block_with(
+                        ast::Block(vec![ast::BlockItem::Stmt(*r#else)]),
+                        make_temp_var,
+                    ));
+                }
+
+                instructions.push(Instruction::Label(Rc::clone(&end_label)));
+                block_instructions.extend(instructions);
+            }
+            ast::Stmt::Case {
+                value: _,
+                stmt,
+                label,
+            } => {
+                let label = label.expect("Case must have label");
+                block_instructions.push(Instruction::Label(Rc::clone(&label)));
+                block_instructions.extend(Self::parse_stmt_with(*stmt, make_temp_var));
+            }
+            ast::Stmt::Default { label, stmt } => {
+                let label = label.expect("Default must have label");
+                block_instructions.push(Instruction::Label(Rc::clone(&label)));
+                block_instructions.extend(Self::parse_stmt_with(*stmt, make_temp_var));
+            }
+            ast::Stmt::Switch {
+                condition,
+                body,
+                label,
+                cases,
+                default,
+            } => {
+                let label = label.expect("Switch statement must be labelled.");
+                let cases = cases.expect("Cases must have been populated.");
+                let break_label = Rc::new(format!("{label}.break"));
+                // Cases:
+                // 1. There are no cases: Still evaluate the condition and make
+                //  instructions in case a goto jumps to a label in them.
+                // 2. The switch value is a literal (or has been const-evaled):
+                //  Perform a compile time comparison to all the cases and make
+                //  a single jump to the right location.
+                // 3. Perform a linear comparison for each case and jump if the
+                //  value matches.
+                if cases.is_empty() {
+                    let Expr { instructions, .. } = Expr::parse_with(condition, make_temp_var);
+                    block_instructions.extend(instructions);
+                    block_instructions.push(Instruction::Jump(
+                        default.unwrap_or(Rc::clone(&break_label)),
+                    ));
+                    block_instructions.extend(Self::parse_stmt_with(*body, make_temp_var));
+                } else if let ast::Expr::Literal(cond) = condition {
+                    let jump_label = cases
+                        .iter()
+                        .find(|&&(case, _)| case == cond)
+                        .map_or(default, |(_, label)| Some(Rc::clone(label)));
+                    let has_jump_label = jump_label.is_some();
+                    let jump_label = jump_label.unwrap_or(break_label.clone());
+                    block_instructions.push(Instruction::Jump(jump_label.clone()));
+                    block_instructions.extend(Self::parse_stmt_with(*body, make_temp_var));
+                    if !has_jump_label {
+                        block_instructions.push(Instruction::Label(jump_label));
+                    }
+                } else {
+                    let Expr {
+                        instructions,
+                        val: switch_val,
+                    } = Expr::parse_with(condition, make_temp_var);
+                    block_instructions.extend(instructions);
+                    for (case, label) in cases.iter() {
+                        let Expr {
+                            instructions,
+                            val: case_val,
+                        } = Expr::parse_with(ast::Expr::Literal(*case), make_temp_var);
+                        block_instructions.extend(instructions);
+                        let dst = Val::Var(Rc::new(make_temp_var()));
+                        block_instructions.push(Self::Binary {
+                            op: BinaryOp::Equal,
+                            src1: switch_val.clone(),
+                            src2: case_val,
+                            dst: dst.clone(),
+                        });
+                        block_instructions.push(Self::JumpIfNotZero {
+                            condition: dst,
+                            target: Rc::clone(label),
+                        });
+                    }
+                    block_instructions.push(Instruction::Jump(
+                        default.unwrap_or(Rc::clone(&break_label)),
+                    ));
+                    block_instructions.extend(Self::parse_stmt_with(*body, make_temp_var));
+                }
+                // Break label always goes after all instructions
+                block_instructions.push(Instruction::Label(break_label));
+            }
+        }
+        block_instructions
+    }
+    fn parse_block_with(node: ast::Block, make_temp_var: &mut impl FnMut() -> String) -> Vec<Self> {
         let mut block_instructions = vec![];
         for item in node.into_items().into_iter() {
             match item {
                 ast::BlockItem::Decl(decl) => {
-                    if let Some(init) = decl.init {
-                        let Expr {
-                            mut instructions,
-                            val: src,
-                        } = Expr::parse_with(init, make_temp_var);
-                        let dst = Val::Var(Rc::clone(&decl.name));
-                        instructions.push(Instruction::Copy {
-                            src,
-                            dst: dst.clone(),
-                        });
-                        block_instructions.extend(instructions);
-                    }
+                    block_instructions.extend(Self::parse_decl_with(decl, make_temp_var));
                 }
-                ast::BlockItem::Stmt(stmt) => match stmt {
-                    ast::Stmt::Null => {}
-                    ast::Stmt::Return(Some(expr)) => {
-                        let Expr {
-                            mut instructions,
-                            val,
-                        } = Expr::parse_with(expr, make_temp_var);
-                        instructions.push(Instruction::Return(Some(val)));
-                        block_instructions.extend(instructions);
-                    }
-                    ast::Stmt::Return(None) => {
-                        block_instructions.push(Instruction::Return(None));
-                    }
-                    ast::Stmt::Expr(expr) => {
-                        let Expr { instructions, .. } = Expr::parse_with(expr, make_temp_var);
-                        block_instructions.extend(instructions);
-                    }
-                    ast::Stmt::Compound(block) => {
-                        block_instructions.extend(Self::parse_with(block, make_temp_var));
-                    }
-                    ast::Stmt::Goto(label) => {
-                        block_instructions.push(Instruction::Jump(label));
-                    }
-                    ast::Stmt::Label(label) => {
-                        block_instructions.push(Instruction::Label(label));
-                    }
-                    ast::Stmt::If {
-                        condition,
-                        then,
-                        r#else,
-                    } => {
-                        let (else_label, end_label) = {
-                            let label = make_temp_var();
-                            // This isn't needed and can be simplified... To Bad!
-                            let Some((name, count)) = label.as_str().split_once('.') else {
-                                unreachable!("label should always be name.count");
-                            };
-                            let else_label = format!("{name}.{count}.else");
-                            let end_label = format!("{name}.{count}.end");
-                            (Rc::new(else_label), Rc::new(end_label))
-                        };
-                        let Expr {
-                            mut instructions,
-                            val,
-                        } = Expr::parse_with(condition, make_temp_var);
-
-                        instructions.push(Self::JumpIfZero {
-                            condition: val,
-                            target: Rc::clone(match r#else {
-                                Some(_) => &else_label,
-                                None => &end_label,
-                            }),
-                        });
-
-                        instructions.extend(Instruction::parse_with(
-                            ast::Block(vec![ast::BlockItem::Stmt(*then)]),
-                            make_temp_var,
-                        ));
-
-                        if let Some(r#else) = r#else {
-                            instructions.push(Instruction::Jump(Rc::clone(&end_label)));
-                            instructions.push(Instruction::Label(Rc::clone(&else_label)));
-                            instructions.extend(Instruction::parse_with(
-                                ast::Block(vec![ast::BlockItem::Stmt(*r#else)]),
-                                make_temp_var,
-                            ));
-                        }
-
-                        instructions.push(Instruction::Label(Rc::clone(&end_label)));
-                        block_instructions.extend(instructions);
-                    }
-                },
+                ast::BlockItem::Stmt(stmt) => {
+                    block_instructions.extend(Self::parse_stmt_with(stmt, make_temp_var));
+                }
             }
         }
         block_instructions
@@ -596,7 +816,7 @@ mod tests {
         )))]);
         let mut counter = 0;
         let mut make_temp_var = Function::make_temp_var(Rc::new("test".to_string()), &mut counter);
-        let actual = Instruction::parse_with(ast, &mut make_temp_var);
+        let actual = Instruction::parse_block_with(ast, &mut make_temp_var);
         let expected = vec![Instruction::Return(Some(Val::Constant(2)))];
         assert_eq!(actual, expected);
     }
@@ -611,7 +831,7 @@ mod tests {
         )))]);
         let mut counter = 0;
         let mut make_temp_var = Function::make_temp_var(Rc::new("test".to_string()), &mut counter);
-        let actual = Instruction::parse_with(ast, &mut make_temp_var);
+        let actual = Instruction::parse_block_with(ast, &mut make_temp_var);
         let expected = vec![
             Instruction::Unary {
                 op: UnaryOp::Complement,
@@ -638,7 +858,7 @@ mod tests {
         )))]);
         let mut counter = 0;
         let mut make_temp_var = Function::make_temp_var(Rc::new("test".to_string()), &mut counter);
-        let actual = Instruction::parse_with(ast, &mut make_temp_var);
+        let actual = Instruction::parse_block_with(ast, &mut make_temp_var);
         let expected = vec![
             Instruction::Unary {
                 op: UnaryOp::Negate,

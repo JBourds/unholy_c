@@ -1,5 +1,5 @@
 use crate::lexer::{self, Token};
-use anyhow::{bail, Context, Result};
+use anyhow::{bail, Context, Error, Result};
 use std::cmp;
 use std::rc::Rc;
 
@@ -12,6 +12,40 @@ pub fn parse(tokens: &[Token]) -> Result<Program> {
     }
 }
 
+// Get ident nested in arbitrary number of parentheses
+fn parse_ident(tokens: &[Token]) -> Result<(Rc<String>, &[Token])> {
+    let mut nparens = 0;
+    let mut name = None;
+    for token in tokens.iter() {
+        match token {
+            Token::LParen => {
+                nparens += 1;
+            }
+            Token::Ident(s) => {
+                name = Some(Rc::clone(s));
+                if tokens[nparens + 1..nparens + 1 + nparens]
+                    .iter()
+                    .any(|t| *t != lexer::Token::RParen)
+                {
+                    bail!("Invalid parentheses around identifier \"{}\"", s);
+                }
+                break;
+            }
+            _ => {
+                bail!(
+                    "Failed to parse identifier in declaration. Found {:?} instead.",
+                    token
+                );
+            }
+        }
+    }
+    if let Some(name) = name {
+        Ok::<(std::rc::Rc<String>, &[Token]), Error>((name, &tokens[nparens + nparens + 1..]))
+    } else {
+        bail!("Unable to parse identifier in declaration.")
+    }
+}
+
 pub trait AstNode {
     fn consume(tokens: &[Token]) -> Result<(Self, &[Token])>
     where
@@ -20,69 +54,95 @@ pub trait AstNode {
 
 #[derive(Debug, PartialEq)]
 pub struct Program {
-    pub function: Function,
+    pub functions: Vec<FunDecl>,
 }
 impl AstNode for Program {
     fn consume(tokens: &[Token]) -> Result<(Program, &[Token])> {
-        let (function, tokens) = Function::consume(tokens).context("Could not parse function.")?;
-        match (
-            function.ret_t,
-            function.name.as_ref().cmp(&"main".to_string()),
-        ) {
-            (Type::Int, cmp::Ordering::Equal) => Ok((Self { function }, tokens)),
-            _ => bail!("Could not find a \"main\" function."),
+        let mut seen_main = false;
+        let mut functions = vec![];
+        let mut remaining = tokens;
+        // This will change again very soon with file scope variables
+        while let Ok((function, tokens)) = FunDecl::consume(remaining) {
+            match (
+                function.ret_t,
+                function.name.as_ref().cmp(&"main".to_string()),
+            ) {
+                (Type::Int, cmp::Ordering::Equal) => {
+                    if seen_main {
+                        bail!("Duplicate \"main\" function definition!.");
+                    }
+                    seen_main = true;
+                    functions.push(function);
+                }
+                _ => {
+                    functions.push(function);
+                }
+            }
+            remaining = tokens;
         }
+        if !seen_main {
+            bail!("No definition for \"main\" function.");
+        }
+        if !remaining.is_empty() {
+            bail!("Found remaining tokens {:?}.", remaining);
+        }
+        Ok((Program { functions }, remaining))
     }
 }
 
-#[derive(Debug, PartialEq)]
-pub struct Function {
+#[derive(Clone, Debug, PartialEq)]
+pub struct FunDecl {
     pub ret_t: Type,
     pub name: Rc<String>,
-    pub signature: Vec<(Type, Option<Rc<String>>)>,
+    pub signature: ParameterList,
     pub block: Option<Block>,
 }
 
-impl AstNode for Function {
-    fn consume(tokens: &[Token]) -> Result<(Function, &[Token])> {
+type ParameterList = Vec<(Type, Option<Rc<String>>)>;
+
+impl FunDecl {
+    /// Parses [ <type> [name] ]*.
+    /// Does not consume opening or closing parentheses
+    fn parse_parameter_list(tokens: &[Token]) -> Result<(ParameterList, &[Token])> {
+        let mut signature = vec![];
+        let remaining = match tokens {
+            [Token::Void, Token::RParen, ..] => &tokens[1..],
+            [Token::Void, t, ..] => {
+                bail!("Expected closing parentheses but found \"{}\"", t)
+            }
+            _ => {
+                let mut remaining = tokens;
+                while let Ok((typ, tokens)) = Type::consume(remaining) {
+                    let (name, tokens) = parse_ident(tokens)
+                        .map(|(name, tokens)| (Some(name), tokens))
+                        .unwrap_or((None, tokens));
+                    signature.push((typ, name));
+
+                    if let [Token::Comma, tokens @ ..] = tokens {
+                        remaining = tokens;
+                    } else {
+                        remaining = tokens;
+                    }
+                }
+                remaining
+            }
+        };
+        Ok((signature, remaining))
+    }
+}
+
+impl AstNode for FunDecl {
+    fn consume(tokens: &[Token]) -> Result<(Self, &[Token])> {
         let (ret_t, tokens) = Type::consume(tokens)
             .context("No return type indicated for function. Add a return type, or mark the function as returning \"void\" to signal that it returns nothing.")?;
-        if let [Token::Ident(name), Token::LParen, tokens @ ..] = tokens {
-            let mut signature = vec![];
-            let remaining = match tokens {
-                [Token::Void, Token::RParen, tokens @ ..] => tokens,
-                [Token::Void, t, ..] => {
-                    bail!("Expected closing parentheses but found \"{}\"", t)
-                }
-                tokens => {
-                    let mut remaining = tokens;
-                    while let Ok((param_t, tokens)) = Type::consume(remaining) {
-                        match tokens {
-                            [Token::Ident(s), Token::Comma, tokens @ ..]
-                            | [Token::Ident(s), tokens @ ..] => {
-                                signature.push((param_t, Some(Rc::clone(s))));
-                                remaining = tokens;
-                            }
-                            [Token::Comma, tokens @ ..] => {
-                                signature.push((param_t, None));
-                                remaining = tokens;
-                            }
-                            [t, ..] => {
-                                bail!("Expected parameter name or comma but found : {}", t)
-                            }
-                            [] => {
-                                bail!("Expected parameter name or comma but found no more tokens.")
-                            }
-                        }
-                    }
-
-                    match remaining {
-                        [Token::RParen, tokens @ ..] => tokens,
-                        [t, ..] => bail!("Expected a closing parentheses but found {}", t),
-                        [] => bail!("Expected a closing parentheses but found no more tokens."),
-                    }
-                }
-            };
+        let (name, tokens) = parse_ident(tokens).context("Missing function name.")?;
+        if let [Token::LParen, tokens @ ..] = tokens {
+            let (signature, tokens) = Self::parse_parameter_list(tokens)
+                .with_context(|| format!("Unable to parse parameter list for {}", name))?;
+            if tokens.iter().next().is_some_and(|t| *t != Token::RParen) {
+                bail!("Expected \")\" to close parameter list.");
+            }
+            let remaining = &tokens[1..];
 
             let (block, tokens) = match remaining {
                 [Token::Semi, tokens @ ..] => (None, tokens),
@@ -103,14 +163,14 @@ impl AstNode for Function {
             Ok((
                 Self {
                     ret_t,
-                    name: Rc::clone(name),
+                    name: Rc::clone(&name),
                     signature,
                     block,
                 },
                 tokens,
             ))
         } else {
-            bail!("Failed to parse function.")
+            bail!("Expected start of function parameter list.")
         }
     }
 }
@@ -125,25 +185,29 @@ impl AstNode for BlockItem {
     fn consume(tokens: &[Token]) -> Result<(BlockItem, &[Token])> {
         if let Ok((decl, tokens)) = Declaration::consume(tokens) {
             Ok((Self::Decl(decl), tokens))
-        } else {
-            let (stmt, tokens) = Stmt::consume(tokens)?;
+        } else if let Ok((stmt, tokens)) = Stmt::consume(tokens) {
             Ok((Self::Stmt(stmt), tokens))
+        } else {
+            bail!("Unable to parse a valid block item.")
         }
     }
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct Declaration {
+pub struct VarDecl {
     pub typ: Type,
     pub name: Rc<String>,
     pub init: Option<Expr>,
 }
 
-impl AstNode for Declaration {
+impl AstNode for VarDecl {
     fn consume(tokens: &[Token]) -> Result<(Self, &[Token])> {
-        let (typ, tokens) = Type::consume(tokens)?;
+        let (typ, tokens) =
+            Type::consume(tokens).context("Unable to parse type in declaration.")?;
+        let (name, tokens) =
+            parse_ident(tokens).context("Failed to find valid identifer for declaration.")?;
         match tokens {
-            [lexer::Token::Ident(s), lexer::Token::Assign, tokens @ ..] => {
+            [lexer::Token::Assign, tokens @ ..] => {
                 let (expr, tokens) = Expr::parse(tokens, 0)?;
                 if tokens.first().is_some_and(|x| *x != lexer::Token::Semi) {
                     bail!("Semicolon required after expression in variable declaration.")
@@ -151,22 +215,40 @@ impl AstNode for Declaration {
                     Ok((
                         Self {
                             typ,
-                            name: Rc::clone(s),
+                            name,
                             init: Some(expr),
                         },
                         &tokens[1..],
                     ))
                 }
             }
-            [lexer::Token::Ident(s), lexer::Token::Semi, tokens @ ..] => Ok((
+            [lexer::Token::Semi, tokens @ ..] => Ok((
                 Self {
                     typ,
-                    name: Rc::clone(s),
+                    name,
                     init: None,
                 },
                 tokens,
             )),
-            _ => bail!("Expected <type> <ident> in variable declaration."),
+            _ => bail!("Unable to parse valid declaration."),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum Declaration {
+    FunDecl(FunDecl),
+    VarDecl(VarDecl),
+}
+
+impl AstNode for Declaration {
+    fn consume(tokens: &[Token]) -> Result<(Self, &[Token])> {
+        if let Ok((decl, tokens)) = FunDecl::consume(tokens) {
+            Ok((Self::FunDecl(decl), tokens))
+        } else if let Ok((decl, tokens)) = VarDecl::consume(tokens) {
+            Ok((Self::VarDecl(decl), tokens))
+        } else {
+            bail!("Unable to parse valid declaration form.")
         }
     }
 }
@@ -523,6 +605,10 @@ pub enum Expr {
         condition: Box<Expr>,
         then: Box<Expr>,
         r#else: Box<Expr>,
+    },
+    FunCall {
+        name: Rc<String>,
+        args: Vec<Expr>,
     },
 }
 
@@ -912,14 +998,14 @@ mod tests {
         ];
         let program = parse(tokens).unwrap();
         let expected = Program {
-            function: Function {
+            functions: vec![FunDecl {
                 ret_t: Type::Int,
                 name: Rc::new("main".to_string()),
                 signature: vec![],
                 block: Some(Block(vec![BlockItem::Stmt(Stmt::Return(Some(
                     Expr::Literal(Literal::Int(2)),
                 )))])),
-            },
+            }],
         };
         assert_eq!(expected, program);
     }
@@ -944,8 +1030,8 @@ mod tests {
             Token::Semi,
             Token::RSquirly,
         ];
-        let (function, _) = Function::consume(tokens).unwrap();
-        let expected = Function {
+        let (function, _) = FunDecl::consume(tokens).unwrap();
+        let expected = FunDecl {
             ret_t: Type::Int,
             name: Rc::new("multiple_args".to_string()),
             signature: vec![
@@ -990,12 +1076,12 @@ mod tests {
         ];
         let program = parse(tokens).unwrap();
         let expected = Program {
-            function: Function {
+            functions: vec![FunDecl {
                 name: Rc::new("main".to_string()),
                 block: Some(Block(vec![])),
                 signature: vec![],
                 ret_t: Type::Int,
-            },
+            }],
         };
         assert_eq!(expected, program);
     }
@@ -1142,7 +1228,7 @@ mod tests {
         ];
         let program = parse(tokens).unwrap();
         let expected = Program {
-            function: Function {
+            functions: vec![FunDecl {
                 ret_t: Type::Int,
                 name: Rc::new("main".to_string()),
                 signature: vec![],
@@ -1155,7 +1241,7 @@ mod tests {
                         }),
                     },
                 )))])),
-            },
+            }],
         };
         assert_eq!(expected, program);
     }

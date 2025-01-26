@@ -29,7 +29,9 @@ pub mod x64 {
     fn gen_program(w: &mut impl Write, program: codegen::Program) -> Result<()> {
         w.write_str("\t.intel_syntax noprefix\n\n")?;
 
-        gen_function(w, &program.function)?;
+        for f in program.functions.iter() {
+            gen_function(w, f)?;
+        }
 
         w.write_str("\n\t.section .note.GNU-stack,\"\",@progbits\n")?;
         Ok(())

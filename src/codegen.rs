@@ -1,5 +1,5 @@
 use crate::tacky;
-use anyhow::{Context, Result};
+use anyhow::{Context, Error, Result};
 use std::collections::HashMap;
 use std::fmt;
 use std::marker::PhantomData;
@@ -7,15 +7,21 @@ use std::rc::Rc;
 
 #[derive(Debug, PartialEq)]
 pub struct Program {
-    pub function: Function,
+    pub functions: Vec<Function>,
 }
 
 impl TryFrom<tacky::Program> for Program {
     type Error = anyhow::Error;
     fn try_from(node: tacky::Program) -> Result<Self> {
-        let function = Function::try_from(node.function)
+        let valid_functions = node
+            .functions
+            .into_iter()
+            .map(Function::try_from)
+            .collect::<Result<Vec<Function>, Error>>()
             .context("Failed to compile intermediate representation into assembly nodes.")?;
-        Ok(Program { function })
+        Ok(Program {
+            functions: valid_functions,
+        })
     }
 }
 

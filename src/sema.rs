@@ -1,7 +1,7 @@
 use std::{collections::HashMap, marker::PhantomData, rc::Rc};
 
 use crate::ast;
-use anyhow::{bail, ensure, Result};
+use anyhow::{bail, ensure, Error, Result};
 
 // Frame entry consists of a bool for whether the variable value is from the
 // current scope as well as the string variable name
@@ -39,17 +39,22 @@ mod variables {
     use super::*;
 
     pub fn validate(stage: SemaStage<Initial>) -> Result<SemaStage<VariableResolution>> {
-        let valid_function = validate_function(stage.program.function)?;
+        let valid_functions = stage
+            .program
+            .functions
+            .into_iter()
+            .map(validate_function)
+            .collect::<Result<Vec<ast::FunDecl>, Error>>()?;
 
         Ok(SemaStage {
             program: ast::Program {
-                function: valid_function,
+                functions: valid_functions,
             },
             stage: PhantomData::<VariableResolution>,
         })
     }
 
-    fn validate_function(function: ast::Function) -> Result<ast::Function> {
+    fn validate_function(function: ast::FunDecl) -> Result<ast::FunDecl> {
         let mut variable_map = HashMap::new();
         let mut count = 0;
         let mut unique_name_generator = move |name: &str| -> String {
@@ -57,7 +62,7 @@ mod variables {
             count += 1;
             new_name
         };
-        let ast::Function {
+        let ast::FunDecl {
             ret_t,
             name,
             signature,
@@ -74,7 +79,7 @@ mod variables {
             None
         };
 
-        Ok(ast::Function {
+        Ok(ast::FunDecl {
             ret_t,
             name,
             signature,
@@ -107,25 +112,30 @@ mod variables {
         variable_map: &mut HashMap<Rc<String>, FrameEntry>,
         make_temporary: &mut impl FnMut(&str) -> String,
     ) -> Result<ast::Declaration> {
-        if variable_map
-            .get(&decl.name)
-            .is_some_and(|(from_this_frame, _)| *from_this_frame)
-        {
-            bail!("Duplicate variable declaration '{}'", decl.name);
+        match decl {
+            ast::Declaration::VarDecl(decl) => {
+                if variable_map
+                    .get(&decl.name)
+                    .is_some_and(|(from_this_frame, _)| *from_this_frame)
+                {
+                    bail!("Duplicate variable declaration '{}'", decl.name);
+                }
+                let unique_name = Rc::new(make_temporary(&decl.name));
+                variable_map.insert(Rc::clone(&decl.name), (true, Rc::clone(&unique_name)));
+
+                let init = match decl.init {
+                    Some(expr) => Some(resolve_expr(expr, variable_map)?),
+                    None => None,
+                };
+
+                Ok(ast::Declaration::VarDecl(ast::VarDecl {
+                    name: unique_name,
+                    init,
+                    ..decl
+                }))
+            }
+            _ => unimplemented!(),
         }
-        let unique_name = Rc::new(make_temporary(&decl.name));
-        variable_map.insert(Rc::clone(&decl.name), (true, Rc::clone(&unique_name)));
-
-        let init = match decl.init {
-            Some(expr) => Some(resolve_expr(expr, variable_map)?),
-            None => None,
-        };
-
-        Ok(ast::Declaration {
-            name: unique_name,
-            init,
-            ..decl
-        })
     }
 
     fn validate_blockitem(
@@ -323,6 +333,7 @@ mod variables {
                 then: Box::new(resolve_expr(*then, variable_map)?),
                 r#else: Box::new(resolve_expr(*r#else, variable_map)?),
             }),
+            _ => unimplemented!(),
         }
     }
 }
@@ -330,30 +341,26 @@ mod variables {
 mod gotos {
     use super::*;
     pub fn validate(stage: SemaStage<VariableResolution>) -> Result<SemaStage<GotoValidation>> {
-        let ast::Function {
-            ret_t,
-            name,
-            signature,
-            block,
-        } = stage.program.function;
-
         let mut label_map = HashMap::new();
-        let block = if let Some(block) = block {
-            let block = resolve_block(block, &name, &mut label_map)?;
-            let block = validate_block(block, &mut label_map)?;
-            Some(block)
-        } else {
-            None
-        };
+        let valid_functions = stage
+            .program
+            .functions
+            .into_iter()
+            .map(|f| {
+                let block = if let Some(b) = f.block {
+                    let b = resolve_block(b, &f.name, &mut label_map)?;
+                    let b = validate_block(b, &mut label_map)?;
+                    Some(b)
+                } else {
+                    None
+                };
+                Ok(ast::FunDecl { block, ..f })
+            })
+            .collect::<Result<Vec<ast::FunDecl>, Error>>()?;
 
         Ok(SemaStage {
             program: ast::Program {
-                function: ast::Function {
-                    ret_t,
-                    name,
-                    signature,
-                    block,
-                },
+                functions: valid_functions,
             },
             stage: PhantomData::<GotoValidation>,
         })
@@ -611,16 +618,21 @@ mod switch {
     }
 
     pub fn validate(stage: SemaStage<GotoValidation>) -> Result<SemaStage<SwitchLabelling>> {
-        let SemaStage { program, .. } = stage;
+        let valid_functions = stage
+            .program
+            .functions
+            .into_iter()
+            .map(resolve_function)
+            .collect::<Result<Vec<ast::FunDecl>, Error>>()?;
         Ok(SemaStage {
             program: ast::Program {
-                function: resolve_function(program.function)?,
+                functions: valid_functions,
             },
             stage: PhantomData::<SwitchLabelling>,
         })
     }
 
-    fn resolve_function(function: ast::Function) -> Result<ast::Function> {
+    fn resolve_function(function: ast::FunDecl) -> Result<ast::FunDecl> {
         if let Some(block) = function.block {
             let mut count = 0;
             let mut unique_name_generator = |name: &str| -> String {
@@ -628,7 +640,7 @@ mod switch {
                 count += 1;
                 new_name
             };
-            Ok(ast::Function {
+            Ok(ast::FunDecl {
                 block: Some(resolve_block(
                     block,
                     &mut SwitchContext::new(),
@@ -859,6 +871,7 @@ mod switch {
                     const_eval(*r#else)
                 }
             }
+            _ => unimplemented!(),
         }
     }
 
@@ -1007,16 +1020,21 @@ mod loops {
     use super::*;
 
     pub fn validate(stage: SemaStage<SwitchLabelling>) -> Result<SemaStage<LoopLabelling>> {
-        let SemaStage { program, .. } = stage;
+        let valid_functions = stage
+            .program
+            .functions
+            .into_iter()
+            .map(resolve_function)
+            .collect::<Result<Vec<ast::FunDecl>, Error>>()?;
         Ok(SemaStage {
             program: ast::Program {
-                function: resolve_function(program.function)?,
+                functions: valid_functions,
             },
             stage: PhantomData::<LoopLabelling>,
         })
     }
 
-    fn resolve_function(function: ast::Function) -> Result<ast::Function> {
+    fn resolve_function(function: ast::FunDecl) -> Result<ast::FunDecl> {
         if let Some(block) = function.block {
             let mut count = 0;
             let mut unique_name_generator = |name: &str| -> String {
@@ -1024,7 +1042,7 @@ mod loops {
                 count += 1;
                 new_name
             };
-            Ok(ast::Function {
+            Ok(ast::FunDecl {
                 block: Some(resolve_block(block, None, &mut unique_name_generator)?),
                 ..function
             })

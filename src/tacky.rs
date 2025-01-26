@@ -1,19 +1,24 @@
 use crate::ast;
 use crate::sema;
-use anyhow::{Context, Result};
+use anyhow::{Error, Result};
 use std::rc::Rc;
 
 #[derive(Debug, PartialEq)]
 pub struct Program {
-    pub function: Function,
+    pub functions: Vec<Function>,
 }
 
 impl TryFrom<sema::SemaStage<sema::Final>> for Program {
     type Error = anyhow::Error;
     fn try_from(stage: sema::SemaStage<sema::Final>) -> Result<Self> {
+        let valid_functions = stage
+            .program
+            .functions
+            .into_iter()
+            .map(Function::try_from)
+            .collect::<Result<Vec<Function>, Error>>()?;
         Ok(Self {
-            function: Function::try_from(stage.program.function)
-                .context("Failed to parse \"main\" function into TACKY representation")?,
+            functions: valid_functions,
         })
     }
 }
@@ -34,14 +39,14 @@ impl Function {
     }
 }
 
-impl TryFrom<ast::Function> for Function {
+impl TryFrom<ast::FunDecl> for Function {
     type Error = anyhow::Error;
     // TODO: Use the return type and arguments for something.
     //  This is a try_from even though it cannot fail right now, assuming that
     //  there wil actually be a possibility of failure once we use all of the
     //  function information.
-    fn try_from(node: ast::Function) -> Result<Self> {
-        let ast::Function { name, block, .. } = node;
+    fn try_from(node: ast::FunDecl) -> Result<Self> {
+        let ast::FunDecl { name, block, .. } = node;
         let mut temp_var_counter = 0;
         let mut make_temp_var =
             Function::make_temp_var(Rc::new(name.to_string()), &mut temp_var_counter);
@@ -93,19 +98,24 @@ impl Instruction {
         decl: ast::Declaration,
         make_temp_var: &mut impl FnMut() -> String,
     ) -> Vec<Self> {
-        if let Some(init) = decl.init {
-            let Expr {
-                mut instructions,
-                val: src,
-            } = Expr::parse_with(init, make_temp_var);
-            let dst = Val::Var(Rc::clone(&decl.name));
-            instructions.push(Instruction::Copy {
-                src,
-                dst: dst.clone(),
-            });
-            instructions
-        } else {
-            vec![]
+        match decl {
+            ast::Declaration::VarDecl(decl) => {
+                if let Some(init) = decl.init {
+                    let Expr {
+                        mut instructions,
+                        val: src,
+                    } = Expr::parse_with(init, make_temp_var);
+                    let dst = Val::Var(Rc::clone(&decl.name));
+                    instructions.push(Instruction::Copy {
+                        src,
+                        dst: dst.clone(),
+                    });
+                    instructions
+                } else {
+                    vec![]
+                }
+            }
+            _ => unimplemented!(),
         }
     }
     fn parse_stmt_with(stmt: ast::Stmt, make_temp_var: &mut impl FnMut() -> String) -> Vec<Self> {
@@ -699,6 +709,7 @@ impl Expr {
                     val: Val::Var(Rc::clone(&result)),
                 }
             }
+            _ => unimplemented!(),
         }
     }
 }

@@ -1,15 +1,10 @@
 use crate::lexer::Token;
 use anyhow::{bail, Context, Error, Result};
-use std::cmp;
 use std::rc::Rc;
 
 pub fn parse(tokens: &[Token]) -> Result<Program> {
-    let (program, tokens) = Program::consume(tokens)?;
-    if !tokens.is_empty() {
-        bail!("Found extra tokens when parsing main:\n{:#?}", tokens)
-    } else {
-        Ok(program)
-    }
+    let (prog, _) = Program::consume(tokens)?;
+    Ok(prog)
 }
 
 // Get ident nested in arbitrary number of parentheses
@@ -58,33 +53,13 @@ pub struct Program {
 }
 impl AstNode for Program {
     fn consume(tokens: &[Token]) -> Result<(Program, &[Token])> {
-        let mut seen_main = false;
         let mut functions = vec![];
         let mut remaining = tokens;
         // This will change again very soon with file scope variables
-        while let Ok((function, tokens)) = FunDecl::consume(remaining) {
-            match (
-                function.ret_t,
-                function.name.as_ref().cmp(&"main".to_string()),
-            ) {
-                (Type::Int, cmp::Ordering::Equal) => {
-                    if seen_main {
-                        bail!("Duplicate \"main\" function definition!.");
-                    }
-                    seen_main = true;
-                    functions.push(function);
-                }
-                _ => {
-                    functions.push(function);
-                }
-            }
+        while !remaining.is_empty() {
+            let (function, tokens) = FunDecl::consume(remaining)?;
+            functions.push(function);
             remaining = tokens;
-        }
-        if !seen_main {
-            bail!("No definition for \"main\" function.");
-        }
-        if !remaining.is_empty() {
-            bail!("Found remaining tokens {:?}.", remaining);
         }
         Ok((Program { functions }, remaining))
     }
@@ -106,21 +81,24 @@ impl FunDecl {
     fn parse_parameter_list(tokens: &[Token]) -> Result<(ParameterList, &[Token])> {
         let mut signature = vec![];
         let remaining = match tokens {
+            [Token::RParen, ..] => tokens,
             [Token::Void, Token::RParen, ..] => &tokens[1..],
             [Token::Void, t, ..] => {
                 bail!("Expected closing parentheses but found \"{}\"", t)
             }
             _ => {
+                let mut keep_going = true;
                 let mut remaining = tokens;
-                while let Ok((typ, tokens)) = Type::consume(remaining) {
+                while keep_going {
+                    let (typ, tokens) = Type::consume(remaining)?;
                     let (name, tokens) = parse_ident(tokens)
                         .map(|(name, tokens)| (Some(name), tokens))
                         .unwrap_or((None, tokens));
                     signature.push((typ, name));
-
-                    if let [Token::Comma, tokens @ ..] = tokens {
-                        remaining = tokens;
+                    if let Some(Token::Comma) = tokens.first() {
+                        remaining = &tokens[1..];
                     } else {
+                        keep_going = false;
                         remaining = tokens;
                     }
                 }
@@ -708,12 +686,19 @@ impl Factor {
                         &remaining[1..],
                     ))
                 } else {
-                    while let Ok((arg, rest)) = Expr::parse(remaining, 0) {
+                    let mut keep_going = true;
+                    while keep_going {
+                        let (arg, tokens) = Expr::parse(remaining, 0)?;
                         args.push(arg);
-                        remaining = match rest {
-                            [Token::Comma, ..] => &rest[1..],
-                            [Token::RParen, ..] => &rest[1..],
-                            _ => bail!("Function call parameter list was not terminated."),
+                        match tokens {
+                            [Token::Comma, tokens @ ..] => {
+                                remaining = tokens;
+                            },
+                            [Token::RParen, tokens @ ..] => {
+                                keep_going = false;
+                                remaining = tokens;
+                            },
+                            t => bail!("Expected a \",\" or \")\" in function parameter list but found {t:?}")
                         }
                     }
                     Ok((

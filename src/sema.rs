@@ -139,8 +139,9 @@ mod variables {
         make_temporary: &mut impl FnMut(&str) -> String,
     ) -> Result<ast::Declaration> {
         match decl {
-            ast::Declaration::VarDecl(decl) => resolve_var_decl(decl, variable_map, make_temporary)
-                .map(|decl| ast::Declaration::VarDecl(decl)),
+            ast::Declaration::VarDecl(decl) => {
+                resolve_var_decl(decl, variable_map, make_temporary).map(ast::Declaration::VarDecl)
+            }
             _ => unimplemented!(),
         }
     }

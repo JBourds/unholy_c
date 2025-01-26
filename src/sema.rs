@@ -107,33 +107,40 @@ mod variables {
         Ok(ast::Block(valid_items))
     }
 
+    fn resolve_var_decl(
+        decl: ast::VarDecl,
+        variable_map: &mut HashMap<Rc<String>, FrameEntry>,
+        make_temporary: &mut impl FnMut(&str) -> String,
+    ) -> Result<ast::VarDecl> {
+        if variable_map
+            .get(&decl.name)
+            .is_some_and(|(from_this_frame, _)| *from_this_frame)
+        {
+            bail!("Duplicate variable declaration '{}'", decl.name);
+        }
+        let unique_name = Rc::new(make_temporary(&decl.name));
+        variable_map.insert(Rc::clone(&decl.name), (true, Rc::clone(&unique_name)));
+
+        let init = match decl.init {
+            Some(expr) => Some(resolve_expr(expr, variable_map)?),
+            None => None,
+        };
+
+        Ok(ast::VarDecl {
+            name: unique_name,
+            init,
+            ..decl
+        })
+    }
+
     fn resolve_decl(
         decl: ast::Declaration,
         variable_map: &mut HashMap<Rc<String>, FrameEntry>,
         make_temporary: &mut impl FnMut(&str) -> String,
     ) -> Result<ast::Declaration> {
         match decl {
-            ast::Declaration::VarDecl(decl) => {
-                if variable_map
-                    .get(&decl.name)
-                    .is_some_and(|(from_this_frame, _)| *from_this_frame)
-                {
-                    bail!("Duplicate variable declaration '{}'", decl.name);
-                }
-                let unique_name = Rc::new(make_temporary(&decl.name));
-                variable_map.insert(Rc::clone(&decl.name), (true, Rc::clone(&unique_name)));
-
-                let init = match decl.init {
-                    Some(expr) => Some(resolve_expr(expr, variable_map)?),
-                    None => None,
-                };
-
-                Ok(ast::Declaration::VarDecl(ast::VarDecl {
-                    name: unique_name,
-                    init,
-                    ..decl
-                }))
-            }
+            ast::Declaration::VarDecl(decl) => resolve_var_decl(decl, variable_map, make_temporary)
+                .map(|decl| ast::Declaration::VarDecl(decl)),
             _ => unimplemented!(),
         }
     }
@@ -222,7 +229,7 @@ mod variables {
                 let mut new_map = make_new_scope(variable_map);
                 let init = match init {
                     ast::ForInit::Decl(decl) => {
-                        ast::ForInit::Decl(resolve_decl(decl, &mut new_map, make_temporary)?)
+                        ast::ForInit::Decl(resolve_var_decl(decl, &mut new_map, make_temporary)?)
                     }
                     ast::ForInit::Expr(Some(expr)) => {
                         ast::ForInit::Expr(Some(resolve_expr(expr, &new_map)?))

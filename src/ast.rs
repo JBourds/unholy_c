@@ -288,7 +288,7 @@ impl AstNode for Block {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum ForInit {
-    Decl(Declaration),
+    Decl(VarDecl),
     Expr(Option<Expr>),
 }
 
@@ -297,7 +297,7 @@ impl AstNode for ForInit {
         match tokens {
             [Token::Semi, tokens @ ..] => Ok((ForInit::Expr(None), tokens)),
             tokens => {
-                if let Ok((decl, tokens)) = Declaration::consume(tokens) {
+                if let Ok((decl, tokens)) = VarDecl::consume(tokens) {
                     Ok((ForInit::Decl(decl), tokens))
                 } else {
                     let (expr, tokens) = Expr::parse(tokens, 0)

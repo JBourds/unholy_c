@@ -99,23 +99,35 @@ impl Instruction {
         make_temp_var: &mut impl FnMut() -> String,
     ) -> Vec<Self> {
         match decl {
-            ast::Declaration::VarDecl(decl) => {
-                if let Some(init) = decl.init {
-                    let Expr {
-                        mut instructions,
-                        val: src,
-                    } = Expr::parse_with(init, make_temp_var);
-                    let dst = Val::Var(Rc::clone(&decl.name));
-                    instructions.push(Instruction::Copy {
-                        src,
-                        dst: dst.clone(),
-                    });
-                    instructions
-                } else {
-                    vec![]
-                }
-            }
-            _ => unimplemented!(),
+            ast::Declaration::VarDecl(decl) => Self::parse_var_decl_with(decl, make_temp_var),
+            ast::Declaration::FunDecl(decl) => Self::parse_fun_decl_with(decl, make_temp_var),
+        }
+    }
+
+    fn parse_fun_decl_with(
+        _decl: ast::FunDecl,
+        _make_temp_var: &mut impl FnMut() -> String,
+    ) -> Vec<Self> {
+        unimplemented!()
+    }
+
+    fn parse_var_decl_with(
+        decl: ast::VarDecl,
+        make_temp_var: &mut impl FnMut() -> String,
+    ) -> Vec<Self> {
+        if let Some(init) = decl.init {
+            let Expr {
+                mut instructions,
+                val: src,
+            } = Expr::parse_with(init, make_temp_var);
+            let dst = Val::Var(Rc::clone(&decl.name));
+            instructions.push(Instruction::Copy {
+                src,
+                dst: dst.clone(),
+            });
+            instructions
+        } else {
+            vec![]
         }
     }
     fn parse_stmt_with(stmt: ast::Stmt, make_temp_var: &mut impl FnMut() -> String) -> Vec<Self> {
@@ -226,7 +238,7 @@ impl Instruction {
                 match init {
                     ast::ForInit::Decl(decl) => {
                         block_instructions
-                            .extend(Instruction::parse_decl_with(decl, make_temp_var));
+                            .extend(Instruction::parse_var_decl_with(decl, make_temp_var));
                     }
                     ast::ForInit::Expr(Some(expr)) => {
                         let Expr { instructions, .. } = Expr::parse_with(expr, make_temp_var);

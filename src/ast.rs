@@ -1,4 +1,4 @@
-use crate::lexer::{self, Token};
+use crate::lexer::Token;
 use anyhow::{bail, Context, Error, Result};
 use std::cmp;
 use std::rc::Rc;
@@ -25,7 +25,7 @@ fn parse_ident(tokens: &[Token]) -> Result<(Rc<String>, &[Token])> {
                 name = Some(Rc::clone(s));
                 if tokens[nparens + 1..nparens + 1 + nparens]
                     .iter()
-                    .any(|t| *t != lexer::Token::RParen)
+                    .any(|t| *t != Token::RParen)
                 {
                     bail!("Invalid parentheses around identifier \"{}\"", s);
                 }
@@ -139,7 +139,7 @@ impl AstNode for FunDecl {
         if let [Token::LParen, tokens @ ..] = tokens {
             let (signature, tokens) = Self::parse_parameter_list(tokens)
                 .with_context(|| format!("Unable to parse parameter list for {}", name))?;
-            if tokens.iter().next().is_some_and(|t| *t != Token::RParen) {
+            if tokens.first().is_some_and(|t| *t != Token::RParen) {
                 bail!("Expected \")\" to close parameter list.");
             }
             let remaining = &tokens[1..];
@@ -207,9 +207,9 @@ impl AstNode for VarDecl {
         let (name, tokens) =
             parse_ident(tokens).context("Failed to find valid identifer for declaration.")?;
         match tokens {
-            [lexer::Token::Assign, tokens @ ..] => {
+            [Token::Assign, tokens @ ..] => {
                 let (expr, tokens) = Expr::parse(tokens, 0)?;
-                if tokens.first().is_some_and(|x| *x != lexer::Token::Semi) {
+                if tokens.first().is_some_and(|x| *x != Token::Semi) {
                     bail!("Semicolon required after expression in variable declaration.")
                 } else {
                     Ok((
@@ -222,7 +222,7 @@ impl AstNode for VarDecl {
                     ))
                 }
             }
-            [lexer::Token::Semi, tokens @ ..] => Ok((
+            [Token::Semi, tokens @ ..] => Ok((
                 Self {
                     typ,
                     name,
@@ -681,7 +681,7 @@ impl Expr {
 struct Factor;
 
 impl Factor {
-    fn check_for_postfix(expr: Expr, tokens: &[Token]) -> Result<(Expr, &[Token])> {
+    fn check_for_postfix(expr: Expr, tokens: &[Token]) -> (Expr, &[Token]) {
         match UnaryOp::consume_postfix(tokens) {
             Ok((op, tokens)) => Self::check_for_postfix(
                 Expr::Unary {
@@ -690,6 +690,41 @@ impl Factor {
                 },
                 tokens,
             ),
+            _ => (expr, tokens),
+        }
+    }
+
+    fn check_for_call(expr: Expr, tokens: &[Token]) -> Result<(Expr, &[Token])> {
+        match (&expr, tokens.first()) {
+            (Expr::Var(name), Some(Token::LParen)) => {
+                let mut args = vec![];
+                let mut remaining = &tokens[1..];
+                if let Some(Token::RParen) = remaining.first() {
+                    Ok((
+                        Expr::FunCall {
+                            name: Rc::clone(name),
+                            args,
+                        },
+                        &remaining[1..],
+                    ))
+                } else {
+                    while let Ok((arg, rest)) = Expr::parse(remaining, 0) {
+                        args.push(arg);
+                        remaining = match rest {
+                            [Token::Comma, ..] => &rest[1..],
+                            [Token::RParen, ..] => &rest[1..],
+                            _ => bail!("Function call parameter list was not terminated."),
+                        }
+                    }
+                    Ok((
+                        Expr::FunCall {
+                            name: Rc::clone(name),
+                            args,
+                        },
+                        remaining,
+                    ))
+                }
+            }
             _ => Ok((expr, tokens)),
         }
     }
@@ -707,18 +742,22 @@ impl Factor {
                 ))
             }
             _ => match tokens {
-                [lexer::Token::Literal(_), ..] => {
+                [Token::Literal(_), ..] => {
                     let (lit, tokens) = Literal::consume(tokens)?;
                     Ok((Expr::Literal(lit), tokens))
                 }
-                [lexer::Token::Ident(s), tokens @ ..] => {
-                    Self::check_for_postfix(Expr::Var(Rc::clone(s)), tokens)
+                [Token::Ident(s), tokens @ ..] => {
+                    let (expr, tokens) = Self::check_for_postfix(Expr::Var(Rc::clone(s)), tokens);
+                    Self::check_for_call(expr, tokens)
                 }
                 [Token::LParen, tokens @ ..] => {
                     let (expr, tokens) = Expr::parse(tokens, 0)
                         .context("Parsing grammer rule: \"(\" <exp> \")\" failed")?;
                     match tokens {
-                        [Token::RParen, tokens @ ..] => Self::check_for_postfix(expr, tokens),
+                        [Token::RParen, tokens @ ..] => {
+                            let (expr, tokens) = Self::check_for_postfix(expr, tokens);
+                            Self::check_for_call(expr, tokens)
+                        }
                         _ => bail!("Could not find matching right parenthesis"),
                     }
                 }

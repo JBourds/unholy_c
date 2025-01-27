@@ -3,10 +3,6 @@ use std::{collections::HashMap, marker::PhantomData, rc::Rc};
 use crate::ast;
 use anyhow::{bail, ensure, Error, Result};
 
-// Frame entry consists of a bool for whether the variable value is from the
-// current scope as well as the string variable name
-type FrameEntry = (bool, Rc<String>);
-
 enum Initial {}
 enum VariableResolution {}
 enum GotoValidation {}
@@ -24,7 +20,7 @@ pub fn validate(program: ast::Program) -> Result<SemaStage<Final>> {
         program,
         stage: PhantomData::<Initial>,
     };
-    let stage = variables::validate(stage)?;
+    let stage = identifiers::validate(stage)?;
     let stage = gotos::validate(stage)?;
     let stage = switch::validate(stage)?;
     let stage = loops::validate(stage)?;
@@ -35,8 +31,38 @@ pub fn validate(program: ast::Program) -> Result<SemaStage<Final>> {
     })
 }
 
-mod variables {
+mod identifiers {
     use super::*;
+
+    #[derive(Clone, Debug, PartialEq)]
+    pub struct IdentEntry {
+        pub from_current_scope: bool,
+        pub name: Rc<String>,
+        pub has_external_linkage: bool,
+    }
+
+    impl IdentEntry {
+        fn new_local(name: Rc<String>) -> Self {
+            Self {
+                from_current_scope: true,
+                name,
+                has_external_linkage: false,
+            }
+        }
+        fn new_external(name: Rc<String>) -> Self {
+            Self {
+                from_current_scope: false,
+                name,
+                has_external_linkage: true,
+            }
+        }
+        fn from_parent_scope(entry: &Self) -> Self {
+            Self {
+                from_current_scope: false,
+                ..entry.clone()
+            }
+        }
+    }
 
     pub fn validate(stage: SemaStage<Initial>) -> Result<SemaStage<VariableResolution>> {
         let valid_functions = stage
@@ -89,7 +115,7 @@ mod variables {
 
     fn validate_block(
         block: ast::Block,
-        variable_map: &mut HashMap<Rc<String>, FrameEntry>,
+        variable_map: &mut HashMap<Rc<String>, IdentEntry>,
         make_temporary: &mut impl FnMut(&str) -> String,
     ) -> Result<ast::Block> {
         let valid_items =
@@ -109,17 +135,20 @@ mod variables {
 
     fn resolve_var_decl(
         decl: ast::VarDecl,
-        variable_map: &mut HashMap<Rc<String>, FrameEntry>,
+        variable_map: &mut HashMap<Rc<String>, IdentEntry>,
         make_temporary: &mut impl FnMut(&str) -> String,
     ) -> Result<ast::VarDecl> {
         if variable_map
             .get(&decl.name)
-            .is_some_and(|(from_this_frame, _)| *from_this_frame)
+            .is_some_and(|entry| entry.from_current_scope)
         {
             bail!("Duplicate variable declaration '{}'", decl.name);
         }
         let unique_name = Rc::new(make_temporary(&decl.name));
-        variable_map.insert(Rc::clone(&decl.name), (true, Rc::clone(&unique_name)));
+        variable_map.insert(
+            Rc::clone(&decl.name),
+            IdentEntry::new_local(Rc::clone(&unique_name)),
+        );
 
         let init = match decl.init {
             Some(expr) => Some(resolve_expr(expr, variable_map)?),
@@ -133,22 +162,44 @@ mod variables {
         })
     }
 
+    fn resolve_fun_decl(
+        decl: ast::FunDecl,
+        variable_map: &mut HashMap<Rc<String>, IdentEntry>,
+        make_temporary: &mut impl FnMut(&str) -> String,
+    ) -> Result<ast::FunDecl> {
+        if variable_map
+            .get(&decl.name)
+            .is_some_and(|entry| entry.from_current_scope)
+        {
+            bail!("Duplicate variable declaration '{}'", decl.name);
+        }
+        let unique_name = Rc::new(make_temporary(&decl.name));
+        variable_map.insert(
+            Rc::clone(&decl.name),
+            IdentEntry::new_external(Rc::clone(&unique_name)),
+        );
+
+        todo!()
+    }
+
     fn resolve_decl(
         decl: ast::Declaration,
-        variable_map: &mut HashMap<Rc<String>, FrameEntry>,
+        variable_map: &mut HashMap<Rc<String>, IdentEntry>,
         make_temporary: &mut impl FnMut(&str) -> String,
     ) -> Result<ast::Declaration> {
         match decl {
             ast::Declaration::VarDecl(decl) => {
                 resolve_var_decl(decl, variable_map, make_temporary).map(ast::Declaration::VarDecl)
             }
-            _ => unimplemented!(),
+            ast::Declaration::FunDecl(decl) => {
+                resolve_fun_decl(decl, variable_map, make_temporary).map(ast::Declaration::FunDecl)
+            }
         }
     }
 
     fn validate_blockitem(
         instruction: ast::BlockItem,
-        variable_map: &mut HashMap<Rc<String>, FrameEntry>,
+        variable_map: &mut HashMap<Rc<String>, IdentEntry>,
         make_temporary: &mut impl FnMut(&str) -> String,
     ) -> Result<ast::BlockItem> {
         match instruction {
@@ -167,14 +218,14 @@ mod variables {
 
     fn resolve_stmt(
         stmt: ast::Stmt,
-        variable_map: &HashMap<Rc<String>, FrameEntry>,
+        variable_map: &HashMap<Rc<String>, IdentEntry>,
         make_temporary: &mut impl FnMut(&str) -> String,
     ) -> Result<ast::Stmt> {
-        let make_new_scope = |variable_map: &HashMap<Rc<String>, FrameEntry>| {
+        let make_new_scope = |variable_map: &HashMap<Rc<String>, IdentEntry>| {
             variable_map
                 .iter()
-                .fold(HashMap::new(), |mut map, (key, (_, var))| {
-                    map.insert(Rc::clone(key), (false, Rc::clone(var)));
+                .fold(HashMap::new(), |mut map, (key, entry)| {
+                    map.insert(Rc::clone(key), IdentEntry::from_parent_scope(entry));
                     map
                 })
         };
@@ -293,7 +344,7 @@ mod variables {
 
     fn resolve_expr(
         expr: ast::Expr,
-        variable_map: &HashMap<Rc<String>, FrameEntry>,
+        variable_map: &HashMap<Rc<String>, IdentEntry>,
     ) -> Result<ast::Expr> {
         match expr {
             ast::Expr::Assignment { lvalue, rvalue } => {
@@ -310,7 +361,7 @@ mod variables {
                 })
             }
             ast::Expr::Var(var) => {
-                if let Some((_, name)) = variable_map.get(&var) {
+                if let Some(IdentEntry { name, .. }) = variable_map.get(&var) {
                     Ok(ast::Expr::Var(Rc::clone(name)))
                 } else {
                     bail!("Undeclared variable '{var}'")

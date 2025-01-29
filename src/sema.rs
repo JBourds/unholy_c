@@ -4,7 +4,8 @@ use crate::ast;
 use anyhow::{bail, ensure, Error, Result};
 
 enum Initial {}
-enum VariableResolution {}
+enum IdentResolution {}
+enum TypeChecking {}
 enum GotoValidation {}
 enum LoopLabelling {}
 enum SwitchLabelling {}
@@ -21,6 +22,7 @@ pub fn validate(program: ast::Program) -> Result<SemaStage<Final>> {
         stage: PhantomData::<Initial>,
     };
     let stage = identifiers::validate(stage)?;
+    let stage = typechecking::validate(stage)?;
     let stage = gotos::validate(stage)?;
     let stage = switch::validate(stage)?;
     let stage = loops::validate(stage)?;
@@ -75,7 +77,7 @@ mod identifiers {
             })
     }
 
-    pub fn validate(stage: SemaStage<Initial>) -> Result<SemaStage<VariableResolution>> {
+    pub fn validate(stage: SemaStage<Initial>) -> Result<SemaStage<IdentResolution>> {
         let valid_functions = stage
             .program
             .functions
@@ -87,7 +89,7 @@ mod identifiers {
             program: ast::Program {
                 functions: valid_functions,
             },
-            stage: PhantomData::<VariableResolution>,
+            stage: PhantomData::<IdentResolution>,
         })
     }
 
@@ -422,9 +424,87 @@ mod identifiers {
     }
 }
 
+mod typechecking {
+    use super::*;
+
+    pub fn validate(stage: SemaStage<IdentResolution>) -> Result<SemaStage<TypeChecking>> {
+        let SemaStage { program, .. } = stage;
+
+        // TODO
+
+        Ok(SemaStage {
+            program,
+            stage: PhantomData::<TypeChecking>,
+        })
+    }
+
+    fn typecheck_program(
+        program: ast::Program,
+        symbols: &mut HashMap<Rc<String>, ast::Type>,
+    ) -> Result<ast::Program> {
+        todo!()
+    }
+
+    fn typecheck_block(
+        block: ast::Block,
+        symbols: &mut HashMap<Rc<String>, ast::Type>,
+    ) -> Result<ast::Block> {
+        todo!()
+    }
+
+    fn typecheck_block_item(
+        item: ast::BlockItem,
+        symbols: &mut HashMap<Rc<String>, ast::Type>,
+    ) -> Result<ast::BlockItem> {
+        todo!()
+    }
+
+    fn typecheck_stmt(
+        stmt: ast::Stmt,
+        symbols: &mut HashMap<Rc<String>, ast::Type>,
+    ) -> Result<ast::Stmt> {
+        todo!()
+    }
+
+    fn typecheck_expr(
+        expr: ast::Expr,
+        symbols: &mut HashMap<Rc<String>, ast::Type>,
+    ) -> Result<ast::Expr> {
+        todo!()
+    }
+
+    fn typecheck_decl(
+        decl: ast::Declaration,
+        symbols: &mut HashMap<Rc<String>, ast::Type>,
+    ) -> Result<ast::Declaration> {
+        todo!()
+    }
+
+    fn typecheck_var_decl(
+        decl: ast::VarDecl,
+        symbols: &mut HashMap<Rc<String>, ast::Type>,
+    ) -> Result<ast::VarDecl> {
+        todo!()
+    }
+
+    fn typecheck_fun_decl(
+        decl: ast::VarDecl,
+        symbols: &mut HashMap<Rc<String>, ast::Type>,
+    ) -> Result<ast::FunDecl> {
+        todo!()
+    }
+
+    fn typecheck_fun_params(
+        args: Vec<ast::Expr>,
+        expected: ast::ParameterList,
+    ) -> Result<Vec<ast::Expr>> {
+        todo!()
+    }
+}
+
 mod gotos {
     use super::*;
-    pub fn validate(stage: SemaStage<VariableResolution>) -> Result<SemaStage<GotoValidation>> {
+    pub fn validate(stage: SemaStage<TypeChecking>) -> Result<SemaStage<GotoValidation>> {
         let mut label_map = HashMap::new();
         let valid_functions = stage
             .program

@@ -65,7 +65,7 @@ impl AstNode for Program {
     }
 }
 
-type ParameterList = Vec<(Type, Option<Rc<String>>)>;
+pub type ParameterList = Vec<(Type, Option<Rc<String>>)>;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct FunDecl {
@@ -752,9 +752,10 @@ impl Factor {
     }
 }
 
-#[derive(Debug, PartialEq, Clone, Copy)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum Type {
     Int,
+    Fun { ret_t: Box<Self>, params: Vec<Self> },
     Void,
 }
 impl AstNode for Type {

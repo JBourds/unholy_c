@@ -65,6 +65,8 @@ impl AstNode for Program {
     }
 }
 
+type ParameterList = Vec<(Type, Option<Rc<String>>)>;
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct FunDecl {
     pub ret_t: Type,
@@ -72,8 +74,6 @@ pub struct FunDecl {
     pub signature: ParameterList,
     pub block: Option<Block>,
 }
-
-type ParameterList = Vec<(Type, Option<Rc<String>>)>;
 
 impl FunDecl {
     /// Parses [ <type> [name] ]*.

@@ -64,6 +64,17 @@ mod identifiers {
         }
     }
 
+    fn make_new_scope(
+        ident_map: &HashMap<Rc<String>, IdentEntry>,
+    ) -> HashMap<Rc<String>, IdentEntry> {
+        ident_map
+            .iter()
+            .fold(HashMap::new(), |mut map, (key, entry)| {
+                map.insert(Rc::clone(key), IdentEntry::from_parent_scope(entry));
+                map
+            })
+    }
+
     pub fn validate(stage: SemaStage<Initial>) -> Result<SemaStage<VariableResolution>> {
         let valid_functions = stage
             .program

@@ -92,41 +92,20 @@ mod identifiers {
     }
 
     fn validate_function(function: ast::FunDecl) -> Result<ast::FunDecl> {
-        let mut variable_map = HashMap::new();
+        let mut ident_map = HashMap::new();
         let mut count = 0;
         let mut unique_name_generator = move |name: &str| -> String {
             let new_name = format!("{name}.{count}");
             count += 1;
             new_name
         };
-        let ast::FunDecl {
-            ret_t,
-            name,
-            signature,
-            block,
-        } = function;
 
-        let block = if let Some(block) = block {
-            Some(validate_block(
-                block,
-                &mut variable_map,
-                &mut unique_name_generator,
-            )?)
-        } else {
-            None
-        };
-
-        Ok(ast::FunDecl {
-            ret_t,
-            name,
-            signature,
-            block,
-        })
+        resolve_fun_decl(function, &mut ident_map, &mut unique_name_generator)
     }
 
     fn validate_block(
         block: ast::Block,
-        variable_map: &mut HashMap<Rc<String>, IdentEntry>,
+        ident_map: &mut HashMap<Rc<String>, IdentEntry>,
         make_temporary: &mut impl FnMut(&str) -> String,
     ) -> Result<ast::Block> {
         let valid_items =
@@ -134,11 +113,7 @@ mod identifiers {
                 .into_items()
                 .into_iter()
                 .try_fold(Vec::new(), |mut items, block_item| {
-                    items.push(validate_blockitem(
-                        block_item,
-                        variable_map,
-                        make_temporary,
-                    )?);
+                    items.push(validate_blockitem(block_item, ident_map, make_temporary)?);
                     Ok::<Vec<ast::BlockItem>, anyhow::Error>(items)
                 })?;
         Ok(ast::Block(valid_items))
@@ -146,23 +121,12 @@ mod identifiers {
 
     fn resolve_var_decl(
         decl: ast::VarDecl,
-        variable_map: &mut HashMap<Rc<String>, IdentEntry>,
+        ident_map: &mut HashMap<Rc<String>, IdentEntry>,
         make_temporary: &mut impl FnMut(&str) -> String,
     ) -> Result<ast::VarDecl> {
-        if variable_map
-            .get(&decl.name)
-            .is_some_and(|entry| entry.from_current_scope)
-        {
-            bail!("Duplicate variable declaration '{}'", decl.name);
-        }
-        let unique_name = Rc::new(make_temporary(&decl.name));
-        variable_map.insert(
-            Rc::clone(&decl.name),
-            IdentEntry::new_local(Rc::clone(&unique_name)),
-        );
-
+        let unique_name = resolve_automatic(decl.name, ident_map, make_temporary)?;
         let init = match decl.init {
-            Some(expr) => Some(resolve_expr(expr, variable_map)?),
+            Some(expr) => Some(resolve_expr(expr, ident_map)?),
             None => None,
         };
 
@@ -173,55 +137,106 @@ mod identifiers {
         })
     }
 
-    fn resolve_fun_decl(
-        decl: ast::FunDecl,
-        variable_map: &mut HashMap<Rc<String>, IdentEntry>,
+    fn resolve_automatic(
+        name: Rc<String>,
+        ident_map: &mut HashMap<Rc<String>, IdentEntry>,
         make_temporary: &mut impl FnMut(&str) -> String,
-    ) -> Result<ast::FunDecl> {
-        if variable_map
-            .get(&decl.name)
+    ) -> Result<Rc<String>> {
+        if ident_map
+            .get(&name)
             .is_some_and(|entry| entry.from_current_scope)
         {
-            bail!("Duplicate variable declaration '{}'", decl.name);
+            bail!("Duplicate local declaration '{}'", name);
         }
-        let unique_name = Rc::new(make_temporary(&decl.name));
-        variable_map.insert(
-            Rc::clone(&decl.name),
-            IdentEntry::new_external(Rc::clone(&unique_name)),
+        let unique_name = Rc::new(make_temporary(&name));
+        ident_map.insert(
+            Rc::clone(&name),
+            IdentEntry::new_local(Rc::clone(&unique_name)),
         );
+        Ok(unique_name)
+    }
 
-        todo!()
+    fn resolve_fun_decl(
+        decl: ast::FunDecl,
+        ident_map: &mut HashMap<Rc<String>, IdentEntry>,
+        make_temporary: &mut impl FnMut(&str) -> String,
+    ) -> Result<ast::FunDecl> {
+        // Reject a duplicate declaration if it is from the current scope but
+        // doesn't have external linkage, since it is a local variable
+        if ident_map
+            .get(&decl.name)
+            .is_some_and(|entry| entry.from_current_scope && !entry.has_external_linkage)
+        {
+            bail!(
+                "Duplicate declaration for variable \"{}\" and function \"{}\"",
+                decl.name,
+                decl.name
+            );
+        }
+        ident_map.insert(
+            Rc::clone(&decl.name),
+            IdentEntry::new_external(Rc::clone(&decl.name)),
+        );
+        let mut inner_map = make_new_scope(ident_map);
+        let new_params = decl
+            .signature
+            .into_iter()
+            .map(|(typ, name)| {
+                // Resolve automatic variables for parameter names
+                if let Some(name) = name {
+                    resolve_automatic(Rc::clone(&name), &mut inner_map, make_temporary)
+                        .map(|_| (typ, Some(name)))
+                } else {
+                    Ok((typ, None))
+                }
+            })
+            .collect::<Result<Vec<(ast::Type, Option<Rc<String>>)>, Error>>()?;
+        let body = if let Some(body) = decl.block {
+            let items = body
+                .into_items()
+                .into_iter()
+                .map(|item| validate_blockitem(item, &mut inner_map, make_temporary))
+                .collect::<Result<Vec<ast::BlockItem>, Error>>()?;
+            Some(ast::Block(items))
+        } else {
+            None
+        };
+        Ok(ast::FunDecl {
+            signature: new_params,
+            block: body,
+            ..decl
+        })
     }
 
     fn resolve_decl(
         decl: ast::Declaration,
-        variable_map: &mut HashMap<Rc<String>, IdentEntry>,
+        ident_map: &mut HashMap<Rc<String>, IdentEntry>,
         make_temporary: &mut impl FnMut(&str) -> String,
     ) -> Result<ast::Declaration> {
         match decl {
             ast::Declaration::VarDecl(decl) => {
-                resolve_var_decl(decl, variable_map, make_temporary).map(ast::Declaration::VarDecl)
+                resolve_var_decl(decl, ident_map, make_temporary).map(ast::Declaration::VarDecl)
             }
             ast::Declaration::FunDecl(decl) => {
-                resolve_fun_decl(decl, variable_map, make_temporary).map(ast::Declaration::FunDecl)
+                resolve_fun_decl(decl, ident_map, make_temporary).map(ast::Declaration::FunDecl)
             }
         }
     }
 
     fn validate_blockitem(
-        instruction: ast::BlockItem,
-        variable_map: &mut HashMap<Rc<String>, IdentEntry>,
+        item: ast::BlockItem,
+        ident_map: &mut HashMap<Rc<String>, IdentEntry>,
         make_temporary: &mut impl FnMut(&str) -> String,
     ) -> Result<ast::BlockItem> {
-        match instruction {
+        match item {
             ast::BlockItem::Stmt(stmt) => Ok(ast::BlockItem::Stmt(resolve_stmt(
                 stmt,
-                variable_map,
+                ident_map,
                 make_temporary,
             )?)),
             ast::BlockItem::Decl(decl) => Ok(ast::BlockItem::Decl(resolve_decl(
                 decl,
-                variable_map,
+                ident_map,
                 make_temporary,
             )?)),
         }
@@ -229,36 +244,26 @@ mod identifiers {
 
     fn resolve_stmt(
         stmt: ast::Stmt,
-        variable_map: &HashMap<Rc<String>, IdentEntry>,
+        ident_map: &HashMap<Rc<String>, IdentEntry>,
         make_temporary: &mut impl FnMut(&str) -> String,
     ) -> Result<ast::Stmt> {
-        let make_new_scope = |variable_map: &HashMap<Rc<String>, IdentEntry>| {
-            variable_map
-                .iter()
-                .fold(HashMap::new(), |mut map, (key, entry)| {
-                    map.insert(Rc::clone(key), IdentEntry::from_parent_scope(entry));
-                    map
-                })
-        };
         match stmt {
             ast::Stmt::Return(Some(expr)) => {
-                Ok(ast::Stmt::Return(Some(resolve_expr(expr, variable_map)?)))
+                Ok(ast::Stmt::Return(Some(resolve_expr(expr, ident_map)?)))
             }
             ast::Stmt::Return(None) => Ok(ast::Stmt::Return(None)),
-            ast::Stmt::Expr(expr) => Ok(ast::Stmt::Expr(resolve_expr(expr, variable_map)?)),
+            ast::Stmt::Expr(expr) => Ok(ast::Stmt::Expr(resolve_expr(expr, ident_map)?)),
             ast::Stmt::If {
                 condition,
                 then,
                 r#else,
             } => Ok(ast::Stmt::If {
-                condition: resolve_expr(condition, variable_map)?,
-                then: Box::new(resolve_stmt(*then, variable_map, make_temporary)?),
+                condition: resolve_expr(condition, ident_map)?,
+                then: Box::new(resolve_stmt(*then, ident_map, make_temporary)?),
                 r#else: match r#else {
-                    Some(r#else) => Some(Box::new(resolve_stmt(
-                        *r#else,
-                        variable_map,
-                        make_temporary,
-                    )?)),
+                    Some(r#else) => {
+                        Some(Box::new(resolve_stmt(*r#else, ident_map, make_temporary)?))
+                    }
                     None => None,
                 },
             }),
@@ -269,8 +274,8 @@ mod identifiers {
                 body,
                 label,
             } => Ok(ast::Stmt::While {
-                condition: resolve_expr(condition, variable_map)?,
-                body: Box::new(resolve_stmt(*body, variable_map, make_temporary)?),
+                condition: resolve_expr(condition, ident_map)?,
+                body: Box::new(resolve_stmt(*body, ident_map, make_temporary)?),
                 label,
             }),
             ast::Stmt::DoWhile {
@@ -278,8 +283,8 @@ mod identifiers {
                 condition,
                 label,
             } => Ok(ast::Stmt::DoWhile {
-                condition: resolve_expr(condition, variable_map)?,
-                body: Box::new(resolve_stmt(*body, variable_map, make_temporary)?),
+                condition: resolve_expr(condition, ident_map)?,
+                body: Box::new(resolve_stmt(*body, ident_map, make_temporary)?),
                 label,
             }),
             ast::Stmt::For {
@@ -289,7 +294,7 @@ mod identifiers {
                 body,
                 label,
             } => {
-                let mut new_map = make_new_scope(variable_map);
+                let mut new_map = make_new_scope(ident_map);
                 let init = match init {
                     ast::ForInit::Decl(decl) => {
                         ast::ForInit::Decl(resolve_var_decl(decl, &mut new_map, make_temporary)?)
@@ -319,17 +324,17 @@ mod identifiers {
             }
             ast::Stmt::Null => Ok(ast::Stmt::Null),
             ast::Stmt::Compound(block) => {
-                let mut new_map = make_new_scope(variable_map);
+                let mut new_map = make_new_scope(ident_map);
                 let block = validate_block(block, &mut new_map, make_temporary)?;
                 Ok(ast::Stmt::Compound(block))
             }
             ast::Stmt::Goto(label) => Ok(ast::Stmt::Goto(label)),
             ast::Stmt::Label { name, stmt } => Ok(ast::Stmt::Label {
                 name,
-                stmt: Box::new(resolve_stmt(*stmt, variable_map, make_temporary)?),
+                stmt: Box::new(resolve_stmt(*stmt, ident_map, make_temporary)?),
             }),
             ast::Stmt::Default { stmt, label } => Ok(ast::Stmt::Default {
-                stmt: Box::new(resolve_stmt(*stmt, variable_map, make_temporary)?),
+                stmt: Box::new(resolve_stmt(*stmt, ident_map, make_temporary)?),
                 label,
             }),
             ast::Stmt::Switch {
@@ -339,15 +344,15 @@ mod identifiers {
                 cases,
                 default,
             } => Ok(ast::Stmt::Switch {
-                condition: resolve_expr(condition, variable_map)?,
-                body: Box::new(resolve_stmt(*body, variable_map, make_temporary)?),
+                condition: resolve_expr(condition, ident_map)?,
+                body: Box::new(resolve_stmt(*body, ident_map, make_temporary)?),
                 label,
                 cases,
                 default,
             }),
             ast::Stmt::Case { value, stmt, label } => Ok(ast::Stmt::Case {
-                value: resolve_expr(value, variable_map)?,
-                stmt: Box::new(resolve_stmt(*stmt, variable_map, make_temporary)?),
+                value: resolve_expr(value, ident_map)?,
+                stmt: Box::new(resolve_stmt(*stmt, ident_map, make_temporary)?),
                 label,
             }),
         }
@@ -355,7 +360,7 @@ mod identifiers {
 
     fn resolve_expr(
         expr: ast::Expr,
-        variable_map: &HashMap<Rc<String>, IdentEntry>,
+        ident_map: &HashMap<Rc<String>, IdentEntry>,
     ) -> Result<ast::Expr> {
         match expr {
             ast::Expr::Assignment { lvalue, rvalue } => {
@@ -367,12 +372,12 @@ mod identifiers {
                     ),
                 };
                 Ok(ast::Expr::Assignment {
-                    lvalue: Box::new(resolve_expr(lvalue, variable_map)?),
-                    rvalue: Box::new(resolve_expr(*rvalue, variable_map)?),
+                    lvalue: Box::new(resolve_expr(lvalue, ident_map)?),
+                    rvalue: Box::new(resolve_expr(*rvalue, ident_map)?),
                 })
             }
             ast::Expr::Var(var) => {
-                if let Some(IdentEntry { name, .. }) = variable_map.get(&var) {
+                if let Some(IdentEntry { name, .. }) = ident_map.get(&var) {
                     Ok(ast::Expr::Var(Rc::clone(name)))
                 } else {
                     bail!("Undeclared variable '{var}'")
@@ -383,7 +388,7 @@ mod identifiers {
                 if op.is_valid_for(&expr) {
                     Ok(ast::Expr::Unary {
                         op,
-                        expr: Box::new(resolve_expr(*expr, variable_map)?),
+                        expr: Box::new(resolve_expr(*expr, ident_map)?),
                     })
                 } else {
                     bail!("Op {:?} is invalid for expression {:?}", op, expr)
@@ -391,17 +396,17 @@ mod identifiers {
             }
             ast::Expr::Binary { op, left, right } => Ok(ast::Expr::Binary {
                 op,
-                left: Box::new(resolve_expr(*left, variable_map)?),
-                right: Box::new(resolve_expr(*right, variable_map)?),
+                left: Box::new(resolve_expr(*left, ident_map)?),
+                right: Box::new(resolve_expr(*right, ident_map)?),
             }),
             ast::Expr::Conditional {
                 condition,
                 then,
                 r#else,
             } => Ok(ast::Expr::Conditional {
-                condition: Box::new(resolve_expr(*condition, variable_map)?),
-                then: Box::new(resolve_expr(*then, variable_map)?),
-                r#else: Box::new(resolve_expr(*r#else, variable_map)?),
+                condition: Box::new(resolve_expr(*condition, ident_map)?),
+                then: Box::new(resolve_expr(*then, ident_map)?),
+                r#else: Box::new(resolve_expr(*r#else, ident_map)?),
             }),
             _ => unimplemented!(),
         }

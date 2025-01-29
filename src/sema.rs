@@ -408,7 +408,16 @@ mod identifiers {
                 then: Box::new(resolve_expr(*then, ident_map)?),
                 r#else: Box::new(resolve_expr(*r#else, ident_map)?),
             }),
-            _ => unimplemented!(),
+            ast::Expr::FunCall { name, args } => {
+                let valid_args = args
+                    .into_iter()
+                    .map(|a| resolve_expr(a, ident_map))
+                    .collect::<Result<Vec<ast::Expr>, Error>>()?;
+                Ok(ast::Expr::FunCall {
+                    name,
+                    args: valid_args,
+                })
+            }
         }
     }
 }

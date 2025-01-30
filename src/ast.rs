@@ -755,7 +755,10 @@ impl Factor {
 #[derive(Debug, PartialEq, Clone)]
 pub enum Type {
     Int,
-    Fun { ret_t: Box<Self>, params: Vec<Self> },
+    Fun {
+        ret_t: Box<Self>,
+        param_types: Vec<Self>,
+    },
     Void,
 }
 impl AstNode for Type {

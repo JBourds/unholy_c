@@ -428,6 +428,7 @@ mod typechecking {
     use super::*;
 
     pub fn validate(stage: SemaStage<IdentResolution>) -> Result<SemaStage<TypeChecking>> {
+        let mut symbols = HashMap::new();
         let SemaStage { program, .. } = stage;
 
         // TODO
@@ -477,28 +478,51 @@ mod typechecking {
         decl: ast::Declaration,
         symbols: &mut HashMap<Rc<String>, ast::Type>,
     ) -> Result<ast::Declaration> {
-        todo!()
+        match decl {
+            ast::Declaration::VarDecl(decl) => Ok(ast::Declaration::VarDecl(typecheck_var_decl(
+                decl, symbols,
+            )?)),
+            ast::Declaration::FunDecl(decl) => Ok(ast::Declaration::FunDecl(typecheck_fun_decl(
+                decl, symbols,
+            )?)),
+        }
     }
 
     fn typecheck_var_decl(
         decl: ast::VarDecl,
         symbols: &mut HashMap<Rc<String>, ast::Type>,
     ) -> Result<ast::VarDecl> {
-        todo!()
+        symbols.insert(Rc::clone(&decl.name), decl.typ.clone());
+        let init = if let Some(init) = decl.init {
+            Some(typecheck_expr(init, symbols)?)
+        } else {
+            None
+        };
+        Ok(ast::VarDecl { init, ..decl })
     }
 
     fn typecheck_fun_decl(
-        decl: ast::VarDecl,
+        decl: ast::FunDecl,
         symbols: &mut HashMap<Rc<String>, ast::Type>,
     ) -> Result<ast::FunDecl> {
-        todo!()
-    }
-
-    fn typecheck_fun_params(
-        args: Vec<ast::Expr>,
-        expected: ast::ParameterList,
-    ) -> Result<Vec<ast::Expr>> {
-        todo!()
+        let param_types = decl
+            .signature
+            .iter()
+            .map(|(param_type, _)| param_type.clone())
+            .collect::<Vec<ast::Type>>();
+        symbols.insert(
+            Rc::clone(&decl.name),
+            ast::Type::Fun {
+                ret_t: Box::new(decl.ret_t.clone()),
+                param_types,
+            },
+        );
+        let block = if let Some(block) = decl.block {
+            Some(typecheck_block(block, symbols)?)
+        } else {
+            None
+        };
+        Ok(ast::FunDecl { block, ..decl })
     }
 }
 

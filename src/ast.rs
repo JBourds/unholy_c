@@ -233,6 +233,15 @@ pub enum Declaration {
     VarDecl(VarDecl),
 }
 
+impl Declaration {
+    pub fn defining(&self) -> bool {
+        match self {
+            Declaration::FunDecl(decl) => decl.block.is_some(),
+            Declaration::VarDecl(decl) => decl.init.is_some(),
+        }
+    }
+}
+
 impl AstNode for Declaration {
     fn consume(tokens: &[Token]) -> Result<(Self, &[Token])> {
         if let Ok((decl, tokens)) = FunDecl::consume(tokens) {
@@ -241,6 +250,15 @@ impl AstNode for Declaration {
             Ok((Self::VarDecl(decl), tokens))
         } else {
             bail!("Unable to parse valid declaration form.")
+        }
+    }
+}
+
+impl From<&Declaration> for Type {
+    fn from(value: &Declaration) -> Self {
+        match value {
+            Declaration::FunDecl(decl) => Type::from(decl),
+            Declaration::VarDecl(decl) => decl.typ.clone(),
         }
     }
 }

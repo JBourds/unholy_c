@@ -430,205 +430,311 @@ mod identifiers {
 mod typechecking {
     use super::*;
 
-    // I promise it is simpler to just lug the bool around for all types even
-    // though it is only used for functions.
-    type SymbolEntry = (ast::Type, bool);
+    #[derive(Debug)]
+    pub struct SymbolEntry {
+        r#type: ast::Type,
+        defined: bool,
+        scope: Scope,
+    }
+
+    #[derive(Debug)]
+    pub struct SymbolTable {
+        global: HashMap<Rc<String>, SymbolEntry>,
+        scopes: Vec<HashMap<Rc<String>, SymbolEntry>>,
+    }
+
+    #[derive(Debug)]
+    pub enum Scope {
+        Global,
+        Local(usize),
+    }
+
+    impl SymbolTable {
+        fn new_table() -> Self {
+            Self {
+                global: HashMap::new(),
+                scopes: vec![],
+            }
+        }
+
+        fn new_entry(&self, decl: &ast::Declaration, global: bool) -> Result<SymbolEntry> {
+            Ok(SymbolEntry {
+                r#type: decl.into(),
+                defined: decl.defining(),
+                scope: if global { Scope::Global } else { self.scope() },
+            })
+        }
+
+        fn get(&self, key: &Rc<String>) -> Option<&SymbolEntry> {
+            let local = self.get_local(key);
+            if local.is_none() {
+                self.get_global(key)
+            } else {
+                local
+            }
+        }
+
+        fn insert_scope(&mut self, key: Rc<String>, entry: SymbolEntry) -> Option<SymbolEntry> {
+            match entry.scope {
+                Scope::Global => self.global.insert(key, entry),
+                Scope::Local(frame) => self.scopes[frame].insert(key, entry),
+            }
+        }
+
+        #[inline]
+        fn scope(&self) -> Scope {
+            match self.scopes.len() {
+                0 => Scope::Global,
+                n => Scope::Local(n - 1),
+            }
+        }
+
+        fn get_local(&self, key: &Rc<String>) -> Option<&SymbolEntry> {
+            for scope in self.scopes.iter().rev() {
+                if let Some(entry) = scope.get(key) {
+                    return Some(entry);
+                }
+            }
+            None
+        }
+
+        fn get_global(&self, key: &Rc<String>) -> Option<&SymbolEntry> {
+            self.global.get(key)
+        }
+
+        fn get_decl_info(decl: &ast::Declaration) -> (Rc<String>, ast::Type, bool) {
+            match decl {
+                ast::Declaration::FunDecl(fun) => (
+                    Rc::clone(&fun.name),
+                    ast::Type::from(fun),
+                    fun.block.is_some(),
+                ),
+                ast::Declaration::VarDecl(ast::VarDecl { typ, name, init }) => {
+                    (Rc::clone(name), typ.clone(), init.is_some())
+                }
+            }
+        }
+
+        fn declare_in_scope(&mut self, decl: &ast::Declaration, global: bool) -> Result<()> {
+            let (name, r#type, defining_ident) = Self::get_decl_info(decl);
+            match self.insert_scope(Rc::clone(&name), self.new_entry(decl, global)?) {
+                Some(SymbolEntry { defined: true, .. }) if defining_ident => {
+                    bail!("Redefining {name} when it is already defined.")
+                }
+                Some(SymbolEntry { r#type: prev_t, .. }) if r#type != prev_t => {
+                    bail!(
+                        "Redeclaring {name} as {type} when it was previously declared as {prev_t}"
+                    )
+                }
+                // Defining or redeclaring global symbol with correct type: Ok!
+                _ => Ok(()),
+            }
+        }
+
+        fn declare_global(&mut self, decl: &ast::Declaration) -> Result<()> {
+            self.declare_in_scope(decl, true)
+        }
+
+        fn declare_local(&mut self, decl: &ast::Declaration) -> Result<()> {
+            self.declare_in_scope(decl, false)
+        }
+
+        // Lazy clones :(
+        fn declare_fun(&mut self, decl: &ast::FunDecl) -> Result<()> {
+            // If a function is defined at global scope, it still needs to create
+            // a local stack frame (index 0) from which to typecheck
+            if decl.block.is_some() && matches!(self.scope(), Scope::Local(n) if n > 0) {
+                bail!(
+                    "Attempted to define function {} outside of global scope.",
+                    decl.name
+                );
+            }
+            let wrapped_decl = ast::Declaration::FunDecl(decl.clone());
+            self.declare_global(&wrapped_decl)?;
+            if matches!(self.scope(), Scope::Local(_)) {
+                // Declare function and all its params into local scope
+                self.declare_local(&wrapped_decl)?;
+                for (typ, name) in decl.signature.iter() {
+                    if let Some(name) = name {
+                        let param_decl = ast::Declaration::VarDecl(ast::VarDecl {
+                            name: Rc::clone(name),
+                            init: None,
+                            typ: typ.clone(),
+                        });
+                        self.declare_local(&param_decl)?;
+                    }
+                }
+            }
+            Ok(())
+        }
+        fn declare_var(&mut self, decl: &ast::VarDecl) -> Result<()> {
+            let decl = ast::Declaration::VarDecl(decl.clone());
+            self.declare_local(&decl)
+        }
+
+        fn has_type(&self, key: &Rc<String>, expected: ast::Type) -> Result<()> {
+            match self.get(key) {
+                Some(SymbolEntry { r#type, .. }) if *r#type == expected => Ok(()),
+
+                Some(SymbolEntry { r#type, .. }) => {
+                    bail!("Expected type {expected} for \"{key}\" but found type {type} instead.")
+                }
+                None => bail!("Found no type information for symbol \"{key}\"."),
+            }
+        }
+
+        fn push_scope(&mut self) {
+            self.scopes.push(HashMap::new());
+        }
+
+        fn pop_scope(&mut self) -> Result<()> {
+            if self.scopes.is_empty() {
+                bail!("Already in global scope, cannot pop symbol table.")
+            } else {
+                self.scopes.pop();
+                Ok(())
+            }
+        }
+    }
 
     pub fn validate(stage: SemaStage<IdentResolution>) -> Result<SemaStage<TypeChecking>> {
-        let mut symbols = HashMap::new();
+        let mut symbols = SymbolTable::new_table();
+        typecheck_program(&stage.program, &mut symbols)?;
         Ok(SemaStage {
-            program: typecheck_program(stage.program, &mut symbols)?,
+            program: stage.program,
             stage: PhantomData::<TypeChecking>,
         })
     }
 
-    fn typecheck_program(
-        program: ast::Program,
-        symbols: &mut HashMap<Rc<String>, SymbolEntry>,
-    ) -> Result<ast::Program> {
-        // This is stupid because it processes functions in order rather than
-        // declaring all signatures then resolving bodies. But hey that's
-        // C for you
-        let valid_functions = program
-            .functions
-            .into_iter()
-            .map(|f| typecheck_fun_decl(f, symbols, false))
-            .collect::<Result<Vec<ast::FunDecl>, Error>>()?;
-        Ok(ast::Program {
-            functions: valid_functions,
-        })
+    fn typecheck_program(program: &ast::Program, symbols: &mut SymbolTable) -> Result<()> {
+        for f in program.functions.iter() {
+            typecheck_fun_decl(f, symbols)?;
+        }
+        Ok(())
     }
 
-    fn typecheck_block(
-        block: ast::Block,
-        symbols: &mut HashMap<Rc<String>, SymbolEntry>,
-    ) -> Result<ast::Block> {
-        let valid_block_items = block
-            .into_items()
-            .into_iter()
-            .map(|item| typecheck_block_item(item, symbols))
-            .collect::<Result<Vec<ast::BlockItem>, Error>>()?;
-        Ok(ast::Block(valid_block_items))
+    fn typecheck_block(block: &ast::Block, symbols: &mut SymbolTable) -> Result<()> {
+        symbols.push_scope();
+        for item in block.items().iter() {
+            typecheck_block_item(item, symbols)?;
+        }
+        symbols.pop_scope()
     }
 
-    fn typecheck_block_item(
-        item: ast::BlockItem,
-        symbols: &mut HashMap<Rc<String>, SymbolEntry>,
-    ) -> Result<ast::BlockItem> {
+    fn typecheck_block_item(item: &ast::BlockItem, symbols: &mut SymbolTable) -> Result<()> {
         match item {
-            ast::BlockItem::Stmt(stmt) => Ok(ast::BlockItem::Stmt(typecheck_stmt(stmt, symbols)?)),
-            ast::BlockItem::Decl(decl) => Ok(ast::BlockItem::Decl(typecheck_decl(decl, symbols)?)),
+            ast::BlockItem::Stmt(stmt) => typecheck_stmt(stmt, symbols).map(|_| ()),
+            ast::BlockItem::Decl(decl) => typecheck_decl(decl, symbols).map(|_| ()),
         }
     }
 
-    fn typecheck_stmt(
-        stmt: ast::Stmt,
-        symbols: &mut HashMap<Rc<String>, SymbolEntry>,
-    ) -> Result<ast::Stmt> {
+    fn typecheck_stmt(stmt: &ast::Stmt, symbols: &mut SymbolTable) -> Result<()> {
         match stmt {
-            ast::Stmt::Compound(block) => Ok(ast::Stmt::Compound(typecheck_block(block, symbols)?)),
-            ast::Stmt::Return(Some(expr)) => {
-                Ok(ast::Stmt::Return(Some(typecheck_expr(expr, symbols)?)))
-            }
-            ast::Stmt::Expr(expr) => Ok(ast::Stmt::Expr(typecheck_expr(expr, symbols)?)),
+            ast::Stmt::Compound(block) => typecheck_block(block, symbols),
+            ast::Stmt::Return(Some(expr)) => typecheck_expr(expr, symbols),
+            ast::Stmt::Expr(expr) => typecheck_expr(expr, symbols),
             ast::Stmt::If {
                 condition,
                 then,
                 r#else,
-            } => Ok(ast::Stmt::If {
-                condition: typecheck_expr(condition, symbols)?,
-                then: Box::new(typecheck_stmt(*then, symbols)?),
-                r#else: if let Some(stmt) = r#else {
-                    Some(Box::new(typecheck_stmt(*stmt, symbols)?))
-                } else {
-                    None
-                },
-            }),
+            } => {
+                typecheck_expr(condition, symbols)?;
+                typecheck_stmt(then, symbols)?;
+                r#else
+                    .as_ref()
+                    .map_or(Ok(()), |stmt| typecheck_stmt(stmt, symbols))
+            }
             ast::Stmt::While {
-                condition,
-                body,
-                label,
-            } => Ok(ast::Stmt::While {
-                condition: typecheck_expr(condition, symbols)?,
-                body: Box::new(typecheck_stmt(*body, symbols)?),
-                label,
-            }),
+                condition, body, ..
+            } => {
+                typecheck_expr(condition, symbols)?;
+                typecheck_stmt(body, symbols)
+            }
             ast::Stmt::DoWhile {
-                body,
-                condition,
-                label,
-            } => Ok(ast::Stmt::DoWhile {
-                condition: typecheck_expr(condition, symbols)?,
-                body: Box::new(typecheck_stmt(*body, symbols)?),
-                label,
-            }),
+                body, condition, ..
+            } => {
+                typecheck_expr(condition, symbols)?;
+                typecheck_stmt(body, symbols)
+            }
             ast::Stmt::For {
                 init,
                 condition,
                 post,
                 body,
-                label,
+                ..
             } => {
-                let init = match init {
+                match init {
                     ast::ForInit::Decl(decl) => {
-                        ast::ForInit::Decl(typecheck_var_decl(decl, symbols)?)
+                        typecheck_var_decl(decl, symbols)?;
                     }
                     ast::ForInit::Expr(Some(expr)) => {
-                        ast::ForInit::Expr(Some(typecheck_expr(expr, symbols)?))
+                        typecheck_expr(expr, symbols)?;
                     }
-                    _ => init,
-                };
-                let condition = if let Some(expr) = condition {
-                    Some(typecheck_expr(expr, symbols)?)
-                } else {
-                    None
-                };
-                let post = if let Some(expr) = post {
-                    Some(typecheck_expr(expr, symbols)?)
-                } else {
-                    None
-                };
-                Ok(ast::Stmt::For {
-                    init,
-                    condition,
-                    post,
-                    body: Box::new(typecheck_stmt(*body, symbols)?),
-                    label,
-                })
+                    _ => {}
+                }
+                if let Some(condition) = condition {
+                    typecheck_expr(condition, symbols)?;
+                }
+                if let Some(post) = post {
+                    typecheck_expr(post, symbols)?;
+                }
+                typecheck_stmt(body, symbols)
             }
-            ast::Stmt::Case { value, stmt, label } => Ok(ast::Stmt::Case {
-                value: typecheck_expr(value, symbols)?,
-                stmt: Box::new(typecheck_stmt(*stmt, symbols)?),
-                label,
-            }),
+            ast::Stmt::Case { value, stmt, .. } => {
+                typecheck_expr(value, symbols)?;
+                typecheck_stmt(stmt, symbols)
+            }
             ast::Stmt::Switch {
                 condition,
                 body,
                 cases,
-                label,
-                default,
+                ..
             } => {
-                let cases = if let Some(cases) = cases {
+                typecheck_expr(condition, symbols)?;
+                typecheck_stmt(body, symbols)?;
+                if let Some(cases) = cases {
                     for (literal, name) in cases.iter() {
                         if !literal.is_int() {
                             bail!("Non-integer type in case {name}.");
                         }
                     }
-                    Some(cases)
-                } else {
-                    None
-                };
-                Ok(ast::Stmt::Switch {
-                    condition: typecheck_expr(condition, symbols)?,
-                    body: Box::new(typecheck_stmt(*body, symbols)?),
-                    cases,
-                    label,
-                    default,
-                })
+                }
+                Ok(())
             }
-            stmt => Ok(stmt),
+            _ => Ok(()),
         }
     }
 
-    fn typecheck_expr(
-        expr: ast::Expr,
-        symbols: &mut HashMap<Rc<String>, SymbolEntry>,
-    ) -> Result<ast::Expr> {
+    fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<()> {
         match expr {
             ast::Expr::Var(name) => {
-                match symbols.get(&name) {
-                    Some((ast::Type::Int, _)) => Ok(ast::Expr::Var(name)),
-                    // FIXME: For later
-                    Some((t, _)) => bail!("Expected integer but found type {t}."),
-                    _ => bail!("Could not find variable named {name}."),
-                }
+                // TODO: Fix this once we have more types
+                symbols.has_type(name, ast::Type::Int)
             }
-            lit @ ast::Expr::Literal(_) => Ok(lit),
-            ast::Expr::Assignment { lvalue, rvalue } => Ok(ast::Expr::Assignment {
-                lvalue: Box::new(typecheck_expr(*lvalue, symbols)?),
-                rvalue: Box::new(typecheck_expr(*rvalue, symbols)?),
-            }),
-            ast::Expr::Unary { op, expr } => Ok(ast::Expr::Unary {
-                op,
-                expr: Box::new(typecheck_expr(*expr, symbols)?),
-            }),
-            ast::Expr::Binary { op, left, right } => Ok(ast::Expr::Binary {
-                op,
-                left: Box::new(typecheck_expr(*left, symbols)?),
-                right: Box::new(typecheck_expr(*right, symbols)?),
-            }),
+            ast::Expr::Assignment { lvalue, rvalue } => {
+                typecheck_expr(lvalue, symbols)?;
+                typecheck_expr(rvalue, symbols)
+            }
+            ast::Expr::Unary { expr, .. } => typecheck_expr(expr, symbols),
+            ast::Expr::Binary { left, right, .. } => {
+                typecheck_expr(left, symbols)?;
+                typecheck_expr(right, symbols)
+            }
             ast::Expr::Conditional {
                 condition,
                 then,
                 r#else,
-            } => Ok(ast::Expr::Conditional {
-                condition: Box::new(typecheck_expr(*condition, symbols)?),
-                then: Box::new(typecheck_expr(*then, symbols)?),
-                r#else: Box::new(typecheck_expr(*r#else, symbols)?),
-            }),
+            } => {
+                typecheck_expr(condition, symbols)?;
+                typecheck_expr(then, symbols)?;
+                typecheck_expr(r#else, symbols)
+            }
             ast::Expr::FunCall { name, args } => {
-                match symbols.get(&name) {
-                    Some((ast::Type::Fun { param_types, .. }, _)) => {
+                match symbols.get(name) {
+                    Some(SymbolEntry {
+                        r#type: ast::Type::Fun { param_types, .. },
+                        ..
+                    }) => {
                         if args.len() != param_types.len() {
                             bail!(
                                 "Expected {} args but received {} when calling \"{name}\".",
@@ -639,86 +745,43 @@ mod typechecking {
                         // Will need to be uprooted once more sophisticated types
                         // are added in order to verify arg types match expected
                         for arg in args.iter() {
-                            typecheck_expr(arg.clone(), symbols)?;
+                            typecheck_expr(arg, symbols)?;
                         }
-                        Ok(ast::Expr::FunCall { name, args })
+                        Ok(())
                     }
-                    Some((t, _)) => bail!("Expected function type, but found type {t}."),
+                    Some(SymbolEntry { r#type: t, .. }) => {
+                        bail!("Expected function type, but found type {t}.")
+                    }
                     _ => bail!("Could not find symbol with name {name}."),
                 }
             }
+            _ => Ok(()),
         }
     }
 
-    fn typecheck_decl(
-        decl: ast::Declaration,
-        symbols: &mut HashMap<Rc<String>, SymbolEntry>,
-    ) -> Result<ast::Declaration> {
+    fn typecheck_decl(decl: &ast::Declaration, symbols: &mut SymbolTable) -> Result<()> {
         match decl {
-            ast::Declaration::VarDecl(decl) => Ok(ast::Declaration::VarDecl(typecheck_var_decl(
-                decl, symbols,
-            )?)),
-            ast::Declaration::FunDecl(decl) => Ok(ast::Declaration::FunDecl(typecheck_fun_decl(
-                decl, symbols, true,
-            )?)),
+            ast::Declaration::FunDecl(decl) => typecheck_fun_decl(decl, symbols),
+            ast::Declaration::VarDecl(decl) => typecheck_var_decl(decl, symbols),
         }
     }
 
-    fn typecheck_var_decl(
-        decl: ast::VarDecl,
-        symbols: &mut HashMap<Rc<String>, SymbolEntry>,
-    ) -> Result<ast::VarDecl> {
-        if let Some((_, false)) = symbols.insert(Rc::clone(&decl.name), (decl.typ.clone(), true)) {
-            bail!("Redeclaring local variable {}", decl.name)
+    fn typecheck_fun_decl(decl: &ast::FunDecl, symbols: &mut SymbolTable) -> Result<()> {
+        // Special case: Push scope and iterate over block items here so the
+        // function parameters get put into the same scope as the block items
+        symbols.push_scope();
+        symbols.declare_fun(decl)?;
+        // Treat parameters as declarations without values
+        if let Some(ref block) = decl.block {
+            for item in block.items() {
+                typecheck_block_item(item, symbols)?;
+            }
         }
-
-        let init = if let Some(init) = decl.init {
-            Some(typecheck_expr(init, symbols)?)
-        } else {
-            None
-        };
-        Ok(ast::VarDecl { init, ..decl })
+        symbols.pop_scope()
     }
 
-    fn typecheck_fun_decl(
-        decl: ast::FunDecl,
-        symbols: &mut HashMap<Rc<String>, SymbolEntry>,
-        local_scope: bool,
-    ) -> Result<ast::FunDecl> {
-        let fun_type = ast::Type::from(&decl);
-        let name = Rc::clone(&decl.name);
-        let defining_function = decl.block.is_some();
-        match symbols.get(&name) {
-            Some((_, true)) if defining_function => {
-                bail!("Duplicate definition for function {name}.");
-            }
-            Some((prev_type @ ast::Type::Fun { .. }, _)) if *prev_type != fun_type => {
-                bail!(
-                    "Redeclaration of function {name} with type {prev_type} with type {fun_type}"
-                );
-            }
-            Some((decl, _)) if !matches!(decl, ast::Type::Fun { .. }) => {
-                bail!("Duplicate declaration for {name}. Found declaration: {decl}");
-            }
-            _ => {
-                symbols.insert(name, (fun_type, defining_function));
-            }
-        }
-        let block = match (decl.block, local_scope) {
-            (Some(_), true) => bail!("Cannot define function in local scope."),
-            (Some(block), _) => {
-                let mut inner_map = symbols.clone();
-                for (typ, name) in decl.signature.iter() {
-                    if let Some(name) = name {
-                        inner_map.insert(Rc::clone(name), (typ.clone(), false));
-                    }
-                }
-                let block = typecheck_block(block, &mut inner_map)?;
-                Some(block)
-            }
-            _ => None,
-        };
-        Ok(ast::FunDecl { block, ..decl })
+    fn typecheck_var_decl(decl: &ast::VarDecl, symbols: &mut SymbolTable) -> Result<()> {
+        symbols.declare_var(decl)
     }
 }
 

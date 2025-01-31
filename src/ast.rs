@@ -73,6 +73,20 @@ pub struct FunDecl {
     pub block: Option<Block>,
 }
 
+impl From<&FunDecl> for Type {
+    fn from(decl: &FunDecl) -> Self {
+        let param_types = decl
+            .signature
+            .iter()
+            .map(|(param_type, _)| param_type.clone())
+            .collect::<Vec<Type>>();
+        Self::Fun {
+            ret_t: Box::new(decl.ret_t.clone()),
+            param_types,
+        }
+    }
+}
+
 impl FunDecl {
     /// Parses [ <type> [name] ]*.
     /// Does not consume opening or closing parentheses

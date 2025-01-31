@@ -65,20 +65,20 @@ impl AstNode for Program {
     }
 }
 
-pub type ParameterList = Vec<(Type, Option<Rc<String>>)>;
-
 #[derive(Clone, Debug, PartialEq)]
 pub struct FunDecl {
     pub ret_t: Type,
     pub name: Rc<String>,
-    pub signature: ParameterList,
+    pub signature: Vec<(Type, Option<Rc<String>>)>,
     pub block: Option<Block>,
 }
 
 impl FunDecl {
     /// Parses [ <type> [name] ]*.
     /// Does not consume opening or closing parentheses
-    fn parse_parameter_list(tokens: &[Token]) -> Result<(ParameterList, &[Token])> {
+    fn parse_parameter_list(
+        tokens: &[Token],
+    ) -> Result<(Vec<(Type, Option<Rc<String>>)>, &[Token])> {
         let mut signature = vec![];
         let remaining = match tokens {
             [Token::RParen, ..] => tokens,

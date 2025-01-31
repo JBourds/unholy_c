@@ -187,7 +187,7 @@ mod identifiers {
                 // Resolve automatic variables for parameter names
                 if let Some(name) = name {
                     resolve_automatic(Rc::clone(&name), &mut inner_map, make_temporary)
-                        .map(|_| (typ, Some(name)))
+                        .map(|name| (typ, Some(name)))
                 } else {
                     Ok((typ, None))
                 }
@@ -432,10 +432,9 @@ mod typechecking {
     type SymbolEntry = (ast::Type, bool);
 
     pub fn validate(stage: SemaStage<IdentResolution>) -> Result<SemaStage<TypeChecking>> {
-        //let mut symbols = HashMap::new();
-        // TODO: Actually call typechecking stage once it works
+        let mut symbols = HashMap::new();
         Ok(SemaStage {
-            program: stage.program,
+            program: typecheck_program(stage.program, &mut symbols)?,
             stage: PhantomData::<TypeChecking>,
         })
     }
@@ -638,7 +637,7 @@ mod typechecking {
                         }
                         Ok(ast::Expr::FunCall { name, args })
                     }
-                    Some((t, _)) => bail!("Expected function with type , but found type {t}."),
+                    Some((t, _)) => bail!("Expected function type, but found type {t}."),
                     _ => bail!("Could not find symbol with name {name}."),
                 }
             }
@@ -663,6 +662,7 @@ mod typechecking {
         decl: ast::VarDecl,
         symbols: &mut HashMap<Rc<String>, SymbolEntry>,
     ) -> Result<ast::VarDecl> {
+        println!("Typechecking declaration for {}", decl.name);
         symbols.insert(Rc::clone(&decl.name), (decl.typ.clone(), true));
         let init = if let Some(init) = decl.init {
             Some(typecheck_expr(init, symbols)?)
@@ -715,7 +715,22 @@ mod typechecking {
             }
         }
         let block = if let Some(block) = decl.block {
-            Some(typecheck_block(block, symbols)?)
+            // Save any conflicting symbol names from the current scope
+            let mut duplicate_definitions = vec![];
+            for (typ, name) in decl.signature.iter() {
+                if let Some(name) = name {
+                    if let Some(prev_entry) = symbols.insert(Rc::clone(name), (typ.clone(), false))
+                    {
+                        duplicate_definitions.push((Rc::clone(name), prev_entry));
+                    }
+                }
+            }
+            let block = typecheck_block(block, symbols)?;
+            // Restore original symbols
+            for (name, prev_entry) in duplicate_definitions.into_iter() {
+                symbols.insert(name, prev_entry);
+            }
+            Some(block)
         } else {
             None
         };

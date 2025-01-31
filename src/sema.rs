@@ -452,7 +452,7 @@ mod typechecking {
         let valid_functions = program
             .functions
             .into_iter()
-            .map(|f| typecheck_fun_decl(f, symbols))
+            .map(|f| typecheck_fun_decl(f, symbols, false))
             .collect::<Result<Vec<ast::FunDecl>, Error>>()?;
         Ok(ast::Program {
             functions: valid_functions,
@@ -659,7 +659,7 @@ mod typechecking {
                 decl, symbols,
             )?)),
             ast::Declaration::FunDecl(decl) => Ok(ast::Declaration::FunDecl(typecheck_fun_decl(
-                decl, symbols,
+                decl, symbols, true,
             )?)),
         }
     }
@@ -683,6 +683,7 @@ mod typechecking {
     fn typecheck_fun_decl(
         decl: ast::FunDecl,
         symbols: &mut HashMap<Rc<String>, SymbolEntry>,
+        local_scope: bool,
     ) -> Result<ast::FunDecl> {
         let fun_type = ast::Type::from(&decl);
         let name = Rc::clone(&decl.name);
@@ -703,17 +704,19 @@ mod typechecking {
                 symbols.insert(name, (fun_type, defining_function));
             }
         }
-        let block = if let Some(block) = decl.block {
-            let mut inner_map = symbols.clone();
-            for (typ, name) in decl.signature.iter() {
-                if let Some(name) = name {
-                    inner_map.insert(Rc::clone(name), (typ.clone(), false));
+        let block = match (decl.block, local_scope) {
+            (Some(_), true) => bail!("Cannot define function in local scope."),
+            (Some(block), _) => {
+                let mut inner_map = symbols.clone();
+                for (typ, name) in decl.signature.iter() {
+                    if let Some(name) = name {
+                        inner_map.insert(Rc::clone(name), (typ.clone(), false));
+                    }
                 }
+                let block = typecheck_block(block, &mut inner_map)?;
+                Some(block)
             }
-            let block = typecheck_block(block, &mut inner_map)?;
-            Some(block)
-        } else {
-            None
+            _ => None,
         };
         Ok(ast::FunDecl { block, ..decl })
     }

@@ -78,11 +78,18 @@ mod identifiers {
     }
 
     pub fn validate(stage: SemaStage<Initial>) -> Result<SemaStage<IdentResolution>> {
+        let mut ident_map = HashMap::new();
+        let mut count = 0;
+        let mut unique_name_generator = move |name: &str| -> String {
+            let new_name = format!("{name}.{count}");
+            count += 1;
+            new_name
+        };
         let valid_functions = stage
             .program
             .functions
             .into_iter()
-            .map(validate_function)
+            .map(|f| resolve_fun_decl(f, &mut ident_map, &mut unique_name_generator))
             .collect::<Result<Vec<ast::FunDecl>, Error>>()?;
 
         Ok(SemaStage {
@@ -91,18 +98,6 @@ mod identifiers {
             },
             stage: PhantomData::<IdentResolution>,
         })
-    }
-
-    fn validate_function(function: ast::FunDecl) -> Result<ast::FunDecl> {
-        let mut ident_map = HashMap::new();
-        let mut count = 0;
-        let mut unique_name_generator = move |name: &str| -> String {
-            let new_name = format!("{name}.{count}");
-            count += 1;
-            new_name
-        };
-
-        resolve_fun_decl(function, &mut ident_map, &mut unique_name_generator)
     }
 
     fn validate_block(
@@ -411,6 +406,14 @@ mod identifiers {
                 r#else: Box::new(resolve_expr(*r#else, ident_map)?),
             }),
             ast::Expr::FunCall { name, args } => {
+                // Replace the name of the function with whatever is there in
+                // the ident map. If a local variable is defined shadowing the
+                // function, then this will return its unique name.
+                let name = if let Some(IdentEntry { name, .. }) = ident_map.get(&name) {
+                    Rc::clone(name)
+                } else {
+                    bail!("Cannot call unknown identifier {}.", name);
+                };
                 let valid_args = args
                     .into_iter()
                     .map(|a| resolve_expr(a, ident_map))
@@ -443,6 +446,9 @@ mod typechecking {
         program: ast::Program,
         symbols: &mut HashMap<Rc<String>, SymbolEntry>,
     ) -> Result<ast::Program> {
+        // This is stupid because it processes functions in order rather than
+        // declaring all signatures then resolving bodies. But hey that's
+        // C for you
         let valid_functions = program
             .functions
             .into_iter()
@@ -662,8 +668,10 @@ mod typechecking {
         decl: ast::VarDecl,
         symbols: &mut HashMap<Rc<String>, SymbolEntry>,
     ) -> Result<ast::VarDecl> {
-        println!("Typechecking declaration for {}", decl.name);
-        symbols.insert(Rc::clone(&decl.name), (decl.typ.clone(), true));
+        if let Some((_, false)) = symbols.insert(Rc::clone(&decl.name), (decl.typ.clone(), true)) {
+            bail!("Redeclaring local variable {}", decl.name)
+        }
+
         let init = if let Some(init) = decl.init {
             Some(typecheck_expr(init, symbols)?)
         } else {
@@ -676,60 +684,33 @@ mod typechecking {
         decl: ast::FunDecl,
         symbols: &mut HashMap<Rc<String>, SymbolEntry>,
     ) -> Result<ast::FunDecl> {
-        let param_types = decl
-            .signature
-            .iter()
-            .map(|(param_type, _)| param_type.clone())
-            .collect::<Vec<ast::Type>>();
+        let fun_type = ast::Type::from(&decl);
         let name = Rc::clone(&decl.name);
         let defining_function = decl.block.is_some();
         match symbols.get(&name) {
             Some((_, true)) if defining_function => {
                 bail!("Duplicate definition for function {name}.");
             }
-            Some((
-                ast::Type::Fun {
-                    ret_t: prev_ret_t,
-                    param_types: prev_types,
-                },
-                _,
-            )) => {
-                if **prev_ret_t != decl.ret_t || *prev_types != param_types {
-                    bail!("Redeclaration of function {name} with return type {:?} and parameter types {:?} but found return type {:?} and parameter types {:?}", decl.ret_t, param_types, prev_ret_t, prev_types);
-                }
+            Some((prev_type @ ast::Type::Fun { .. }, _)) if *prev_type != fun_type => {
+                bail!(
+                    "Redeclaration of function {name} with type {prev_type} with type {fun_type}"
+                );
             }
-            Some((decl, _)) => {
-                bail!("Duplicate declaration for {name}. Found declaration: {decl:?}");
+            Some((decl, _)) if !matches!(decl, ast::Type::Fun { .. }) => {
+                bail!("Duplicate declaration for {name}. Found declaration: {decl}");
             }
             _ => {
-                symbols.insert(
-                    name,
-                    (
-                        ast::Type::Fun {
-                            ret_t: Box::new(decl.ret_t.clone()),
-                            param_types,
-                        },
-                        defining_function,
-                    ),
-                );
+                symbols.insert(name, (fun_type, defining_function));
             }
         }
         let block = if let Some(block) = decl.block {
-            // Save any conflicting symbol names from the current scope
-            let mut duplicate_definitions = vec![];
+            let mut inner_map = symbols.clone();
             for (typ, name) in decl.signature.iter() {
                 if let Some(name) = name {
-                    if let Some(prev_entry) = symbols.insert(Rc::clone(name), (typ.clone(), false))
-                    {
-                        duplicate_definitions.push((Rc::clone(name), prev_entry));
-                    }
+                    inner_map.insert(Rc::clone(name), (typ.clone(), false));
                 }
             }
-            let block = typecheck_block(block, symbols)?;
-            // Restore original symbols
-            for (name, prev_entry) in duplicate_definitions.into_iter() {
-                symbols.insert(name, prev_entry);
-            }
+            let block = typecheck_block(block, &mut inner_map)?;
             Some(block)
         } else {
             None

@@ -427,56 +427,227 @@ mod identifiers {
 mod typechecking {
     use super::*;
 
+    // I promise it is simpler to just lug the bool around for all types even
+    // though it is only used for functions.
+    type SymbolEntry = (ast::Type, bool);
+
     pub fn validate(stage: SemaStage<IdentResolution>) -> Result<SemaStage<TypeChecking>> {
-        let mut symbols = HashMap::new();
-        let SemaStage { program, .. } = stage;
-
-        // TODO
-
+        //let mut symbols = HashMap::new();
+        // TODO: Actually call typechecking stage once it works
         Ok(SemaStage {
-            program,
+            program: stage.program,
             stage: PhantomData::<TypeChecking>,
         })
     }
 
     fn typecheck_program(
         program: ast::Program,
-        symbols: &mut HashMap<Rc<String>, ast::Type>,
+        symbols: &mut HashMap<Rc<String>, SymbolEntry>,
     ) -> Result<ast::Program> {
-        todo!()
+        let valid_functions = program
+            .functions
+            .into_iter()
+            .map(|f| typecheck_fun_decl(f, symbols))
+            .collect::<Result<Vec<ast::FunDecl>, Error>>()?;
+        Ok(ast::Program {
+            functions: valid_functions,
+        })
     }
 
     fn typecheck_block(
         block: ast::Block,
-        symbols: &mut HashMap<Rc<String>, ast::Type>,
+        symbols: &mut HashMap<Rc<String>, SymbolEntry>,
     ) -> Result<ast::Block> {
-        todo!()
+        let valid_block_items = block
+            .into_items()
+            .into_iter()
+            .map(|item| typecheck_block_item(item, symbols))
+            .collect::<Result<Vec<ast::BlockItem>, Error>>()?;
+        Ok(ast::Block(valid_block_items))
     }
 
     fn typecheck_block_item(
         item: ast::BlockItem,
-        symbols: &mut HashMap<Rc<String>, ast::Type>,
+        symbols: &mut HashMap<Rc<String>, SymbolEntry>,
     ) -> Result<ast::BlockItem> {
-        todo!()
+        match item {
+            ast::BlockItem::Stmt(stmt) => Ok(ast::BlockItem::Stmt(typecheck_stmt(stmt, symbols)?)),
+            ast::BlockItem::Decl(decl) => Ok(ast::BlockItem::Decl(typecheck_decl(decl, symbols)?)),
+        }
     }
 
     fn typecheck_stmt(
         stmt: ast::Stmt,
-        symbols: &mut HashMap<Rc<String>, ast::Type>,
+        symbols: &mut HashMap<Rc<String>, SymbolEntry>,
     ) -> Result<ast::Stmt> {
-        todo!()
+        match stmt {
+            ast::Stmt::Compound(block) => Ok(ast::Stmt::Compound(typecheck_block(block, symbols)?)),
+            ast::Stmt::Return(Some(expr)) => {
+                Ok(ast::Stmt::Return(Some(typecheck_expr(expr, symbols)?)))
+            }
+            ast::Stmt::Expr(expr) => Ok(ast::Stmt::Expr(typecheck_expr(expr, symbols)?)),
+            ast::Stmt::If {
+                condition,
+                then,
+                r#else,
+            } => Ok(ast::Stmt::If {
+                condition: typecheck_expr(condition, symbols)?,
+                then: Box::new(typecheck_stmt(*then, symbols)?),
+                r#else: if let Some(stmt) = r#else {
+                    Some(Box::new(typecheck_stmt(*stmt, symbols)?))
+                } else {
+                    None
+                },
+            }),
+            ast::Stmt::While {
+                condition,
+                body,
+                label,
+            } => Ok(ast::Stmt::While {
+                condition: typecheck_expr(condition, symbols)?,
+                body: Box::new(typecheck_stmt(*body, symbols)?),
+                label,
+            }),
+            ast::Stmt::DoWhile {
+                body,
+                condition,
+                label,
+            } => Ok(ast::Stmt::DoWhile {
+                condition: typecheck_expr(condition, symbols)?,
+                body: Box::new(typecheck_stmt(*body, symbols)?),
+                label,
+            }),
+            ast::Stmt::For {
+                init,
+                condition,
+                post,
+                body,
+                label,
+            } => {
+                let init = match init {
+                    ast::ForInit::Decl(decl) => {
+                        ast::ForInit::Decl(typecheck_var_decl(decl, symbols)?)
+                    }
+                    ast::ForInit::Expr(Some(expr)) => {
+                        ast::ForInit::Expr(Some(typecheck_expr(expr, symbols)?))
+                    }
+                    _ => init,
+                };
+                let condition = if let Some(expr) = condition {
+                    Some(typecheck_expr(expr, symbols)?)
+                } else {
+                    None
+                };
+                let post = if let Some(expr) = post {
+                    Some(typecheck_expr(expr, symbols)?)
+                } else {
+                    None
+                };
+                Ok(ast::Stmt::For {
+                    init,
+                    condition,
+                    post,
+                    body: Box::new(typecheck_stmt(*body, symbols)?),
+                    label,
+                })
+            }
+            ast::Stmt::Case { value, stmt, label } => Ok(ast::Stmt::Case {
+                value: typecheck_expr(value, symbols)?,
+                stmt: Box::new(typecheck_stmt(*stmt, symbols)?),
+                label,
+            }),
+            ast::Stmt::Switch {
+                condition,
+                body,
+                cases,
+                label,
+                default,
+            } => {
+                let cases = if let Some(cases) = cases {
+                    for (literal, name) in cases.iter() {
+                        if !literal.is_int() {
+                            bail!("Non-integer type in case {name}.");
+                        }
+                    }
+                    Some(cases)
+                } else {
+                    None
+                };
+                Ok(ast::Stmt::Switch {
+                    condition: typecheck_expr(condition, symbols)?,
+                    body: Box::new(typecheck_stmt(*body, symbols)?),
+                    cases,
+                    label,
+                    default,
+                })
+            }
+            stmt => Ok(stmt),
+        }
     }
 
     fn typecheck_expr(
         expr: ast::Expr,
-        symbols: &mut HashMap<Rc<String>, ast::Type>,
+        symbols: &mut HashMap<Rc<String>, SymbolEntry>,
     ) -> Result<ast::Expr> {
-        todo!()
+        match expr {
+            ast::Expr::Var(name) => {
+                match symbols.get(&name) {
+                    Some((ast::Type::Int, _)) => Ok(ast::Expr::Var(name)),
+                    // FIXME: For later
+                    Some((t, _)) => bail!("Expected integer but found type {t}."),
+                    _ => bail!("Could not find variable named {name}."),
+                }
+            }
+            lit @ ast::Expr::Literal(_) => Ok(lit),
+            ast::Expr::Assignment { lvalue, rvalue } => Ok(ast::Expr::Assignment {
+                lvalue: Box::new(typecheck_expr(*lvalue, symbols)?),
+                rvalue: Box::new(typecheck_expr(*rvalue, symbols)?),
+            }),
+            ast::Expr::Unary { op, expr } => Ok(ast::Expr::Unary {
+                op,
+                expr: Box::new(typecheck_expr(*expr, symbols)?),
+            }),
+            ast::Expr::Binary { op, left, right } => Ok(ast::Expr::Binary {
+                op,
+                left: Box::new(typecheck_expr(*left, symbols)?),
+                right: Box::new(typecheck_expr(*right, symbols)?),
+            }),
+            ast::Expr::Conditional {
+                condition,
+                then,
+                r#else,
+            } => Ok(ast::Expr::Conditional {
+                condition: Box::new(typecheck_expr(*condition, symbols)?),
+                then: Box::new(typecheck_expr(*then, symbols)?),
+                r#else: Box::new(typecheck_expr(*r#else, symbols)?),
+            }),
+            ast::Expr::FunCall { name, args } => {
+                match symbols.get(&name) {
+                    Some((ast::Type::Fun { param_types, .. }, _)) => {
+                        if args.len() != param_types.len() {
+                            bail!(
+                                "Expected {} args but received {} when calling \"{name}\".",
+                                param_types.len(),
+                                args.len()
+                            );
+                        }
+                        // Will need to be uprooted once more sophisticated types
+                        // are added in order to verify arg types match expected
+                        for arg in args.iter() {
+                            typecheck_expr(arg.clone(), symbols)?;
+                        }
+                        Ok(ast::Expr::FunCall { name, args })
+                    }
+                    Some((t, _)) => bail!("Expected function with type , but found type {t}."),
+                    _ => bail!("Could not find symbol with name {name}."),
+                }
+            }
+        }
     }
 
     fn typecheck_decl(
         decl: ast::Declaration,
-        symbols: &mut HashMap<Rc<String>, ast::Type>,
+        symbols: &mut HashMap<Rc<String>, SymbolEntry>,
     ) -> Result<ast::Declaration> {
         match decl {
             ast::Declaration::VarDecl(decl) => Ok(ast::Declaration::VarDecl(typecheck_var_decl(
@@ -490,9 +661,9 @@ mod typechecking {
 
     fn typecheck_var_decl(
         decl: ast::VarDecl,
-        symbols: &mut HashMap<Rc<String>, ast::Type>,
+        symbols: &mut HashMap<Rc<String>, SymbolEntry>,
     ) -> Result<ast::VarDecl> {
-        symbols.insert(Rc::clone(&decl.name), decl.typ.clone());
+        symbols.insert(Rc::clone(&decl.name), (decl.typ.clone(), true));
         let init = if let Some(init) = decl.init {
             Some(typecheck_expr(init, symbols)?)
         } else {
@@ -503,20 +674,46 @@ mod typechecking {
 
     fn typecheck_fun_decl(
         decl: ast::FunDecl,
-        symbols: &mut HashMap<Rc<String>, ast::Type>,
+        symbols: &mut HashMap<Rc<String>, SymbolEntry>,
     ) -> Result<ast::FunDecl> {
         let param_types = decl
             .signature
             .iter()
             .map(|(param_type, _)| param_type.clone())
             .collect::<Vec<ast::Type>>();
-        symbols.insert(
-            Rc::clone(&decl.name),
-            ast::Type::Fun {
-                ret_t: Box::new(decl.ret_t.clone()),
-                param_types,
-            },
-        );
+        let name = Rc::clone(&decl.name);
+        let defining_function = decl.block.is_some();
+        match symbols.get(&name) {
+            Some((_, true)) if defining_function => {
+                bail!("Duplicate definition for function {name}.");
+            }
+            Some((
+                ast::Type::Fun {
+                    ret_t: prev_ret_t,
+                    param_types: prev_types,
+                },
+                _,
+            )) => {
+                if **prev_ret_t != decl.ret_t || *prev_types != param_types {
+                    bail!("Redeclaration of function {name} with return type {:?} and parameter types {:?} but found return type {:?} and parameter types {:?}", decl.ret_t, param_types, prev_ret_t, prev_types);
+                }
+            }
+            Some((decl, _)) => {
+                bail!("Duplicate declaration for {name}. Found declaration: {decl:?}");
+            }
+            _ => {
+                symbols.insert(
+                    name,
+                    (
+                        ast::Type::Fun {
+                            ret_t: Box::new(decl.ret_t.clone()),
+                            param_types,
+                        },
+                        defining_function,
+                    ),
+                );
+            }
+        }
         let block = if let Some(block) = decl.block {
             Some(typecheck_block(block, symbols)?)
         } else {

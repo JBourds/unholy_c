@@ -761,6 +761,7 @@ pub enum Type {
     },
     Void,
 }
+
 impl AstNode for Type {
     fn consume(tokens: &[Token]) -> Result<(Type, &[Token])> {
         if let Some(token) = tokens.first() {
@@ -776,9 +777,39 @@ impl AstNode for Type {
     }
 }
 
+impl std::fmt::Display for Type {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Int => write!(f, "int"),
+            Self::Fun { ret_t, param_types } => {
+                write!(f, "(")?;
+                for (index, t) in param_types.iter().enumerate() {
+                    write!(f, "{t}")?;
+                    if index < param_types.len() - 1 {
+                        write!(f, ", ")?;
+                    }
+                }
+                match **ret_t {
+                    Self::Void => write!(f, ")"),
+                    _ => write!(f, ") -> {ret_t}"),
+                }
+            }
+            Self::Void => write!(f, "void"),
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Literal {
     Int(i32),
+}
+
+impl Literal {
+    pub fn is_int(&self) -> bool {
+        match self {
+            Self::Int(_) => true,
+        }
+    }
 }
 
 impl std::fmt::Display for Literal {

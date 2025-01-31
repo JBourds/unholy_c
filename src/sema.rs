@@ -53,7 +53,7 @@ mod identifiers {
         }
         fn new_external(name: Rc<String>) -> Self {
             Self {
-                from_current_scope: false,
+                from_current_scope: true,
                 name,
                 has_external_linkage: true,
             }

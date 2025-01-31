@@ -443,10 +443,21 @@ mod typechecking {
         scopes: Vec<HashMap<Rc<String>, SymbolEntry>>,
     }
 
-    #[derive(Debug)]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     pub enum Scope {
         Global,
         Local(usize),
+    }
+
+    impl Scope {
+        fn shadows(&self, other: &Self) -> bool {
+            match (self, other) {
+                (Self::Global, Self::Global) => false,
+                (Self::Global, Self::Local(_)) => false,
+                (Self::Local(_), Self::Global) => true,
+                (Self::Local(n1), Self::Local(n2)) => n1 > n2,
+            }
+        }
     }
 
     impl SymbolTable {
@@ -457,11 +468,11 @@ mod typechecking {
             }
         }
 
-        fn new_entry(&self, decl: &ast::Declaration, global: bool) -> Result<SymbolEntry> {
+        fn new_entry(&self, decl: &ast::Declaration, scope: Scope) -> Result<SymbolEntry> {
             Ok(SymbolEntry {
                 r#type: decl.into(),
                 defined: decl.defining(),
-                scope: if global { Scope::Global } else { self.scope() },
+                scope,
             })
         }
 
@@ -515,34 +526,48 @@ mod typechecking {
             }
         }
 
-        fn declare_in_scope(&mut self, decl: &ast::Declaration, global: bool) -> Result<()> {
-            let (name, r#type, defining_ident) = Self::get_decl_info(decl);
-            match self.insert_scope(Rc::clone(&name), self.new_entry(decl, global)?) {
-                Some(SymbolEntry { defined: true, .. }) if defining_ident => {
-                    bail!("Redefining {name} when it is already defined.")
+        fn declare_in_scope(&mut self, decl: &ast::Declaration, scope: Scope) -> Result<()> {
+            let (name, new_type, defining_ident) = Self::get_decl_info(decl);
+            if let Some(SymbolEntry {
+                r#type: old_type,
+                defined: already_defined,
+                scope: old_scope,
+            }) = self.get(&name)
+            {
+                // There is already a declaration for this name, cases include:
+                //  1. It is a function:
+                //      I)   New declaration matches existing type (OK)
+                //      II)  New declaration has no args specified (Potentially
+                //           any number of args- still OK)
+                //      III) New declaration type doesn't match existing (ERROR)
+                //      IV)  New declaration redefines existing definition
+                //  2. It is a variable:
+                //      I)  New declaration shadows existing one (OK)
+                //      II) New declaration doesn't shadow (ERROR)
+                if !scope.shadows(old_scope) {
+                    if *old_type != new_type {
+                        match new_type {
+                            ast::Type::Fun { param_types, .. } if param_types.is_empty() => {},
+                            _ => bail!(
+                                "Redeclaring {name} as {new_type} when it was previously declared as {old_type}"
+                            )
+                        }
+                    }
+                    if *already_defined && defining_ident {
+                        bail!("Redefining {name} when it is already defined.")
+                    }
+                } else {
+                    // Local variables can shadow, but functions cannot
+                    self.insert_scope(name, self.new_entry(decl, scope)?);
                 }
-                Some(SymbolEntry { r#type: prev_t, .. }) if r#type != prev_t => {
-                    bail!(
-                        "Redeclaring {name} as {type} when it was previously declared as {prev_t}"
-                    )
-                }
-                // Defining or redeclaring global symbol with correct type: Ok!
-                _ => Ok(()),
+            } else {
+                self.insert_scope(name, self.new_entry(decl, scope)?);
             }
-        }
-
-        fn declare_global(&mut self, decl: &ast::Declaration) -> Result<()> {
-            self.declare_in_scope(decl, true)
-        }
-
-        fn declare_local(&mut self, decl: &ast::Declaration) -> Result<()> {
-            self.declare_in_scope(decl, false)
+            Ok(())
         }
 
         // Lazy clones :(
         fn declare_fun(&mut self, decl: &ast::FunDecl) -> Result<()> {
-            // If a function is defined at global scope, it still needs to create
-            // a local stack frame (index 0) from which to typecheck
             if decl.block.is_some() && matches!(self.scope(), Scope::Local(n) if n > 0) {
                 bail!(
                     "Attempted to define function {} outside of global scope.",
@@ -550,10 +575,10 @@ mod typechecking {
                 );
             }
             let wrapped_decl = ast::Declaration::FunDecl(decl.clone());
-            self.declare_global(&wrapped_decl)?;
-            if matches!(self.scope(), Scope::Local(_)) {
+            self.declare_in_scope(&wrapped_decl, Scope::Global)?;
+            if let scope @ Scope::Local(_) = self.scope() {
                 // Declare function and all its params into local scope
-                self.declare_local(&wrapped_decl)?;
+                self.declare_in_scope(&wrapped_decl, scope)?;
                 for (typ, name) in decl.signature.iter() {
                     if let Some(name) = name {
                         let param_decl = ast::Declaration::VarDecl(ast::VarDecl {
@@ -561,7 +586,7 @@ mod typechecking {
                             init: None,
                             typ: typ.clone(),
                         });
-                        self.declare_local(&param_decl)?;
+                        self.declare_in_scope(&param_decl, scope)?;
                     }
                 }
             }
@@ -569,7 +594,7 @@ mod typechecking {
         }
         fn declare_var(&mut self, decl: &ast::VarDecl) -> Result<()> {
             let decl = ast::Declaration::VarDecl(decl.clone());
-            self.declare_local(&decl)
+            self.declare_in_scope(&decl, self.scope())
         }
 
         fn has_type(&self, key: &Rc<String>, expected: ast::Type) -> Result<()> {
@@ -577,7 +602,7 @@ mod typechecking {
                 Some(SymbolEntry { r#type, .. }) if *r#type == expected => Ok(()),
 
                 Some(SymbolEntry { r#type, .. }) => {
-                    bail!("Expected type {expected} for \"{key}\" but found type {type} instead.")
+                    bail!("Expected type \"{expected}\" for \"{key}\" but found type \"{type}\" instead.")
                 }
                 None => bail!("Found no type information for symbol \"{key}\"."),
             }
@@ -781,7 +806,12 @@ mod typechecking {
     }
 
     fn typecheck_var_decl(decl: &ast::VarDecl, symbols: &mut SymbolTable) -> Result<()> {
-        symbols.declare_var(decl)
+        symbols.declare_var(decl)?;
+        if let Some(init) = &decl.init {
+            typecheck_expr(init, symbols)
+        } else {
+            Ok(())
+        }
     }
 }
 

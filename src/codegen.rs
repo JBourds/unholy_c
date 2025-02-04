@@ -803,6 +803,7 @@ impl From<tacky::Instruction> for Vec<Instruction<Initial>> {
             tacky::Instruction::Label(label) => {
                 vec![new_instr(InstructionType::Label(label))]
             }
+            tacky::Instruction::FunCall { name, args, dst } => todo!(),
         }
     }
 }
@@ -972,6 +973,7 @@ mod tests {
     fn test_binary_expressions() {
         let tacky_fn = tacky::Function {
             name: Rc::new("test_fn".to_string()),
+            params: vec![],
             instructions: vec![
                 tacky::Instruction::Binary {
                     op: tacky::BinaryOp::Multiply,

@@ -1,6 +1,6 @@
 use crate::ast;
 use crate::sema;
-use anyhow::{Error, Result};
+use anyhow::Result;
 use std::rc::Rc;
 
 #[derive(Debug, PartialEq)]
@@ -15,10 +15,12 @@ impl TryFrom<sema::SemaStage<sema::Final>> for Program {
             .program
             .functions
             .into_iter()
-            .map(Function::try_from)
-            .collect::<Result<Vec<Function>, Error>>()?;
+            .map(Option::<Function>::from)
+            .collect::<Vec<Option<Function>>>();
+
+        let valid_function_definitions = valid_functions.into_iter().flatten().collect();
         Ok(Self {
-            functions: valid_functions,
+            functions: valid_function_definitions,
         })
     }
 }
@@ -26,6 +28,7 @@ impl TryFrom<sema::SemaStage<sema::Final>> for Program {
 #[derive(Debug, PartialEq)]
 pub struct Function {
     pub name: Rc<String>,
+    pub params: Vec<Option<Rc<String>>>,
     pub instructions: Vec<Instruction>,
 }
 
@@ -39,25 +42,34 @@ impl Function {
     }
 }
 
-impl TryFrom<ast::FunDecl> for Function {
-    type Error = anyhow::Error;
-    // TODO: Use the return type and arguments for something.
-    //  This is a try_from even though it cannot fail right now, assuming that
-    //  there wil actually be a possibility of failure once we use all of the
-    //  function information.
-    fn try_from(node: ast::FunDecl) -> Result<Self> {
-        let ast::FunDecl { name, block, .. } = node;
+impl From<ast::FunDecl> for Option<Function> {
+    fn from(node: ast::FunDecl) -> Self {
+        let ast::FunDecl {
+            name,
+            signature,
+            block: Some(block),
+            ..
+        } = node
+        else {
+            return None;
+        };
         let mut temp_var_counter = 0;
         let mut make_temp_var =
             Function::make_temp_var(Rc::new(name.to_string()), &mut temp_var_counter);
-        let mut instructions = block.map_or(vec![], |block| {
-            Instruction::parse_block_with(block, &mut make_temp_var)
-        });
+        let mut instructions = Instruction::parse_block_with(block, &mut make_temp_var);
+
         // Temporary fix suggested by the book for the case where a function
         // is supposed to return something but does not.
         instructions.push(Instruction::Return(Some(Val::Constant(0))));
-        Ok(Self {
+
+        let params = signature
+            .into_iter()
+            .map(|x| x.1)
+            .collect::<Vec<Option<Rc<String>>>>();
+
+        Some(Function {
             name: Rc::new(name.to_string()),
+            params,
             instructions,
         })
     }
@@ -91,6 +103,11 @@ pub enum Instruction {
         target: Rc<String>,
     },
     Label(Rc<String>),
+    FunCall {
+        name: Rc<String>,
+        args: Vec<Val>,
+        dst: Val,
+    },
 }
 
 impl Instruction {
@@ -105,10 +122,13 @@ impl Instruction {
     }
 
     fn parse_fun_decl_with(
-        _decl: ast::FunDecl,
+        decl: ast::FunDecl,
         _make_temp_var: &mut impl FnMut() -> String,
     ) -> Vec<Self> {
-        unimplemented!()
+        if let Some(_) = Option::<Function>::from(decl) {
+            unreachable!("Function declerations inside statements should be caught in sema");
+        }
+        vec![]
     }
 
     fn parse_var_decl_with(
@@ -721,7 +741,27 @@ impl Expr {
                     val: Val::Var(Rc::clone(&result)),
                 }
             }
-            _ => unimplemented!(),
+            ast::Expr::FunCall { name, args } => {
+                let label = Rc::new(make_temp_var());
+                let (mut instructions, args) =
+                    args.into_iter()
+                        .fold((vec![], vec![]), |(mut instrs, mut args), arg| {
+                            let Expr { instructions, val } = Expr::parse_with(arg, make_temp_var);
+                            instrs.extend(instructions);
+                            args.push(val);
+                            (instrs, args)
+                        });
+                let dst = Val::Var(label);
+                instructions.push(Instruction::FunCall {
+                    name,
+                    args,
+                    dst: dst.clone(),
+                });
+                Self {
+                    instructions,
+                    val: dst,
+                }
+            }
         }
     }
 }

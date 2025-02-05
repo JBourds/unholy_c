@@ -1,6 +1,5 @@
 use crate::ast;
 use crate::sema;
-use anyhow::Result;
 use std::rc::Rc;
 
 #[derive(Debug, PartialEq)]
@@ -8,9 +7,8 @@ pub struct Program {
     pub functions: Vec<Function>,
 }
 
-impl TryFrom<sema::SemaStage<sema::Final>> for Program {
-    type Error = anyhow::Error;
-    fn try_from(stage: sema::SemaStage<sema::Final>) -> Result<Self> {
+impl From<sema::SemaStage<sema::Final>> for Program {
+    fn from(stage: sema::SemaStage<sema::Final>) -> Self {
         let valid_functions = stage
             .program
             .functions
@@ -19,9 +17,9 @@ impl TryFrom<sema::SemaStage<sema::Final>> for Program {
             .collect::<Vec<Option<Function>>>();
 
         let valid_function_definitions = valid_functions.into_iter().flatten().collect();
-        Ok(Self {
+        Self {
             functions: valid_function_definitions,
-        })
+        }
     }
 }
 
@@ -125,7 +123,7 @@ impl Instruction {
         decl: ast::FunDecl,
         _make_temp_var: &mut impl FnMut() -> String,
     ) -> Vec<Self> {
-        if let Some(_) = Option::<Function>::from(decl) {
+        if Option::<Function>::from(decl).is_some() {
             unreachable!("Function declerations inside statements should be caught in sema");
         }
         vec![]

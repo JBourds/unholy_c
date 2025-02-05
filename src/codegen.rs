@@ -1226,6 +1226,6 @@ mod tests {
             ],
         };
         // Because the resulting AST is huge just check that it parses
-        let _ = Function::try_from(tacky_fn).unwrap();
+        let _ = Function::from(tacky_fn);
     }
 }

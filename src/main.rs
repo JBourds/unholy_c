@@ -126,7 +126,7 @@ fn validate_ast(args: &Args, ast: ast::Program) -> Result<Option<sema::SemaStage
 }
 
 fn generate_ir(args: &Args, stage: sema::SemaStage<sema::Final>) -> Result<Option<tacky::Program>> {
-    let tacky = tacky::Program::try_from(stage)?;
+    let tacky = tacky::Program::from(stage);
     if args.tacky {
         println!("Generated Intermediate Representation:\n{:#?}", tacky);
         Ok(None)
@@ -136,7 +136,7 @@ fn generate_ir(args: &Args, stage: sema::SemaStage<sema::Final>) -> Result<Optio
 }
 
 fn generate_code(args: &Args, tacky: tacky::Program) -> Result<Option<codegen::Program>> {
-    let codegen = codegen::Program::try_from(tacky)?;
+    let codegen = codegen::Program::from(tacky);
     if args.codegen {
         println!("Codegen:\n{:#?}", codegen);
         Ok(None)

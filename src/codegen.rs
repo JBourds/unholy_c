@@ -1,3 +1,4 @@
+use crate::asm::x64;
 use crate::tacky;
 use std::collections::HashMap;
 use std::fmt;
@@ -26,28 +27,138 @@ pub struct Function {
 
 impl From<tacky::Function> for Function {
     fn from(node: tacky::Function) -> Self {
-        let mut instructions: Vec<Instruction<Initial>> = node
-            .instructions
+        let tacky::Function {
+            name,
+            mut params,
+            instructions,
+        } = node;
+
+        let initial_instructions = {
+            let system_v_regs = [
+                Operand::Reg(Reg::X86 {
+                    reg: X86Reg::Di,
+                    section: RegSection::Dword,
+                }),
+                Operand::Reg(Reg::X86 {
+                    reg: X86Reg::Si,
+                    section: RegSection::Dword,
+                }),
+                Operand::Reg(Reg::X86 {
+                    reg: X86Reg::Dx,
+                    section: RegSection::Dword,
+                }),
+                Operand::Reg(Reg::X86 {
+                    reg: X86Reg::Cx,
+                    section: RegSection::Dword,
+                }),
+                Operand::Reg(Reg::X64 {
+                    reg: X64Reg::R8,
+                    section: RegSection::Dword,
+                }),
+                Operand::Reg(Reg::X64 {
+                    reg: X64Reg::R9,
+                    section: RegSection::Dword,
+                }),
+            ];
+
+            let (reg_args, stack_args) = {
+                let to_drain = std::cmp::min(system_v_regs.len(), params.len());
+                let reg_args = params
+                    .drain(..to_drain)
+                    .collect::<Vec<Option<Rc<String>>>>();
+                let stack_args = params.drain(..);
+                (reg_args, stack_args)
+            };
+
+            let mut v = vec![
+                Instruction::<Initial>::new(InstructionType::Push(Operand::Reg(Reg::X86 {
+                    reg: X86Reg::Bp,
+                    section: RegSection::Qword,
+                }))),
+                Instruction::<Initial>::new(InstructionType::Mov {
+                    src: Operand::Reg(Reg::X86 {
+                        reg: X86Reg::Sp,
+                        section: RegSection::Qword,
+                    }),
+                    dst: Operand::Reg(Reg::X86 {
+                        reg: X86Reg::Bp,
+                        section: RegSection::Qword,
+                    }),
+                }),
+                Instruction::<Initial>::new(InstructionType::AllocStack(0)),
+            ];
+
+            for (src_reg, dst_arg) in
+                std::iter::zip(system_v_regs.into_iter(), reg_args.into_iter())
+            {
+                if let Some(name) = dst_arg {
+                    v.push(Instruction::<Initial>::new(InstructionType::Mov {
+                        src: src_reg,
+                        dst: Operand::Pseudo { name, size: 4 },
+                    }));
+                }
+            }
+
+            for (i, stack_arg) in stack_args.into_iter().enumerate() {
+                if let Some(name) = stack_arg {
+                    v.push(Instruction::<Initial>::new(InstructionType::Mov {
+                        src: Operand::StackOffset {
+                            offset: 16 + i * 8,
+                            size: 4,
+                        },
+                        dst: Operand::Pseudo { name, size: 4 },
+                    }));
+                }
+            }
+            v
+        };
+
+        let mut instructions: Vec<Instruction<Initial>> = instructions
             .into_iter()
             .map(Vec::<Instruction<Initial>>::from)
-            .fold(
-                vec![Instruction::<Initial>::new(InstructionType::AllocStack(0))],
-                |mut unrolled, result| {
-                    unrolled.extend(result);
-                    unrolled
-                },
-            );
+            .fold(initial_instructions, |mut unrolled, result| {
+                unrolled.extend(result);
+                unrolled
+            });
 
         // Get stack offsets for each pseudoregister as we fix them up
         let mut stack_offsets = HashMap::new();
         let mut stack_bound = 0;
+        let mut requires_fixup = vec![];
         let mut fixed_instructions: Vec<Instruction<Offset>> = instructions
             .drain(..)
-            .map(|instr| Instruction::<Offset>::new(instr, &mut stack_offsets, &mut stack_bound))
+            .enumerate()
+            .map(|(i, instr)| {
+                let (instr, needs_fixing) =
+                    Instruction::<Offset>::new(instr, &mut stack_offsets, &mut stack_bound);
+                if needs_fixing {
+                    requires_fixup.push(i);
+                }
+                instr
+            })
             .collect();
 
         // Setup stack prologue
-        fixed_instructions[0].op = InstructionType::AllocStack(stack_bound);
+        // Sixteen byte alignment is required
+        stack_bound += match stack_bound % 16 {
+            0 => 0,
+            remainder => 16 - remainder,
+        };
+        fixed_instructions[2].op = InstructionType::AllocStack(stack_bound);
+
+        for i in requires_fixup {
+            let instr = match fixed_instructions[i].op.clone() {
+                InstructionType::Mov { src, dst } => {
+                    let src = match src {
+                        Operand::StackOffset { offset, size } => Operand::StackOffset { offset: offset + stack_bound,  size },
+                        _ => unreachable!("This applies to args passed on the stack only")
+                    };
+                    InstructionType::Mov { src , dst  }
+                },
+                _ => unreachable!("We should only be fixing up mov instructions which are used to allocate this current functions args"),
+            };
+            fixed_instructions[i].op = instr;
+        }
 
         let final_instructions: Vec<Instruction<Final>> = fixed_instructions
             .drain(..)
@@ -58,13 +169,13 @@ impl From<tacky::Function> for Function {
             });
 
         Function {
-            name: Rc::clone(&node.name),
+            name,
             instructions: final_instructions,
         }
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum UnaryOp {
     Negate,
     Complement,
@@ -89,7 +200,7 @@ impl From<tacky::UnaryOp> for UnaryOp {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum BinaryOp {
     Add,
     Subtract,
@@ -263,7 +374,7 @@ impl fmt::Display for Reg {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum CondCode {
     E,
     NE,
@@ -309,7 +420,7 @@ struct Offset;
 #[derive(Debug, PartialEq)]
 pub struct Final;
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum InstructionType {
     Mov {
         src: Operand,
@@ -367,9 +478,10 @@ impl Instruction<Offset> {
         instruction: Instruction<Initial>,
         stack_offsets: &mut HashMap<Rc<String>, usize>,
         stack_bound: &mut usize,
-    ) -> Self {
-        let mut convert_operand_offset = |op| {
-            if let Operand::Pseudo { ref name, size } = op {
+    ) -> (Self, bool) {
+        let mut needs_fixing = false;
+        let mut convert_operand_offset = |op| match op {
+            Operand::Pseudo { ref name, size } => {
                 let offset = stack_offsets.entry(Rc::clone(name)).or_insert_with(|| {
                     *stack_bound += size;
                     *stack_bound
@@ -379,39 +491,46 @@ impl Instruction<Offset> {
                     offset: *offset,
                     size,
                 }
-            } else {
-                op
             }
+            Operand::StackOffset { offset, size } => {
+                needs_fixing = true;
+                Operand::StackOffset { offset, size }
+            }
+            _ => op,
         };
 
-        Self {
-            op: match instruction.op {
-                InstructionType::Mov { src, dst } => InstructionType::Mov {
-                    src: convert_operand_offset(src),
-                    dst: convert_operand_offset(dst),
+        (
+            Self {
+                op: match instruction.op {
+                    InstructionType::Mov { src, dst } => InstructionType::Mov {
+                        src: convert_operand_offset(src),
+                        dst: convert_operand_offset(dst),
+                    },
+                    InstructionType::Unary { op, dst } => InstructionType::Unary {
+                        op,
+                        dst: convert_operand_offset(dst),
+                    },
+                    InstructionType::Binary { op, src1, src2 } => InstructionType::Binary {
+                        op,
+                        src1: convert_operand_offset(src1),
+                        src2: convert_operand_offset(src2),
+                    },
+                    InstructionType::Idiv(op) => InstructionType::Idiv(convert_operand_offset(op)),
+                    InstructionType::Cmp { src, dst } => InstructionType::Cmp {
+                        src: convert_operand_offset(src),
+                        dst: convert_operand_offset(dst),
+                    },
+                    InstructionType::SetCC { cond_code, dst } => InstructionType::SetCC {
+                        cond_code,
+                        dst: convert_operand_offset(dst),
+                    },
+                    InstructionType::Push(op) => InstructionType::Push(convert_operand_offset(op)),
+                    instr => instr,
                 },
-                InstructionType::Unary { op, dst } => InstructionType::Unary {
-                    op,
-                    dst: convert_operand_offset(dst),
-                },
-                InstructionType::Binary { op, src1, src2 } => InstructionType::Binary {
-                    op,
-                    src1: convert_operand_offset(src1),
-                    src2: convert_operand_offset(src2),
-                },
-                InstructionType::Idiv(op) => InstructionType::Idiv(convert_operand_offset(op)),
-                InstructionType::Cmp { src, dst } => InstructionType::Cmp {
-                    src: convert_operand_offset(src),
-                    dst: convert_operand_offset(dst),
-                },
-                InstructionType::SetCC { cond_code, dst } => InstructionType::SetCC {
-                    cond_code,
-                    dst: convert_operand_offset(dst),
-                },
-                instr => instr,
+                phantom: PhantomData::<Offset>,
             },
-            phantom: PhantomData::<Offset>,
-        }
+            needs_fixing,
+        )
     }
 }
 
@@ -795,12 +914,126 @@ impl From<tacky::Instruction> for Vec<Instruction<Initial>> {
             tacky::Instruction::Label(label) => {
                 vec![new_instr(InstructionType::Label(label))]
             }
-            tacky::Instruction::FunCall { name, args, dst } => todo!(),
+            tacky::Instruction::FunCall {
+                name,
+                mut args,
+                dst,
+            } => {
+                let system_v_regs = [
+                    Operand::Reg(Reg::X86 {
+                        reg: X86Reg::Di,
+                        section: RegSection::Dword,
+                    }),
+                    Operand::Reg(Reg::X86 {
+                        reg: X86Reg::Si,
+                        section: RegSection::Dword,
+                    }),
+                    Operand::Reg(Reg::X86 {
+                        reg: X86Reg::Dx,
+                        section: RegSection::Dword,
+                    }),
+                    Operand::Reg(Reg::X86 {
+                        reg: X86Reg::Cx,
+                        section: RegSection::Dword,
+                    }),
+                    Operand::Reg(Reg::X64 {
+                        reg: X64Reg::R8,
+                        section: RegSection::Dword,
+                    }),
+                    Operand::Reg(Reg::X64 {
+                        reg: X64Reg::R9,
+                        section: RegSection::Dword,
+                    }),
+                ];
+
+                let (reg_args, stack_args) = {
+                    let to_drain = std::cmp::min(system_v_regs.len(), args.len());
+                    let reg_args = args.drain(..to_drain).collect::<Vec<tacky::Val>>();
+                    let stack_args = args.drain(..);
+                    (reg_args, stack_args)
+                };
+
+                let num_stack_args = stack_args.len();
+
+                let stack_padding = match num_stack_args % 2 == 0 {
+                    true => 0,
+                    false => 8,
+                };
+
+                let mut v = vec![];
+
+                if stack_padding != 0 {
+                    v.push(new_instr(InstructionType::AllocStack(stack_padding)));
+                }
+                for (dst_reg, src_arg) in
+                    std::iter::zip(system_v_regs.into_iter(), reg_args.into_iter())
+                {
+                    v.push(new_instr(InstructionType::Mov {
+                        src: src_arg.into(),
+                        dst: dst_reg,
+                    }));
+                }
+
+                for arg in stack_args.into_iter().rev() {
+                    match arg.into() {
+                        Operand::Imm(i) => {
+                            v.push(new_instr(InstructionType::Push(Operand::Imm(i))))
+                        }
+                        Operand::Reg(r) => {
+                            v.push(new_instr(InstructionType::Push(Operand::Reg(r))))
+                        }
+                        Operand::Pseudo { name, size } => {
+                            v.extend([
+                                new_instr(InstructionType::Mov {
+                                    src: Operand::Pseudo { name, size },
+                                    dst: Operand::Reg(Reg::X86 {
+                                        reg: X86Reg::Ax,
+                                        section: RegSection::Dword,
+                                    }),
+                                }),
+                                new_instr(InstructionType::Push(Operand::Reg(Reg::X86 {
+                                    reg: X86Reg::Ax,
+                                    section: RegSection::Dword,
+                                }))),
+                            ]);
+                        }
+                        Operand::StackOffset { offset, size } => {
+                            v.extend([
+                                new_instr(InstructionType::Mov {
+                                    src: Operand::StackOffset { offset, size },
+                                    dst: Operand::Reg(Reg::X86 {
+                                        reg: X86Reg::Ax,
+                                        section: RegSection::Dword,
+                                    }),
+                                }),
+                                new_instr(InstructionType::Push(Operand::Reg(Reg::X86 {
+                                    reg: X86Reg::Ax,
+                                    section: RegSection::Dword,
+                                }))),
+                            ]);
+                        }
+                    }
+                }
+                v.push(new_instr(InstructionType::Call(name)));
+
+                let bytes_to_remove = 8 * num_stack_args + stack_padding;
+                if bytes_to_remove != 0 {
+                    v.push(new_instr(InstructionType::DeAllocStack(bytes_to_remove)));
+                }
+                v.push(new_instr(InstructionType::Mov {
+                    src: Operand::Reg(Reg::X86 {
+                        reg: X86Reg::Ax,
+                        section: RegSection::Dword,
+                    }),
+                    dst: dst.into(),
+                }));
+                v
+            }
         }
     }
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Operand {
     Imm(i32),
     Reg(Reg),

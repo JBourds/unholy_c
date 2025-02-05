@@ -133,6 +133,9 @@ pub mod x64 {
             codegen::InstructionType::Label(label) => {
                 w.write_fmt(format_args!(".L{label}:\n",))?;
             }
+            codegen::InstructionType::DeAllocStack(size) => todo!(),
+            codegen::InstructionType::Push(op) => todo!(),
+            codegen::InstructionType::Call(name) => todo!(),
         }
         Ok(())
     }

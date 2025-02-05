@@ -352,6 +352,9 @@ pub enum InstructionType {
     },
     Label(Rc<String>),
     AllocStack(usize),
+    DeAllocStack(usize),
+    Push(Operand),
+    Call(Rc<String>),
     Ret,
 }
 

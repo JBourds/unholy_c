@@ -1,4 +1,3 @@
-use crate::asm::x64;
 use crate::tacky;
 use std::collections::HashMap;
 use std::fmt;

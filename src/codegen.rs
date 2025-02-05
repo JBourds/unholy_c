@@ -1,5 +1,4 @@
 use crate::tacky;
-use anyhow::{Context, Error, Result};
 use std::collections::HashMap;
 use std::fmt;
 use std::marker::PhantomData;
@@ -10,18 +9,12 @@ pub struct Program {
     pub functions: Vec<Function>,
 }
 
-impl TryFrom<tacky::Program> for Program {
-    type Error = anyhow::Error;
-    fn try_from(node: tacky::Program) -> Result<Self> {
-        let valid_functions = node
-            .functions
-            .into_iter()
-            .map(Function::try_from)
-            .collect::<Result<Vec<Function>, Error>>()
-            .context("Failed to compile intermediate representation into assembly nodes.")?;
-        Ok(Program {
+impl From<tacky::Program> for Program {
+    fn from(node: tacky::Program) -> Self {
+        let valid_functions = node.functions.into_iter().map(Function::from).collect();
+        Program {
             functions: valid_functions,
-        })
+        }
     }
 }
 
@@ -31,23 +24,19 @@ pub struct Function {
     pub instructions: Vec<Instruction<Final>>,
 }
 
-impl TryFrom<tacky::Function> for Function {
-    type Error = anyhow::Error;
-    fn try_from(node: tacky::Function) -> Result<Self> {
+impl From<tacky::Function> for Function {
+    fn from(node: tacky::Function) -> Self {
         let mut instructions: Vec<Instruction<Initial>> = node
             .instructions
             .into_iter()
-            .map(Vec::<Instruction<Initial>>::try_from)
-            .try_fold(
+            .map(Vec::<Instruction<Initial>>::from)
+            .fold(
                 vec![Instruction::<Initial>::new(InstructionType::AllocStack(0))],
                 |mut unrolled, result| {
-                    unrolled.extend(result.context(
-                        "Failed to parse assembly function from intermediate representation.",
-                    )?);
-                    Ok::<Vec<Instruction<Initial>>, Self::Error>(unrolled)
+                    unrolled.extend(result);
+                    unrolled
                 },
-            )
-            .context("Failed to generate function definition from statements.")?;
+            );
 
         // Get stack offsets for each pseudoregister as we fix them up
         let mut stack_offsets = HashMap::new();
@@ -68,10 +57,10 @@ impl TryFrom<tacky::Function> for Function {
                 v
             });
 
-        Ok(Function {
+        Function {
             name: Rc::clone(&node.name),
             instructions: final_instructions,
-        })
+        }
     }
 }
 

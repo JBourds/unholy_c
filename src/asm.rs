@@ -82,9 +82,10 @@ pub mod x64 {
                 w.write_fmt(format_args!("\t{op} {}{dst}\n", get_specifier(None, dst)))?
             }
             codegen::InstructionType::AllocStack(size) => {
-                w.write_str("\tpush rbp\n")?;
-                w.write_str("\tmov rbp, rsp\n")?;
-                w.write_fmt(format_args!("\tsub rsp, {}\n", size))?;
+                w.write_fmt(format_args!("\tsub rsp, {size}\n"))?;
+            }
+            codegen::InstructionType::DeAllocStack(size) => {
+                w.write_fmt(format_args!("\tadd rsp, {size}\n"))?;
             }
             codegen::InstructionType::Binary {
                 op,
@@ -133,9 +134,12 @@ pub mod x64 {
             codegen::InstructionType::Label(label) => {
                 w.write_fmt(format_args!(".L{label}:\n",))?;
             }
-            codegen::InstructionType::DeAllocStack(_size) => todo!(),
-            codegen::InstructionType::Push(_op) => todo!(),
-            codegen::InstructionType::Call(_name) => todo!(),
+            codegen::InstructionType::Push(op) => {
+                w.write_fmt(format_args!("\tpush {op}\n"))?;
+            }
+            codegen::InstructionType::Call(name) => {
+                w.write_fmt(format_args!("\tcall {name}@PLT\n"))?;
+            }
         }
         Ok(())
     }

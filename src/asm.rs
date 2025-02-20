@@ -127,6 +127,11 @@ pub mod x64 {
                 w.write_fmt(format_args!("\tj{cond_code} .L{identifier}\n",))?;
             }
             codegen::InstructionType::SetCC { cond_code, dst } => {
+                let dst = match dst {
+                    codegen::Operand::Reg(r) => codegen::Operand::Reg(r.as_section(codegen::RegSection::LowByte)),
+                    codegen::Operand::StackOffset { offset, .. } => codegen::Operand::StackOffset { offset, size: 1 },
+                    _ => dst
+                };
                 w.write_fmt(format_args!(
                     "\tset{cond_code} {}{dst}\n",
                     get_specifier(None, &dst)

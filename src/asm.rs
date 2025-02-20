@@ -142,13 +142,9 @@ pub mod x64 {
                 //  - Registers have to be rewritten as their 64-bit equivalents here (Annoying)
                 // Clone since we do have to mutate register section
                 let mut op = op.clone();
-                match &mut op {
-                    codegen::Operand::Reg(codegen::Reg::X86 { section, .. })
-                    | codegen::Operand::Reg(codegen::Reg::X64 { section, .. }) => {
-                        *section = codegen::RegSection::Qword;
-                    }
-                    _ => {}
-                };
+                if let codegen::Operand::Reg(r) = op {
+                    op = codegen::Operand::Reg(r.as_section(codegen::RegSection::Qword))
+                }
                 w.write_fmt(format_args!("\tpush {}{op}\n", get_specifier(None, &op)))?;
             }
             codegen::InstructionType::Call(name) => {

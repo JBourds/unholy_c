@@ -331,6 +331,13 @@ impl Reg {
             Self::X64 { reg: _, section } => section.size(),
         }
     }
+
+    pub fn as_section(self, section: RegSection) -> Self {
+        match self {
+            Self::X86 { reg, .. } => Self::X86 { reg, section },
+            Self::X64 { reg, .. } => Self::X64 { reg, section },
+        }
+    }
 }
 
 impl fmt::Display for Reg {

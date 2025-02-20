@@ -44,6 +44,7 @@ pub mod x64 {
         for instr in function.instructions.iter() {
             gen_instruction(w, &instr.op)?;
         }
+        w.write_char('\n')?;
 
         Ok(())
     }

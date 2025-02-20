@@ -308,8 +308,8 @@ impl Instruction {
                     let Some((name, count)) = label.as_str().split_once('.') else {
                         unreachable!("label should always be name.count");
                     };
-                    let else_label = format!("{name}.{count}.else");
-                    let end_label = format!("{name}.{count}.end");
+                    let else_label = format!("{name}.{count}.if_else");
+                    let end_label = format!("{name}.{count}.if_end");
                     (Rc::new(else_label), Rc::new(end_label))
                 };
                 let Expr {
@@ -538,8 +538,8 @@ impl Expr {
                         let mut label = make_temp_var();
                         // FIXME: make_temp_var() should support making label names
                         label.push_str(match op {
-                            ast::BinaryOp::And => ".false_label",
-                            ast::BinaryOp::Or => ".true_label",
+                            ast::BinaryOp::And => ".binary_false_label",
+                            ast::BinaryOp::Or => ".binary_true_label",
                             _ => unreachable!(),
                         });
                         label.into()
@@ -572,7 +572,7 @@ impl Expr {
                     let end = {
                         // FIXME: Support label use case
                         let mut end = make_temp_var();
-                        end.push_str(".end");
+                        end.push_str(".binary_end_label");
                         end.into()
                     };
 
@@ -692,8 +692,8 @@ impl Expr {
                     let Some((name, count)) = label.as_str().split_once('.') else {
                         unreachable!("label should always be name.count");
                     };
-                    let e2_label = format!("{name}.{count}.e2");
-                    let end_label = format!("{name}.{count}.end");
+                    let e2_label = format!("{name}.{count}.cond_e2");
+                    let end_label = format!("{name}.{count}.cond_end");
                     (Rc::new(label), Rc::new(e2_label), Rc::new(end_label))
                 };
                 let Expr {

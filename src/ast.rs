@@ -87,12 +87,12 @@ impl From<&FunDecl> for Type {
     }
 }
 
+type ParameterList = Vec<(Type, Option<Rc<String>>)>;
+
 impl FunDecl {
     /// Parses [ <type> [name] ]*.
     /// Does not consume opening or closing parentheses
-    fn parse_parameter_list(
-        tokens: &[Token],
-    ) -> Result<(Vec<(Type, Option<Rc<String>>)>, &[Token])> {
+    fn parse_parameter_list(tokens: &[Token]) -> Result<(ParameterList, &[Token])> {
         let mut signature = vec![];
         let remaining = match tokens {
             [Token::RParen, ..] => tokens,

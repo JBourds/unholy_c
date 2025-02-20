@@ -11,7 +11,7 @@ pub trait AsmGen<W> {
 pub mod x64 {
     use super::AsmGen;
     use crate::codegen::{self, Operand};
-    use anyhow::Result;
+    use anyhow::{bail, Result};
     use std::fmt::Write;
 
     pub struct Generator;
@@ -29,7 +29,7 @@ pub mod x64 {
     fn gen_program(w: &mut impl Write, program: codegen::Program) -> Result<()> {
         w.write_str("\t.intel_syntax noprefix\n\n")?;
 
-        for f in program.functions.iter() {
+        for f in program.functions.into_iter() {
             gen_function(w, f)?;
         }
 
@@ -37,19 +37,19 @@ pub mod x64 {
         Ok(())
     }
 
-    fn gen_function(w: &mut impl Write, function: &codegen::Function) -> Result<()> {
+    fn gen_function(w: &mut impl Write, function: codegen::Function) -> Result<()> {
         w.write_fmt(format_args!("\t.globl {}\n", function.name))?;
         w.write_fmt(format_args!("{}:\n", function.name))?;
 
-        for instr in function.instructions.iter() {
-            gen_instruction(w, &instr.op)?;
+        for instr in function.instructions.into_iter() {
+            gen_instruction(w, instr.op)?;
         }
         w.write_char('\n')?;
 
         Ok(())
     }
 
-    fn gen_instruction(w: &mut impl Write, instr: &codegen::InstructionType) -> Result<()> {
+    fn gen_instruction(w: &mut impl Write, instr: codegen::InstructionType) -> Result<()> {
         let get_specifier = |src: Option<&Operand>, dst: &Operand| {
             let size = match (src, dst) {
                 (None, Operand::StackOffset { size, .. })
@@ -71,7 +71,7 @@ pub mod x64 {
             codegen::InstructionType::Mov { src, dst } => {
                 w.write_fmt(format_args!(
                     "\tmov {}{dst}, {src}\n",
-                    get_specifier(Some(src), dst)
+                    get_specifier(Some(&src), &dst)
                 ))?;
             }
             codegen::InstructionType::Ret => {
@@ -80,7 +80,7 @@ pub mod x64 {
                 w.write_str("\tret\n")?;
             }
             codegen::InstructionType::Unary { op, dst } => {
-                w.write_fmt(format_args!("\t{op} {}{dst}\n", get_specifier(None, dst)))?
+                w.write_fmt(format_args!("\t{op} {}{dst}\n", get_specifier(None, &dst)))?
             }
             codegen::InstructionType::AllocStack(size) => {
                 w.write_fmt(format_args!("\tsub rsp, {size}\n"))?;
@@ -98,9 +98,9 @@ pub mod x64 {
                 // the data it points to
                 let specifier = match op {
                     codegen::BinaryOp::LShift | codegen::BinaryOp::RShift => {
-                        get_specifier(None, dst)
+                        get_specifier(None, &dst)
                     }
-                    _ => get_specifier(Some(src), dst),
+                    _ => get_specifier(Some(&src), &dst),
                 };
                 w.write_fmt(format_args!("\t{op} {specifier}{dst}, {src}\n",))?
             }
@@ -109,12 +109,12 @@ pub mod x64 {
             }
             codegen::InstructionType::Idiv(operand) => w.write_fmt(format_args!(
                 "\tidiv {}{operand}\n",
-                get_specifier(None, operand)
+                get_specifier(None, &operand)
             ))?,
             codegen::InstructionType::Cmp { src, dst } => {
                 w.write_fmt(format_args!(
                     "\tcmp {}{dst}, {src}\n",
-                    get_specifier(Some(src), dst)
+                    get_specifier(Some(&src), &dst)
                 ))?;
             }
             codegen::InstructionType::Jmp(label) => {
@@ -129,23 +129,37 @@ pub mod x64 {
             codegen::InstructionType::SetCC { cond_code, dst } => {
                 w.write_fmt(format_args!(
                     "\tset{cond_code} {}{dst}\n",
-                    get_specifier(None, dst)
+                    get_specifier(None, &dst)
                 ))?;
             }
             codegen::InstructionType::Label(label) => {
                 w.write_fmt(format_args!(".L{label}:\n",))?;
             }
+            // Push and pop instruction works with 64-bit arguments. This means:
+            //  - Constants will be pushed as 8-bytes (Ok)
+            //  - Memory offsets < 8-bytes will include garbage after (Not great, but alright)
+            //  - Registers have to be rewritten as their 64-bit equivalents here (Annoying)
+            // Clone since we do have to mutate register section
             codegen::InstructionType::Push(op) => {
-                // Push instruction works with 64-bit arguments. This means:
-                //  - Constants will be pushed as 8-bytes (Ok)
-                //  - Memory offsets < 8-bytes will include garbage after (Not great, but alright)
-                //  - Registers have to be rewritten as their 64-bit equivalents here (Annoying)
-                // Clone since we do have to mutate register section
-                let mut op = op.clone();
-                if let codegen::Operand::Reg(r) = op {
-                    op = codegen::Operand::Reg(r.as_section(codegen::RegSection::Qword))
-                }
+                let op = if let codegen::Operand::Reg(r) = op {
+                    codegen::Operand::Reg(r.as_section(codegen::RegSection::Qword))
+                } else { 
+                    op 
+                };
                 w.write_fmt(format_args!("\tpush {}{op}\n", get_specifier(None, &op)))?;
+            }
+            codegen::InstructionType::Pop(op) => {
+                match op {
+                    codegen::Operand::Reg(_) | codegen::Operand::StackOffset { .. } => {
+                        let op = if let codegen::Operand::Reg(r) = op {
+                            codegen::Operand::Reg(r.as_section(codegen::RegSection::Qword))
+                        } else { 
+                            op 
+                        };
+                        w.write_fmt(format_args!("\tpop {}{op}\n", get_specifier(None, &op)))?;
+                    }
+                    _ => bail!("Cannot push stack to argument {} which is neither a register nor a memory location.", op)
+                }
             }
             codegen::InstructionType::Call(name) => {
                 w.write_fmt(format_args!("\tcall {name}@PLT\n"))?;

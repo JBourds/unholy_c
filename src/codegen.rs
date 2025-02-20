@@ -460,6 +460,8 @@ pub enum InstructionType {
     AllocStack(usize),
     DeAllocStack(usize),
     Push(Operand),
+    // Invariant: Can only pop to a register or stack offset
+    Pop(Operand),
     Call(Rc<String>),
     Ret,
 }
@@ -960,6 +962,7 @@ impl From<tacky::Instruction> for Vec<Instruction<Initial>> {
                 };
 
                 let num_stack_args = stack_args.len();
+                let num_reg_args = reg_args.len();
 
                 let stack_padding = match num_stack_args % 2 == 0 {
                     true => 0,
@@ -971,12 +974,14 @@ impl From<tacky::Instruction> for Vec<Instruction<Initial>> {
                 if stack_padding != 0 {
                     v.push(new_instr(InstructionType::AllocStack(stack_padding)));
                 }
-                for (dst_reg, src_arg) in
-                    std::iter::zip(system_v_regs.into_iter(), reg_args.into_iter())
+                for dst_reg in system_v_regs.iter().take(num_reg_args) {
+                    v.push(new_instr(InstructionType::Push(dst_reg.clone())));
+                }
+                for (dst_reg, src_arg) in std::iter::zip(system_v_regs.iter(), reg_args.into_iter())
                 {
                     v.push(new_instr(InstructionType::Mov {
                         src: src_arg.into(),
-                        dst: dst_reg,
+                        dst: dst_reg.clone(),
                     }));
                 }
 
@@ -1026,6 +1031,11 @@ impl From<tacky::Instruction> for Vec<Instruction<Initial>> {
                 v.push(new_instr(InstructionType::Call(name)));
 
                 let bytes_to_remove = 8 * num_stack_args + stack_padding;
+
+                // Pop saved registers
+                for dst_reg in system_v_regs.into_iter().take(num_reg_args) {
+                    v.push(new_instr(InstructionType::Pop(dst_reg)));
+                }
                 if bytes_to_remove != 0 {
                     v.push(new_instr(InstructionType::DeAllocStack(bytes_to_remove)));
                 }

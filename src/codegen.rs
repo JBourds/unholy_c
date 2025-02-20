@@ -978,6 +978,9 @@ impl From<tacky::Instruction> for Vec<Instruction<Initial>> {
                         Operand::Imm(i) => {
                             v.push(new_instr(InstructionType::Push(Operand::Imm(i))))
                         }
+                        // NOTE: If we go to push a non-64 bit register here,
+                        // it will need to be rewritten in emission as pushing
+                        // the full 64-bit register
                         Operand::Reg(r) => {
                             v.push(new_instr(InstructionType::Push(Operand::Reg(r))))
                         }

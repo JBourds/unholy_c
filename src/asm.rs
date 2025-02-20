@@ -135,7 +135,20 @@ pub mod x64 {
                 w.write_fmt(format_args!(".L{label}:\n",))?;
             }
             codegen::InstructionType::Push(op) => {
-                w.write_fmt(format_args!("\tpush {op}\n"))?;
+                // Push instruction works with 64-bit arguments. This means:
+                //  - Constants will be pushed as 8-bytes (Ok)
+                //  - Memory offsets < 8-bytes will include garbage after (Not great, but alright)
+                //  - Registers have to be rewritten as their 64-bit equivalents here (Annoying)
+                // Clone since we do have to mutate register section
+                let mut op = op.clone();
+                match &mut op {
+                    codegen::Operand::Reg(codegen::Reg::X86 { section, .. })
+                    | codegen::Operand::Reg(codegen::Reg::X64 { section, .. }) => {
+                        *section = codegen::RegSection::Qword;
+                    }
+                    _ => {}
+                };
+                w.write_fmt(format_args!("\tpush {}{op}\n", get_specifier(None, &op)))?;
             }
             codegen::InstructionType::Call(name) => {
                 w.write_fmt(format_args!("\tcall {name}@PLT\n"))?;

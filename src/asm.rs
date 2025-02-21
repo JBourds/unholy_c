@@ -148,8 +148,8 @@ pub mod x64 {
             codegen::InstructionType::Push(op) => {
                 let op = if let codegen::Operand::Reg(r) = op {
                     codegen::Operand::Reg(r.as_section(codegen::RegSection::Qword))
-                } else { 
-                    op 
+                } else {
+                    op
                 };
                 w.write_fmt(format_args!("\tpush {}{op}\n", get_specifier(None, &op)))?;
             }
@@ -158,8 +158,8 @@ pub mod x64 {
                     codegen::Operand::Reg(_) | codegen::Operand::StackOffset { .. } => {
                         let op = if let codegen::Operand::Reg(r) = op {
                             codegen::Operand::Reg(r.as_section(codegen::RegSection::Qword))
-                        } else { 
-                            op 
+                        } else {
+                            op
                         };
                         w.write_fmt(format_args!("\tpop {}{op}\n", get_specifier(None, &op)))?;
                     }

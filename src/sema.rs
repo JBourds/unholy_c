@@ -818,12 +818,12 @@ mod typechecking {
 mod gotos {
     use super::*;
     pub fn validate(stage: SemaStage<TypeChecking>) -> Result<SemaStage<GotoValidation>> {
-        let mut label_map = HashMap::new();
         let valid_functions = stage
             .program
             .functions
             .into_iter()
             .map(|f| {
+                let mut label_map = HashMap::new();
                 let block = if let Some(b) = f.block {
                     let b = resolve_block(b, &f.name, &mut label_map)?;
                     let b = validate_block(b, &mut label_map)?;
@@ -889,7 +889,7 @@ mod gotos {
                     label_map
                         .insert(Rc::clone(&name), Rc::clone(&new_name))
                         .is_none(),
-                    "Duplicate labels {name}."
+                    "Duplicate label \"{name}\" in function \"{func_name}\"."
                 );
                 Ok(ast::Stmt::Label {
                     name: new_name,

@@ -4,6 +4,33 @@ use std::fmt;
 use std::marker::PhantomData;
 use std::rc::Rc;
 
+const SYSTEM_V_REGS: [Operand; 6] = [
+    Operand::Reg(Reg::X86 {
+        reg: X86Reg::Di,
+        section: RegSection::Dword,
+    }),
+    Operand::Reg(Reg::X86 {
+        reg: X86Reg::Si,
+        section: RegSection::Dword,
+    }),
+    Operand::Reg(Reg::X86 {
+        reg: X86Reg::Dx,
+        section: RegSection::Dword,
+    }),
+    Operand::Reg(Reg::X86 {
+        reg: X86Reg::Cx,
+        section: RegSection::Dword,
+    }),
+    Operand::Reg(Reg::X64 {
+        reg: X64Reg::R8,
+        section: RegSection::Dword,
+    }),
+    Operand::Reg(Reg::X64 {
+        reg: X64Reg::R9,
+        section: RegSection::Dword,
+    }),
+];
+
 #[derive(Debug, PartialEq)]
 pub struct Program {
     pub functions: Vec<Function>,
@@ -29,107 +56,66 @@ impl From<tacky::Function> for Function {
         let tacky::Function {
             name,
             mut params,
-            instructions,
+            instructions: fun_instructions,
         } = node;
-
-        let initial_instructions = {
-            let system_v_regs = [
-                Operand::Reg(Reg::X86 {
-                    reg: X86Reg::Di,
-                    section: RegSection::Dword,
+        // Create the System V register/stack mappings here
+        let (reg_args, stack_args) = {
+            let to_drain = std::cmp::min(SYSTEM_V_REGS.len(), params.len());
+            let reg_args = params
+                .drain(..to_drain)
+                .collect::<Vec<Option<Rc<String>>>>();
+            let stack_args = params.drain(..);
+            (reg_args, stack_args)
+        };
+        let mut instructions = vec![
+            Instruction::<Initial>::new(InstructionType::Push(Operand::Reg(Reg::X86 {
+                reg: X86Reg::Bp,
+                section: RegSection::Qword,
+            }))),
+            Instruction::<Initial>::new(InstructionType::Mov {
+                src: Operand::Reg(Reg::X86 {
+                    reg: X86Reg::Sp,
+                    section: RegSection::Qword,
                 }),
-                Operand::Reg(Reg::X86 {
-                    reg: X86Reg::Si,
-                    section: RegSection::Dword,
-                }),
-                Operand::Reg(Reg::X86 {
-                    reg: X86Reg::Dx,
-                    section: RegSection::Dword,
-                }),
-                Operand::Reg(Reg::X86 {
-                    reg: X86Reg::Cx,
-                    section: RegSection::Dword,
-                }),
-                Operand::Reg(Reg::X64 {
-                    reg: X64Reg::R8,
-                    section: RegSection::Dword,
-                }),
-                Operand::Reg(Reg::X64 {
-                    reg: X64Reg::R9,
-                    section: RegSection::Dword,
-                }),
-            ];
-
-            let (reg_args, stack_args) = {
-                let to_drain = std::cmp::min(system_v_regs.len(), params.len());
-                let reg_args = params
-                    .drain(..to_drain)
-                    .collect::<Vec<Option<Rc<String>>>>();
-                let stack_args = params.drain(..);
-                (reg_args, stack_args)
-            };
-
-            let mut v = vec![
-                Instruction::<Initial>::new(InstructionType::Push(Operand::Reg(Reg::X86 {
+                dst: Operand::Reg(Reg::X86 {
                     reg: X86Reg::Bp,
                     section: RegSection::Qword,
-                }))),
-                Instruction::<Initial>::new(InstructionType::Mov {
-                    src: Operand::Reg(Reg::X86 {
-                        reg: X86Reg::Sp,
-                        section: RegSection::Qword,
-                    }),
-                    dst: Operand::Reg(Reg::X86 {
-                        reg: X86Reg::Bp,
-                        section: RegSection::Qword,
-                    }),
                 }),
-                Instruction::<Initial>::new(InstructionType::AllocStack(0)),
-            ];
+            }),
+            Instruction::<Initial>::new(InstructionType::AllocStack(0)),
+        ];
+        for instr in fun_instructions.into_iter() {
+            instructions.extend(Vec::<Instruction<Initial>>::from(instr));
+        }
 
-            for (src_reg, dst_arg) in
-                std::iter::zip(system_v_regs.into_iter(), reg_args.into_iter())
-            {
-                if let Some(name) = dst_arg {
-                    v.push(Instruction::<Initial>::new(InstructionType::Mov {
-                        src: src_reg,
-                        dst: Operand::Pseudo { name, size: 4 },
-                    }));
-                }
-            }
-
-            for (i, stack_arg) in stack_args.into_iter().enumerate() {
-                if let Some(name) = stack_arg {
-                    v.push(Instruction::<Initial>::new(InstructionType::Mov {
-                        src: Operand::StackOffset {
-                            offset: 16 + i * 8,
-                            size: 4,
-                        },
-                        dst: Operand::Pseudo { name, size: 4 },
-                    }));
-                }
-            }
-            v
-        };
-
-        let mut instructions: Vec<Instruction<Initial>> = instructions
-            .into_iter()
-            .map(Vec::<Instruction<Initial>>::from)
-            .fold(initial_instructions, |mut unrolled, result| {
-                unrolled.extend(result);
-                unrolled
-            });
+        let mut mappings = HashMap::new();
+        // We always start with a stack bound of 8 for RBP
+        // Stack arg sizes are hardcoded currently
+        let mut stack_bound = 8;
+        for arg in stack_args.rev().flatten() {
+            stack_bound += 8;
+            mappings.insert(
+                arg,
+                Operand::StackOffset {
+                    offset: stack_bound,
+                    size: 4,
+                },
+            );
+        }
+        for (reg_arg, src) in std::iter::zip(reg_args.into_iter().flatten(), SYSTEM_V_REGS.iter()) {
+            mappings.insert(reg_arg, src.clone());
+        }
 
         // Get stack offsets for each pseudoregister as we fix them up
-        let mut stack_offsets = HashMap::new();
-        let mut stack_bound = 0;
+        // Start moving down for arguments & temp vars used here
+        stack_bound = 0;
         let mut requires_fixup = vec![];
         let mut fixed_instructions: Vec<Instruction<Offset>> = instructions
             .drain(..)
             .enumerate()
             .map(|(i, instr)| {
                 let (instr, needs_fixing) =
-                    Instruction::<Offset>::new(instr, &mut stack_offsets, &mut stack_bound);
+                    Instruction::<Offset>::new(instr, &mut mappings, &mut stack_bound);
                 if needs_fixing {
                     requires_fixup.push(i);
                 }
@@ -143,16 +129,16 @@ impl From<tacky::Function> for Function {
             0 => 0,
             remainder => 16 - remainder,
         };
-        fixed_instructions[2].op = InstructionType::AllocStack(stack_bound);
+        fixed_instructions[2].op = InstructionType::AllocStack(stack_bound as usize);
 
         for i in requires_fixup {
             let instr = match fixed_instructions[i].op.clone() {
                 InstructionType::Mov { src, dst } => {
                     let src = match src {
-                        Operand::StackOffset { offset, size } => Operand::StackOffset { offset: offset + stack_bound,  size },
+                        Operand::StackOffset { offset, size } => Operand::StackOffset { offset: offset + stack_bound, size },
                         _ => unreachable!("This applies to args passed on the stack only")
                     };
-                    InstructionType::Mov { src , dst  }
+                    InstructionType::Mov { src , dst }
                 },
                 _ => unreachable!("We should only be fixing up mov instructions which are used to allocate this current functions args"),
             };
@@ -484,25 +470,24 @@ impl Instruction<Initial> {
 impl Instruction<Offset> {
     fn new(
         instruction: Instruction<Initial>,
-        stack_offsets: &mut HashMap<Rc<String>, usize>,
-        stack_bound: &mut usize,
+        mappings: &mut HashMap<Rc<String>, Operand>,
+        stack_bound: &mut isize,
     ) -> (Self, bool) {
         let mut needs_fixing = false;
         let mut convert_operand_offset = |op| match op {
-            Operand::Pseudo { ref name, size } => {
-                let offset = stack_offsets.entry(Rc::clone(name)).or_insert_with(|| {
-                    *stack_bound += size;
-                    *stack_bound
-                });
-
-                Operand::StackOffset {
-                    offset: *offset,
-                    size,
-                }
-            }
-            Operand::StackOffset { offset, size } => {
+            Operand::Pseudo { ref name, size } => mappings
+                .entry(Rc::clone(name))
+                .or_insert_with(|| {
+                    *stack_bound += size as isize;
+                    Operand::StackOffset {
+                        offset: -*stack_bound,
+                        size,
+                    }
+                })
+                .clone(),
+            op @ Operand::StackOffset { .. } => {
                 needs_fixing = true;
-                Operand::StackOffset { offset, size }
+                op
             }
             _ => op,
         };
@@ -927,35 +912,8 @@ impl From<tacky::Instruction> for Vec<Instruction<Initial>> {
                 mut args,
                 dst,
             } => {
-                let system_v_regs = [
-                    Operand::Reg(Reg::X86 {
-                        reg: X86Reg::Di,
-                        section: RegSection::Dword,
-                    }),
-                    Operand::Reg(Reg::X86 {
-                        reg: X86Reg::Si,
-                        section: RegSection::Dword,
-                    }),
-                    Operand::Reg(Reg::X86 {
-                        reg: X86Reg::Dx,
-                        section: RegSection::Dword,
-                    }),
-                    Operand::Reg(Reg::X86 {
-                        reg: X86Reg::Cx,
-                        section: RegSection::Dword,
-                    }),
-                    Operand::Reg(Reg::X64 {
-                        reg: X64Reg::R8,
-                        section: RegSection::Dword,
-                    }),
-                    Operand::Reg(Reg::X64 {
-                        reg: X64Reg::R9,
-                        section: RegSection::Dword,
-                    }),
-                ];
-
                 let (reg_args, stack_args) = {
-                    let to_drain = std::cmp::min(system_v_regs.len(), args.len());
+                    let to_drain = std::cmp::min(SYSTEM_V_REGS.len(), args.len());
                     let reg_args = args.drain(..to_drain).collect::<Vec<tacky::Val>>();
                     let stack_args = args.drain(..);
                     (reg_args, stack_args)
@@ -963,8 +921,7 @@ impl From<tacky::Instruction> for Vec<Instruction<Initial>> {
 
                 let num_stack_args = stack_args.len();
                 let num_reg_args = reg_args.len();
-
-                let stack_padding = match num_stack_args % 2 == 0 {
+                let stack_padding = match (num_reg_args + num_stack_args) % 2 == 0 {
                     true => 0,
                     false => 8,
                 };
@@ -974,10 +931,10 @@ impl From<tacky::Instruction> for Vec<Instruction<Initial>> {
                 if stack_padding != 0 {
                     v.push(new_instr(InstructionType::AllocStack(stack_padding)));
                 }
-                for dst_reg in system_v_regs.iter().take(num_reg_args) {
+                for dst_reg in SYSTEM_V_REGS.iter().take(num_reg_args) {
                     v.push(new_instr(InstructionType::Push(dst_reg.clone())));
                 }
-                for (dst_reg, src_arg) in std::iter::zip(system_v_regs.iter(), reg_args.into_iter())
+                for (dst_reg, src_arg) in std::iter::zip(SYSTEM_V_REGS.iter(), reg_args.into_iter())
                 {
                     v.push(new_instr(InstructionType::Mov {
                         src: src_arg.into(),
@@ -1030,12 +987,11 @@ impl From<tacky::Instruction> for Vec<Instruction<Initial>> {
                 }
                 v.push(new_instr(InstructionType::Call(name)));
 
-                let bytes_to_remove = 8 * num_stack_args + stack_padding;
-
-                // Pop saved registers
-                for dst_reg in system_v_regs.into_iter().take(num_reg_args) {
-                    v.push(new_instr(InstructionType::Pop(dst_reg)));
+                for dst_reg in SYSTEM_V_REGS.iter().take(num_reg_args).rev() {
+                    v.push(new_instr(InstructionType::Pop(dst_reg.clone())));
                 }
+
+                let bytes_to_remove = 8 * num_stack_args + stack_padding;
                 if bytes_to_remove != 0 {
                     v.push(new_instr(InstructionType::DeAllocStack(bytes_to_remove)));
                 }
@@ -1057,14 +1013,14 @@ pub enum Operand {
     Imm(i32),
     Reg(Reg),
     Pseudo { name: Rc<String>, size: usize },
-    StackOffset { offset: usize, size: usize },
+    StackOffset { offset: isize, size: usize },
 }
 
-// TODO: Unhardcode immediate size
+// TODO: Unhardcode immediate size- gets pushed as 8 bytes
 impl Operand {
     pub fn size(&self) -> usize {
         match self {
-            Self::Imm(_) => 4,
+            Self::Imm(_) => 8,
             Self::Reg(r) => r.size(),
             Self::Pseudo { size, .. } => *size,
             Self::StackOffset { size, .. } => *size,
@@ -1087,7 +1043,9 @@ impl fmt::Display for Operand {
         match self {
             Self::Imm(v) => write!(f, "{v}"),
             Self::Reg(r) => write!(f, "{r}"),
-            Self::StackOffset { offset, .. } => write!(f, "[rbp-{offset}]"),
+            Self::StackOffset { offset, .. } => {
+                write!(f, "[rbp{offset:+}]")
+            }
             Self::Pseudo { .. } => {
                 unreachable!("Cannot create asm representation for a pseudioregister.")
             }

@@ -92,7 +92,7 @@ impl From<tacky::Function> for Function {
         // We always start with a stack bound of 8 for RBP
         // Stack arg sizes are hardcoded currently
         let mut stack_bound = 8;
-        for arg in stack_args.rev().flatten() {
+        for arg in stack_args.flatten() {
             stack_bound += 8;
             mappings.insert(
                 arg,
@@ -934,11 +934,7 @@ impl From<tacky::Instruction> for Vec<Instruction<Initial>> {
 
                 let num_stack_args = stack_args.len();
                 let num_reg_args = reg_args.len();
-                let stack_padding = match (num_reg_args + num_stack_args) % 2 == 0 {
-                    true => 0,
-                    false => 8,
-                };
-
+                let stack_padding = if num_stack_args % 2 == 1 { 8 } else { 0 };
                 let mut v = vec![];
 
                 if stack_padding != 0 {

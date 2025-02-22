@@ -35,6 +35,9 @@ struct Args {
 
     #[arg(long)]
     asm: bool,
+
+    #[arg(short = 'c', long, default_value_t = false)]
+    c: bool,
 }
 
 fn main() -> Result<()> {
@@ -126,7 +129,7 @@ fn validate_ast(args: &Args, ast: ast::Program) -> Result<Option<sema::SemaStage
 }
 
 fn generate_ir(args: &Args, stage: sema::SemaStage<sema::Final>) -> Result<Option<tacky::Program>> {
-    let tacky = tacky::Program::try_from(stage)?;
+    let tacky = tacky::Program::from(stage);
     if args.tacky {
         println!("Generated Intermediate Representation:\n{:#?}", tacky);
         Ok(None)
@@ -136,7 +139,7 @@ fn generate_ir(args: &Args, stage: sema::SemaStage<sema::Final>) -> Result<Optio
 }
 
 fn generate_code(args: &Args, tacky: tacky::Program) -> Result<Option<codegen::Program>> {
-    let codegen = codegen::Program::try_from(tacky)?;
+    let codegen = codegen::Program::from(tacky);
     if args.codegen {
         println!("Codegen:\n{:#?}", codegen);
         Ok(None)
@@ -175,16 +178,21 @@ fn assemble_and_link(args: &Args, asm: String) -> Result<()> {
         })?;
     }
 
-    let output_name = std::path::Path::new(&args.file).with_extension("");
-
-    let output = Command::new("gcc")
-        .args([
-            asm_path.as_os_str(),
-            OsStr::new("-o"),
-            output_name.as_os_str(),
-        ])
-        .output()
-        .context("Failed to run gcc for assembly and linking")?;
+    let output_name =
+        std::path::Path::new(&args.file).with_extension(if args.c { "o" } else { "" });
+    let mut cmd = Command::new("gcc");
+    cmd.args([
+        asm_path.as_os_str(),
+        OsStr::new("-o"),
+        output_name.as_os_str(),
+    ]);
+    let output = if args.c {
+        cmd.arg(OsStr::new("-c"));
+        cmd.output().context("Failed to run gcc for assembly")?
+    } else {
+        cmd.output()
+            .context("Failed to run gcc for assembly and linking")?
+    };
 
     if !output.status.success() {
         return Err(anyhow!("gcc exited with error code: {}", output.status)).with_context(|| {

@@ -1,26 +1,32 @@
 use crate::ast;
 use crate::sema;
-use anyhow::{Context, Result};
 use std::rc::Rc;
 
 #[derive(Debug, PartialEq)]
 pub struct Program {
-    pub function: Function,
+    pub functions: Vec<Function>,
 }
 
-impl TryFrom<sema::SemaStage<sema::Final>> for Program {
-    type Error = anyhow::Error;
-    fn try_from(stage: sema::SemaStage<sema::Final>) -> Result<Self> {
-        Ok(Self {
-            function: Function::try_from(stage.program.function)
-                .context("Failed to parse \"main\" function into TACKY representation")?,
-        })
+impl From<sema::SemaStage<sema::Final>> for Program {
+    fn from(stage: sema::SemaStage<sema::Final>) -> Self {
+        let valid_functions = stage
+            .program
+            .functions
+            .into_iter()
+            .map(Option::<Function>::from)
+            .collect::<Vec<Option<Function>>>();
+
+        let valid_function_definitions = valid_functions.into_iter().flatten().collect();
+        Self {
+            functions: valid_function_definitions,
+        }
     }
 }
 
 #[derive(Debug, PartialEq)]
 pub struct Function {
     pub name: Rc<String>,
+    pub params: Vec<Option<Rc<String>>>,
     pub instructions: Vec<Instruction>,
 }
 
@@ -34,25 +40,34 @@ impl Function {
     }
 }
 
-impl TryFrom<ast::Function> for Function {
-    type Error = anyhow::Error;
-    // TODO: Use the return type and arguments for something.
-    //  This is a try_from even though it cannot fail right now, assuming that
-    //  there wil actually be a possibility of failure once we use all of the
-    //  function information.
-    fn try_from(node: ast::Function) -> Result<Self> {
-        let ast::Function { name, block, .. } = node;
+impl From<ast::FunDecl> for Option<Function> {
+    fn from(node: ast::FunDecl) -> Self {
+        let ast::FunDecl {
+            name,
+            signature,
+            block: Some(block),
+            ..
+        } = node
+        else {
+            return None;
+        };
         let mut temp_var_counter = 0;
         let mut make_temp_var =
             Function::make_temp_var(Rc::new(name.to_string()), &mut temp_var_counter);
-        let mut instructions = block.map_or(vec![], |block| {
-            Instruction::parse_block_with(block, &mut make_temp_var)
-        });
+        let mut instructions = Instruction::parse_block_with(block, &mut make_temp_var);
+
         // Temporary fix suggested by the book for the case where a function
         // is supposed to return something but does not.
         instructions.push(Instruction::Return(Some(Val::Constant(0))));
-        Ok(Self {
+
+        let params = signature
+            .into_iter()
+            .map(|x| x.1)
+            .collect::<Vec<Option<Rc<String>>>>();
+
+        Some(Function {
             name: Rc::new(name.to_string()),
+            params,
             instructions,
         })
     }
@@ -86,11 +101,36 @@ pub enum Instruction {
         target: Rc<String>,
     },
     Label(Rc<String>),
+    FunCall {
+        name: Rc<String>,
+        args: Vec<Val>,
+        dst: Val,
+    },
 }
 
 impl Instruction {
     fn parse_decl_with(
         decl: ast::Declaration,
+        make_temp_var: &mut impl FnMut() -> String,
+    ) -> Vec<Self> {
+        match decl {
+            ast::Declaration::VarDecl(decl) => Self::parse_var_decl_with(decl, make_temp_var),
+            ast::Declaration::FunDecl(decl) => Self::parse_fun_decl_with(decl, make_temp_var),
+        }
+    }
+
+    fn parse_fun_decl_with(
+        decl: ast::FunDecl,
+        _make_temp_var: &mut impl FnMut() -> String,
+    ) -> Vec<Self> {
+        if Option::<Function>::from(decl).is_some() {
+            unreachable!("Function declerations inside statements should be caught in sema");
+        }
+        vec![]
+    }
+
+    fn parse_var_decl_with(
+        decl: ast::VarDecl,
         make_temp_var: &mut impl FnMut() -> String,
     ) -> Vec<Self> {
         if let Some(init) = decl.init {
@@ -216,7 +256,7 @@ impl Instruction {
                 match init {
                     ast::ForInit::Decl(decl) => {
                         block_instructions
-                            .extend(Instruction::parse_decl_with(decl, make_temp_var));
+                            .extend(Instruction::parse_var_decl_with(decl, make_temp_var));
                     }
                     ast::ForInit::Expr(Some(expr)) => {
                         let Expr { instructions, .. } = Expr::parse_with(expr, make_temp_var);
@@ -268,8 +308,8 @@ impl Instruction {
                     let Some((name, count)) = label.as_str().split_once('.') else {
                         unreachable!("label should always be name.count");
                     };
-                    let else_label = format!("{name}.{count}.else");
-                    let end_label = format!("{name}.{count}.end");
+                    let else_label = format!("{name}.{count}.if_else");
+                    let end_label = format!("{name}.{count}.if_end");
                     (Rc::new(else_label), Rc::new(end_label))
                 };
                 let Expr {
@@ -498,8 +538,8 @@ impl Expr {
                         let mut label = make_temp_var();
                         // FIXME: make_temp_var() should support making label names
                         label.push_str(match op {
-                            ast::BinaryOp::And => ".false_label",
-                            ast::BinaryOp::Or => ".true_label",
+                            ast::BinaryOp::And => ".binary_false_label",
+                            ast::BinaryOp::Or => ".binary_true_label",
                             _ => unreachable!(),
                         });
                         label.into()
@@ -532,7 +572,7 @@ impl Expr {
                     let end = {
                         // FIXME: Support label use case
                         let mut end = make_temp_var();
-                        end.push_str(".end");
+                        end.push_str(".binary_end_label");
                         end.into()
                     };
 
@@ -652,8 +692,8 @@ impl Expr {
                     let Some((name, count)) = label.as_str().split_once('.') else {
                         unreachable!("label should always be name.count");
                     };
-                    let e2_label = format!("{name}.{count}.e2");
-                    let end_label = format!("{name}.{count}.end");
+                    let e2_label = format!("{name}.{count}.cond_e2");
+                    let end_label = format!("{name}.{count}.cond_end");
                     (Rc::new(label), Rc::new(e2_label), Rc::new(end_label))
                 };
                 let Expr {
@@ -697,6 +737,27 @@ impl Expr {
                 Self {
                     instructions,
                     val: Val::Var(Rc::clone(&result)),
+                }
+            }
+            ast::Expr::FunCall { name, args } => {
+                let label = Rc::new(make_temp_var());
+                let (mut instructions, args) =
+                    args.into_iter()
+                        .fold((vec![], vec![]), |(mut instrs, mut args), arg| {
+                            let Expr { instructions, val } = Expr::parse_with(arg, make_temp_var);
+                            instrs.extend(instructions);
+                            args.push(val);
+                            (instrs, args)
+                        });
+                let dst = Val::Var(label);
+                instructions.push(Instruction::FunCall {
+                    name,
+                    args,
+                    dst: dst.clone(),
+                });
+                Self {
+                    instructions,
+                    val: dst,
                 }
             }
         }

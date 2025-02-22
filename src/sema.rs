@@ -1,14 +1,11 @@
 use std::{collections::HashMap, marker::PhantomData, rc::Rc};
 
 use crate::ast;
-use anyhow::{bail, ensure, Result};
-
-// Frame entry consists of a bool for whether the variable value is from the
-// current scope as well as the string variable name
-type FrameEntry = (bool, Rc<String>);
+use anyhow::{bail, ensure, Error, Result};
 
 enum Initial {}
-enum VariableResolution {}
+enum IdentResolution {}
+enum TypeChecking {}
 enum GotoValidation {}
 enum LoopLabelling {}
 enum SwitchLabelling {}
@@ -24,7 +21,8 @@ pub fn validate(program: ast::Program) -> Result<SemaStage<Final>> {
         program,
         stage: PhantomData::<Initial>,
     };
-    let stage = variables::validate(stage)?;
+    let stage = identifiers::validate(stage)?;
+    let stage = typechecking::validate(stage)?;
     let stage = gotos::validate(stage)?;
     let stage = switch::validate(stage)?;
     let stage = loops::validate(stage)?;
@@ -35,56 +33,76 @@ pub fn validate(program: ast::Program) -> Result<SemaStage<Final>> {
     })
 }
 
-mod variables {
+mod identifiers {
     use super::*;
 
-    pub fn validate(stage: SemaStage<Initial>) -> Result<SemaStage<VariableResolution>> {
-        let valid_function = validate_function(stage.program.function)?;
-
-        Ok(SemaStage {
-            program: ast::Program {
-                function: valid_function,
-            },
-            stage: PhantomData::<VariableResolution>,
-        })
+    #[derive(Clone, Debug, PartialEq)]
+    pub struct IdentEntry {
+        pub from_current_scope: bool,
+        pub name: Rc<String>,
+        pub has_external_linkage: bool,
     }
 
-    fn validate_function(function: ast::Function) -> Result<ast::Function> {
-        let mut variable_map = HashMap::new();
+    impl IdentEntry {
+        fn new_local(name: Rc<String>) -> Self {
+            Self {
+                from_current_scope: true,
+                name,
+                has_external_linkage: false,
+            }
+        }
+        fn new_external(name: Rc<String>) -> Self {
+            Self {
+                from_current_scope: true,
+                name,
+                has_external_linkage: true,
+            }
+        }
+        fn from_parent_scope(entry: &Self) -> Self {
+            Self {
+                from_current_scope: false,
+                ..entry.clone()
+            }
+        }
+    }
+
+    fn make_new_scope(
+        ident_map: &HashMap<Rc<String>, IdentEntry>,
+    ) -> HashMap<Rc<String>, IdentEntry> {
+        ident_map
+            .iter()
+            .fold(HashMap::new(), |mut map, (key, entry)| {
+                map.insert(Rc::clone(key), IdentEntry::from_parent_scope(entry));
+                map
+            })
+    }
+
+    pub fn validate(stage: SemaStage<Initial>) -> Result<SemaStage<IdentResolution>> {
+        let mut ident_map = HashMap::new();
         let mut count = 0;
         let mut unique_name_generator = move |name: &str| -> String {
             let new_name = format!("{name}.{count}");
             count += 1;
             new_name
         };
-        let ast::Function {
-            ret_t,
-            name,
-            signature,
-            block,
-        } = function;
+        let valid_functions = stage
+            .program
+            .functions
+            .into_iter()
+            .map(|f| resolve_fun_decl(f, &mut ident_map, &mut unique_name_generator))
+            .collect::<Result<Vec<ast::FunDecl>, Error>>()?;
 
-        let block = if let Some(block) = block {
-            Some(validate_block(
-                block,
-                &mut variable_map,
-                &mut unique_name_generator,
-            )?)
-        } else {
-            None
-        };
-
-        Ok(ast::Function {
-            ret_t,
-            name,
-            signature,
-            block,
+        Ok(SemaStage {
+            program: ast::Program {
+                functions: valid_functions,
+            },
+            stage: PhantomData::<IdentResolution>,
         })
     }
 
     fn validate_block(
         block: ast::Block,
-        variable_map: &mut HashMap<Rc<String>, FrameEntry>,
+        ident_map: &mut HashMap<Rc<String>, IdentEntry>,
         make_temporary: &mut impl FnMut(&str) -> String,
     ) -> Result<ast::Block> {
         let valid_items =
@@ -92,56 +110,130 @@ mod variables {
                 .into_items()
                 .into_iter()
                 .try_fold(Vec::new(), |mut items, block_item| {
-                    items.push(validate_blockitem(
-                        block_item,
-                        variable_map,
-                        make_temporary,
-                    )?);
+                    items.push(validate_blockitem(block_item, ident_map, make_temporary)?);
                     Ok::<Vec<ast::BlockItem>, anyhow::Error>(items)
                 })?;
         Ok(ast::Block(valid_items))
     }
 
-    fn resolve_decl(
-        decl: ast::Declaration,
-        variable_map: &mut HashMap<Rc<String>, FrameEntry>,
+    fn resolve_var_decl(
+        decl: ast::VarDecl,
+        ident_map: &mut HashMap<Rc<String>, IdentEntry>,
         make_temporary: &mut impl FnMut(&str) -> String,
-    ) -> Result<ast::Declaration> {
-        if variable_map
-            .get(&decl.name)
-            .is_some_and(|(from_this_frame, _)| *from_this_frame)
-        {
-            bail!("Duplicate variable declaration '{}'", decl.name);
-        }
-        let unique_name = Rc::new(make_temporary(&decl.name));
-        variable_map.insert(Rc::clone(&decl.name), (true, Rc::clone(&unique_name)));
-
+    ) -> Result<ast::VarDecl> {
+        let unique_name = resolve_automatic(decl.name, ident_map, make_temporary)?;
         let init = match decl.init {
-            Some(expr) => Some(resolve_expr(expr, variable_map)?),
+            Some(expr) => Some(resolve_expr(expr, ident_map)?),
             None => None,
         };
 
-        Ok(ast::Declaration {
+        Ok(ast::VarDecl {
             name: unique_name,
             init,
             ..decl
         })
     }
 
+    fn resolve_automatic(
+        name: Rc<String>,
+        ident_map: &mut HashMap<Rc<String>, IdentEntry>,
+        make_temporary: &mut impl FnMut(&str) -> String,
+    ) -> Result<Rc<String>> {
+        if ident_map
+            .get(&name)
+            .is_some_and(|entry| entry.from_current_scope)
+        {
+            bail!("Duplicate local declaration '{}'", name);
+        }
+        let unique_name = Rc::new(make_temporary(&name));
+        ident_map.insert(
+            Rc::clone(&name),
+            IdentEntry::new_local(Rc::clone(&unique_name)),
+        );
+        Ok(unique_name)
+    }
+
+    fn resolve_fun_decl(
+        decl: ast::FunDecl,
+        ident_map: &mut HashMap<Rc<String>, IdentEntry>,
+        make_temporary: &mut impl FnMut(&str) -> String,
+    ) -> Result<ast::FunDecl> {
+        // Reject a duplicate declaration if it is from the current scope but
+        // doesn't have external linkage, since it is a local variable
+        if ident_map
+            .get(&decl.name)
+            .is_some_and(|entry| entry.from_current_scope && !entry.has_external_linkage)
+        {
+            bail!(
+                "Duplicate declaration for variable \"{}\" and function \"{}\"",
+                decl.name,
+                decl.name
+            );
+        }
+        ident_map.insert(
+            Rc::clone(&decl.name),
+            IdentEntry::new_external(Rc::clone(&decl.name)),
+        );
+        let mut inner_map = make_new_scope(ident_map);
+        let new_params = decl
+            .signature
+            .into_iter()
+            .map(|(typ, name)| {
+                // Resolve automatic variables for parameter names
+                if let Some(name) = name {
+                    resolve_automatic(Rc::clone(&name), &mut inner_map, make_temporary)
+                        .map(|name| (typ, Some(name)))
+                } else {
+                    Ok((typ, None))
+                }
+            })
+            .collect::<Result<Vec<(ast::Type, Option<Rc<String>>)>, Error>>()?;
+        let body = if let Some(body) = decl.block {
+            let items = body
+                .into_items()
+                .into_iter()
+                .map(|item| validate_blockitem(item, &mut inner_map, make_temporary))
+                .collect::<Result<Vec<ast::BlockItem>, Error>>()?;
+            Some(ast::Block(items))
+        } else {
+            None
+        };
+        Ok(ast::FunDecl {
+            signature: new_params,
+            block: body,
+            ..decl
+        })
+    }
+
+    fn resolve_decl(
+        decl: ast::Declaration,
+        ident_map: &mut HashMap<Rc<String>, IdentEntry>,
+        make_temporary: &mut impl FnMut(&str) -> String,
+    ) -> Result<ast::Declaration> {
+        match decl {
+            ast::Declaration::VarDecl(decl) => {
+                resolve_var_decl(decl, ident_map, make_temporary).map(ast::Declaration::VarDecl)
+            }
+            ast::Declaration::FunDecl(decl) => {
+                resolve_fun_decl(decl, ident_map, make_temporary).map(ast::Declaration::FunDecl)
+            }
+        }
+    }
+
     fn validate_blockitem(
-        instruction: ast::BlockItem,
-        variable_map: &mut HashMap<Rc<String>, FrameEntry>,
+        item: ast::BlockItem,
+        ident_map: &mut HashMap<Rc<String>, IdentEntry>,
         make_temporary: &mut impl FnMut(&str) -> String,
     ) -> Result<ast::BlockItem> {
-        match instruction {
+        match item {
             ast::BlockItem::Stmt(stmt) => Ok(ast::BlockItem::Stmt(resolve_stmt(
                 stmt,
-                variable_map,
+                ident_map,
                 make_temporary,
             )?)),
             ast::BlockItem::Decl(decl) => Ok(ast::BlockItem::Decl(resolve_decl(
                 decl,
-                variable_map,
+                ident_map,
                 make_temporary,
             )?)),
         }
@@ -149,36 +241,26 @@ mod variables {
 
     fn resolve_stmt(
         stmt: ast::Stmt,
-        variable_map: &HashMap<Rc<String>, FrameEntry>,
+        ident_map: &HashMap<Rc<String>, IdentEntry>,
         make_temporary: &mut impl FnMut(&str) -> String,
     ) -> Result<ast::Stmt> {
-        let make_new_scope = |variable_map: &HashMap<Rc<String>, FrameEntry>| {
-            variable_map
-                .iter()
-                .fold(HashMap::new(), |mut map, (key, (_, var))| {
-                    map.insert(Rc::clone(key), (false, Rc::clone(var)));
-                    map
-                })
-        };
         match stmt {
             ast::Stmt::Return(Some(expr)) => {
-                Ok(ast::Stmt::Return(Some(resolve_expr(expr, variable_map)?)))
+                Ok(ast::Stmt::Return(Some(resolve_expr(expr, ident_map)?)))
             }
             ast::Stmt::Return(None) => Ok(ast::Stmt::Return(None)),
-            ast::Stmt::Expr(expr) => Ok(ast::Stmt::Expr(resolve_expr(expr, variable_map)?)),
+            ast::Stmt::Expr(expr) => Ok(ast::Stmt::Expr(resolve_expr(expr, ident_map)?)),
             ast::Stmt::If {
                 condition,
                 then,
                 r#else,
             } => Ok(ast::Stmt::If {
-                condition: resolve_expr(condition, variable_map)?,
-                then: Box::new(resolve_stmt(*then, variable_map, make_temporary)?),
+                condition: resolve_expr(condition, ident_map)?,
+                then: Box::new(resolve_stmt(*then, ident_map, make_temporary)?),
                 r#else: match r#else {
-                    Some(r#else) => Some(Box::new(resolve_stmt(
-                        *r#else,
-                        variable_map,
-                        make_temporary,
-                    )?)),
+                    Some(r#else) => {
+                        Some(Box::new(resolve_stmt(*r#else, ident_map, make_temporary)?))
+                    }
                     None => None,
                 },
             }),
@@ -189,8 +271,8 @@ mod variables {
                 body,
                 label,
             } => Ok(ast::Stmt::While {
-                condition: resolve_expr(condition, variable_map)?,
-                body: Box::new(resolve_stmt(*body, variable_map, make_temporary)?),
+                condition: resolve_expr(condition, ident_map)?,
+                body: Box::new(resolve_stmt(*body, ident_map, make_temporary)?),
                 label,
             }),
             ast::Stmt::DoWhile {
@@ -198,8 +280,8 @@ mod variables {
                 condition,
                 label,
             } => Ok(ast::Stmt::DoWhile {
-                condition: resolve_expr(condition, variable_map)?,
-                body: Box::new(resolve_stmt(*body, variable_map, make_temporary)?),
+                condition: resolve_expr(condition, ident_map)?,
+                body: Box::new(resolve_stmt(*body, ident_map, make_temporary)?),
                 label,
             }),
             ast::Stmt::For {
@@ -209,10 +291,10 @@ mod variables {
                 body,
                 label,
             } => {
-                let mut new_map = make_new_scope(variable_map);
+                let mut new_map = make_new_scope(ident_map);
                 let init = match init {
                     ast::ForInit::Decl(decl) => {
-                        ast::ForInit::Decl(resolve_decl(decl, &mut new_map, make_temporary)?)
+                        ast::ForInit::Decl(resolve_var_decl(decl, &mut new_map, make_temporary)?)
                     }
                     ast::ForInit::Expr(Some(expr)) => {
                         ast::ForInit::Expr(Some(resolve_expr(expr, &new_map)?))
@@ -239,17 +321,17 @@ mod variables {
             }
             ast::Stmt::Null => Ok(ast::Stmt::Null),
             ast::Stmt::Compound(block) => {
-                let mut new_map = make_new_scope(variable_map);
+                let mut new_map = make_new_scope(ident_map);
                 let block = validate_block(block, &mut new_map, make_temporary)?;
                 Ok(ast::Stmt::Compound(block))
             }
             ast::Stmt::Goto(label) => Ok(ast::Stmt::Goto(label)),
             ast::Stmt::Label { name, stmt } => Ok(ast::Stmt::Label {
                 name,
-                stmt: Box::new(resolve_stmt(*stmt, variable_map, make_temporary)?),
+                stmt: Box::new(resolve_stmt(*stmt, ident_map, make_temporary)?),
             }),
             ast::Stmt::Default { stmt, label } => Ok(ast::Stmt::Default {
-                stmt: Box::new(resolve_stmt(*stmt, variable_map, make_temporary)?),
+                stmt: Box::new(resolve_stmt(*stmt, ident_map, make_temporary)?),
                 label,
             }),
             ast::Stmt::Switch {
@@ -259,15 +341,15 @@ mod variables {
                 cases,
                 default,
             } => Ok(ast::Stmt::Switch {
-                condition: resolve_expr(condition, variable_map)?,
-                body: Box::new(resolve_stmt(*body, variable_map, make_temporary)?),
+                condition: resolve_expr(condition, ident_map)?,
+                body: Box::new(resolve_stmt(*body, ident_map, make_temporary)?),
                 label,
                 cases,
                 default,
             }),
             ast::Stmt::Case { value, stmt, label } => Ok(ast::Stmt::Case {
-                value: resolve_expr(value, variable_map)?,
-                stmt: Box::new(resolve_stmt(*stmt, variable_map, make_temporary)?),
+                value: resolve_expr(value, ident_map)?,
+                stmt: Box::new(resolve_stmt(*stmt, ident_map, make_temporary)?),
                 label,
             }),
         }
@@ -275,7 +357,7 @@ mod variables {
 
     fn resolve_expr(
         expr: ast::Expr,
-        variable_map: &HashMap<Rc<String>, FrameEntry>,
+        ident_map: &HashMap<Rc<String>, IdentEntry>,
     ) -> Result<ast::Expr> {
         match expr {
             ast::Expr::Assignment { lvalue, rvalue } => {
@@ -287,12 +369,12 @@ mod variables {
                     ),
                 };
                 Ok(ast::Expr::Assignment {
-                    lvalue: Box::new(resolve_expr(lvalue, variable_map)?),
-                    rvalue: Box::new(resolve_expr(*rvalue, variable_map)?),
+                    lvalue: Box::new(resolve_expr(lvalue, ident_map)?),
+                    rvalue: Box::new(resolve_expr(*rvalue, ident_map)?),
                 })
             }
             ast::Expr::Var(var) => {
-                if let Some((_, name)) = variable_map.get(&var) {
+                if let Some(IdentEntry { name, .. }) = ident_map.get(&var) {
                     Ok(ast::Expr::Var(Rc::clone(name)))
                 } else {
                     bail!("Undeclared variable '{var}'")
@@ -303,7 +385,7 @@ mod variables {
                 if op.is_valid_for(&expr) {
                     Ok(ast::Expr::Unary {
                         op,
-                        expr: Box::new(resolve_expr(*expr, variable_map)?),
+                        expr: Box::new(resolve_expr(*expr, ident_map)?),
                     })
                 } else {
                     bail!("Op {:?} is invalid for expression {:?}", op, expr)
@@ -311,49 +393,451 @@ mod variables {
             }
             ast::Expr::Binary { op, left, right } => Ok(ast::Expr::Binary {
                 op,
-                left: Box::new(resolve_expr(*left, variable_map)?),
-                right: Box::new(resolve_expr(*right, variable_map)?),
+                left: Box::new(resolve_expr(*left, ident_map)?),
+                right: Box::new(resolve_expr(*right, ident_map)?),
             }),
             ast::Expr::Conditional {
                 condition,
                 then,
                 r#else,
             } => Ok(ast::Expr::Conditional {
-                condition: Box::new(resolve_expr(*condition, variable_map)?),
-                then: Box::new(resolve_expr(*then, variable_map)?),
-                r#else: Box::new(resolve_expr(*r#else, variable_map)?),
+                condition: Box::new(resolve_expr(*condition, ident_map)?),
+                then: Box::new(resolve_expr(*then, ident_map)?),
+                r#else: Box::new(resolve_expr(*r#else, ident_map)?),
             }),
+            ast::Expr::FunCall { name, args } => {
+                // Replace the name of the function with whatever is there in
+                // the ident map. If a local variable is defined shadowing the
+                // function, then this will return its unique name.
+                let name = if let Some(IdentEntry { name, .. }) = ident_map.get(&name) {
+                    Rc::clone(name)
+                } else {
+                    bail!("Cannot call unknown identifier {}.", name);
+                };
+                let valid_args = args
+                    .into_iter()
+                    .map(|a| resolve_expr(a, ident_map))
+                    .collect::<Result<Vec<ast::Expr>, Error>>()?;
+                Ok(ast::Expr::FunCall {
+                    name,
+                    args: valid_args,
+                })
+            }
+        }
+    }
+}
+
+mod typechecking {
+    use super::*;
+
+    #[derive(Debug)]
+    pub struct SymbolEntry {
+        r#type: ast::Type,
+        defined: bool,
+        scope: Scope,
+    }
+
+    #[derive(Debug)]
+    pub struct SymbolTable {
+        global: HashMap<Rc<String>, SymbolEntry>,
+        scopes: Vec<HashMap<Rc<String>, SymbolEntry>>,
+    }
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub enum Scope {
+        Global,
+        Local(usize),
+    }
+
+    impl Scope {
+        fn shadows(&self, other: &Self) -> bool {
+            match (self, other) {
+                (Self::Global, Self::Global) => false,
+                (Self::Global, Self::Local(_)) => false,
+                (Self::Local(_), Self::Global) => true,
+                (Self::Local(n1), Self::Local(n2)) => n1 > n2,
+            }
+        }
+    }
+
+    impl SymbolTable {
+        fn new_table() -> Self {
+            Self {
+                global: HashMap::new(),
+                scopes: vec![],
+            }
+        }
+
+        fn new_entry(&self, decl: &ast::Declaration, scope: Scope) -> Result<SymbolEntry> {
+            Ok(SymbolEntry {
+                r#type: decl.into(),
+                defined: decl.defining(),
+                scope,
+            })
+        }
+
+        fn get(&self, key: &Rc<String>) -> Option<&SymbolEntry> {
+            let local = self.get_local(key);
+            if local.is_none() {
+                self.get_global(key)
+            } else {
+                local
+            }
+        }
+
+        fn insert_scope(&mut self, key: Rc<String>, entry: SymbolEntry) -> Option<SymbolEntry> {
+            match entry.scope {
+                Scope::Global => self.global.insert(key, entry),
+                Scope::Local(frame) => self.scopes[frame].insert(key, entry),
+            }
+        }
+
+        #[inline]
+        fn scope(&self) -> Scope {
+            match self.scopes.len() {
+                0 => Scope::Global,
+                n => Scope::Local(n - 1),
+            }
+        }
+
+        fn get_local(&self, key: &Rc<String>) -> Option<&SymbolEntry> {
+            for scope in self.scopes.iter().rev() {
+                if let Some(entry) = scope.get(key) {
+                    return Some(entry);
+                }
+            }
+            None
+        }
+
+        fn get_global(&self, key: &Rc<String>) -> Option<&SymbolEntry> {
+            self.global.get(key)
+        }
+
+        fn get_decl_info(decl: &ast::Declaration) -> (Rc<String>, ast::Type, bool) {
+            match decl {
+                ast::Declaration::FunDecl(fun) => (
+                    Rc::clone(&fun.name),
+                    ast::Type::from(fun),
+                    fun.block.is_some(),
+                ),
+                ast::Declaration::VarDecl(ast::VarDecl { typ, name, init }) => {
+                    (Rc::clone(name), typ.clone(), init.is_some())
+                }
+            }
+        }
+
+        fn declare_in_scope(&mut self, decl: &ast::Declaration, scope: Scope) -> Result<()> {
+            let (name, new_type, defining_ident) = Self::get_decl_info(decl);
+            if let Some(SymbolEntry {
+                r#type: old_type,
+                defined: already_defined,
+                scope: old_scope,
+            }) = self.get(&name)
+            {
+                // There is already a declaration for this name, cases include:
+                //  1. It is a function:
+                //      I)   New declaration matches existing type (OK)
+                //      II)  New declaration has no args specified (Potentially
+                //           any number of args- still OK)
+                //      III) New declaration type doesn't match existing (ERROR)
+                //      IV)  New declaration redefines existing definition
+                //  2. It is a variable:
+                //      I)  New declaration shadows existing one (OK)
+                //      II) New declaration doesn't shadow (ERROR)
+                if !scope.shadows(old_scope) {
+                    if *old_type != new_type {
+                        match new_type {
+                            ast::Type::Fun { param_types, .. } if param_types.is_empty() => {},
+                            _ => bail!(
+                                "Redeclaring {name} as {new_type} when it was previously declared as {old_type}"
+                            )
+                        }
+                    }
+                    if *already_defined && defining_ident {
+                        bail!("Redefining {name} when it is already defined.")
+                    }
+                } else {
+                    // Local variables can shadow, but functions cannot
+                    self.insert_scope(name, self.new_entry(decl, scope)?);
+                }
+            } else {
+                self.insert_scope(name, self.new_entry(decl, scope)?);
+            }
+            Ok(())
+        }
+
+        // Lazy clones :(
+        fn declare_fun(&mut self, decl: &ast::FunDecl) -> Result<()> {
+            if decl.block.is_some() && matches!(self.scope(), Scope::Local(n) if n > 0) {
+                bail!(
+                    "Attempted to define function {} outside of global scope.",
+                    decl.name
+                );
+            }
+            let wrapped_decl = ast::Declaration::FunDecl(decl.clone());
+            self.declare_in_scope(&wrapped_decl, Scope::Global)?;
+            if let scope @ Scope::Local(_) = self.scope() {
+                // Declare function and all its params into local scope
+                self.declare_in_scope(&wrapped_decl, scope)?;
+                for (typ, name) in decl.signature.iter() {
+                    if let Some(name) = name {
+                        let param_decl = ast::Declaration::VarDecl(ast::VarDecl {
+                            name: Rc::clone(name),
+                            init: None,
+                            typ: typ.clone(),
+                        });
+                        self.declare_in_scope(&param_decl, scope)?;
+                    }
+                }
+            }
+            Ok(())
+        }
+        fn declare_var(&mut self, decl: &ast::VarDecl) -> Result<()> {
+            let decl = ast::Declaration::VarDecl(decl.clone());
+            self.declare_in_scope(&decl, self.scope())
+        }
+
+        fn has_type(&self, key: &Rc<String>, expected: ast::Type) -> Result<()> {
+            match self.get(key) {
+                Some(SymbolEntry { r#type, .. }) if *r#type == expected => Ok(()),
+
+                Some(SymbolEntry { r#type, .. }) => {
+                    bail!("Expected type \"{expected}\" for \"{key}\" but found type \"{type}\" instead.")
+                }
+                None => bail!("Found no type information for symbol \"{key}\"."),
+            }
+        }
+
+        fn push_scope(&mut self) {
+            self.scopes.push(HashMap::new());
+        }
+
+        fn pop_scope(&mut self) -> Result<()> {
+            if self.scopes.is_empty() {
+                bail!("Already in global scope, cannot pop symbol table.")
+            } else {
+                self.scopes.pop();
+                Ok(())
+            }
+        }
+    }
+
+    pub fn validate(stage: SemaStage<IdentResolution>) -> Result<SemaStage<TypeChecking>> {
+        let mut symbols = SymbolTable::new_table();
+        typecheck_program(&stage.program, &mut symbols)?;
+        Ok(SemaStage {
+            program: stage.program,
+            stage: PhantomData::<TypeChecking>,
+        })
+    }
+
+    fn typecheck_program(program: &ast::Program, symbols: &mut SymbolTable) -> Result<()> {
+        for f in program.functions.iter() {
+            typecheck_fun_decl(f, symbols)?;
+        }
+        Ok(())
+    }
+
+    fn typecheck_block(block: &ast::Block, symbols: &mut SymbolTable) -> Result<()> {
+        symbols.push_scope();
+        for item in block.items().iter() {
+            typecheck_block_item(item, symbols)?;
+        }
+        symbols.pop_scope()
+    }
+
+    fn typecheck_block_item(item: &ast::BlockItem, symbols: &mut SymbolTable) -> Result<()> {
+        match item {
+            ast::BlockItem::Stmt(stmt) => typecheck_stmt(stmt, symbols).map(|_| ()),
+            ast::BlockItem::Decl(decl) => typecheck_decl(decl, symbols).map(|_| ()),
+        }
+    }
+
+    fn typecheck_stmt(stmt: &ast::Stmt, symbols: &mut SymbolTable) -> Result<()> {
+        match stmt {
+            ast::Stmt::Compound(block) => typecheck_block(block, symbols),
+            ast::Stmt::Return(Some(expr)) => typecheck_expr(expr, symbols),
+            ast::Stmt::Expr(expr) => typecheck_expr(expr, symbols),
+            ast::Stmt::If {
+                condition,
+                then,
+                r#else,
+            } => {
+                typecheck_expr(condition, symbols)?;
+                typecheck_stmt(then, symbols)?;
+                r#else
+                    .as_ref()
+                    .map_or(Ok(()), |stmt| typecheck_stmt(stmt, symbols))
+            }
+            ast::Stmt::While {
+                condition, body, ..
+            } => {
+                typecheck_expr(condition, symbols)?;
+                typecheck_stmt(body, symbols)
+            }
+            ast::Stmt::DoWhile {
+                body, condition, ..
+            } => {
+                typecheck_expr(condition, symbols)?;
+                typecheck_stmt(body, symbols)
+            }
+            ast::Stmt::For {
+                init,
+                condition,
+                post,
+                body,
+                ..
+            } => {
+                match init {
+                    ast::ForInit::Decl(decl) => {
+                        typecheck_var_decl(decl, symbols)?;
+                    }
+                    ast::ForInit::Expr(Some(expr)) => {
+                        typecheck_expr(expr, symbols)?;
+                    }
+                    _ => {}
+                }
+                if let Some(condition) = condition {
+                    typecheck_expr(condition, symbols)?;
+                }
+                if let Some(post) = post {
+                    typecheck_expr(post, symbols)?;
+                }
+                typecheck_stmt(body, symbols)
+            }
+            ast::Stmt::Case { value, stmt, .. } => {
+                typecheck_expr(value, symbols)?;
+                typecheck_stmt(stmt, symbols)
+            }
+            ast::Stmt::Switch {
+                condition,
+                body,
+                cases,
+                ..
+            } => {
+                typecheck_expr(condition, symbols)?;
+                typecheck_stmt(body, symbols)?;
+                if let Some(cases) = cases {
+                    for (literal, name) in cases.iter() {
+                        if !literal.is_int() {
+                            bail!("Non-integer type in case {name}.");
+                        }
+                    }
+                }
+                Ok(())
+            }
+            _ => Ok(()),
+        }
+    }
+
+    fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<()> {
+        match expr {
+            ast::Expr::Var(name) => {
+                // TODO: Fix this once we have more types
+                symbols.has_type(name, ast::Type::Int)
+            }
+            ast::Expr::Assignment { lvalue, rvalue } => {
+                typecheck_expr(lvalue, symbols)?;
+                typecheck_expr(rvalue, symbols)
+            }
+            ast::Expr::Unary { expr, .. } => typecheck_expr(expr, symbols),
+            ast::Expr::Binary { left, right, .. } => {
+                typecheck_expr(left, symbols)?;
+                typecheck_expr(right, symbols)
+            }
+            ast::Expr::Conditional {
+                condition,
+                then,
+                r#else,
+            } => {
+                typecheck_expr(condition, symbols)?;
+                typecheck_expr(then, symbols)?;
+                typecheck_expr(r#else, symbols)
+            }
+            ast::Expr::FunCall { name, args } => {
+                match symbols.get(name) {
+                    Some(SymbolEntry {
+                        r#type: ast::Type::Fun { param_types, .. },
+                        ..
+                    }) => {
+                        if args.len() != param_types.len() {
+                            bail!(
+                                "Expected {} args but received {} when calling \"{name}\".",
+                                param_types.len(),
+                                args.len()
+                            );
+                        }
+                        // Will need to be uprooted once more sophisticated types
+                        // are added in order to verify arg types match expected
+                        for arg in args.iter() {
+                            typecheck_expr(arg, symbols)?;
+                        }
+                        Ok(())
+                    }
+                    Some(SymbolEntry { r#type: t, .. }) => {
+                        bail!("Expected function type, but found type {t}.")
+                    }
+                    _ => bail!("Could not find symbol with name {name}."),
+                }
+            }
+            _ => Ok(()),
+        }
+    }
+
+    fn typecheck_decl(decl: &ast::Declaration, symbols: &mut SymbolTable) -> Result<()> {
+        match decl {
+            ast::Declaration::FunDecl(decl) => typecheck_fun_decl(decl, symbols),
+            ast::Declaration::VarDecl(decl) => typecheck_var_decl(decl, symbols),
+        }
+    }
+
+    fn typecheck_fun_decl(decl: &ast::FunDecl, symbols: &mut SymbolTable) -> Result<()> {
+        // Special case: Push scope and iterate over block items here so the
+        // function parameters get put into the same scope as the block items
+        symbols.push_scope();
+        symbols.declare_fun(decl)?;
+        // Treat parameters as declarations without values
+        if let Some(ref block) = decl.block {
+            for item in block.items() {
+                typecheck_block_item(item, symbols)?;
+            }
+        }
+        symbols.pop_scope()
+    }
+
+    fn typecheck_var_decl(decl: &ast::VarDecl, symbols: &mut SymbolTable) -> Result<()> {
+        symbols.declare_var(decl)?;
+        if let Some(init) = &decl.init {
+            typecheck_expr(init, symbols)
+        } else {
+            Ok(())
         }
     }
 }
 
 mod gotos {
     use super::*;
-    pub fn validate(stage: SemaStage<VariableResolution>) -> Result<SemaStage<GotoValidation>> {
-        let ast::Function {
-            ret_t,
-            name,
-            signature,
-            block,
-        } = stage.program.function;
-
-        let mut label_map = HashMap::new();
-        let block = if let Some(block) = block {
-            let block = resolve_block(block, &name, &mut label_map)?;
-            let block = validate_block(block, &mut label_map)?;
-            Some(block)
-        } else {
-            None
-        };
+    pub fn validate(stage: SemaStage<TypeChecking>) -> Result<SemaStage<GotoValidation>> {
+        let valid_functions = stage
+            .program
+            .functions
+            .into_iter()
+            .map(|f| {
+                let mut label_map = HashMap::new();
+                let block = if let Some(b) = f.block {
+                    let b = resolve_block(b, &f.name, &mut label_map)?;
+                    let b = validate_block(b, &mut label_map)?;
+                    Some(b)
+                } else {
+                    None
+                };
+                Ok(ast::FunDecl { block, ..f })
+            })
+            .collect::<Result<Vec<ast::FunDecl>, Error>>()?;
 
         Ok(SemaStage {
             program: ast::Program {
-                function: ast::Function {
-                    ret_t,
-                    name,
-                    signature,
-                    block,
-                },
+                functions: valid_functions,
             },
             stage: PhantomData::<GotoValidation>,
         })
@@ -405,7 +889,7 @@ mod gotos {
                     label_map
                         .insert(Rc::clone(&name), Rc::clone(&new_name))
                         .is_none(),
-                    "Duplicate labels {name}."
+                    "Duplicate label \"{name}\" in function \"{func_name}\"."
                 );
                 Ok(ast::Stmt::Label {
                     name: new_name,
@@ -611,16 +1095,21 @@ mod switch {
     }
 
     pub fn validate(stage: SemaStage<GotoValidation>) -> Result<SemaStage<SwitchLabelling>> {
-        let SemaStage { program, .. } = stage;
+        let valid_functions = stage
+            .program
+            .functions
+            .into_iter()
+            .map(resolve_function)
+            .collect::<Result<Vec<ast::FunDecl>, Error>>()?;
         Ok(SemaStage {
             program: ast::Program {
-                function: resolve_function(program.function)?,
+                functions: valid_functions,
             },
             stage: PhantomData::<SwitchLabelling>,
         })
     }
 
-    fn resolve_function(function: ast::Function) -> Result<ast::Function> {
+    fn resolve_function(function: ast::FunDecl) -> Result<ast::FunDecl> {
         if let Some(block) = function.block {
             let mut count = 0;
             let mut unique_name_generator = |name: &str| -> String {
@@ -628,7 +1117,7 @@ mod switch {
                 count += 1;
                 new_name
             };
-            Ok(ast::Function {
+            Ok(ast::FunDecl {
                 block: Some(resolve_block(
                     block,
                     &mut SwitchContext::new(),
@@ -859,6 +1348,7 @@ mod switch {
                     const_eval(*r#else)
                 }
             }
+            _ => unimplemented!(),
         }
     }
 
@@ -1007,16 +1497,21 @@ mod loops {
     use super::*;
 
     pub fn validate(stage: SemaStage<SwitchLabelling>) -> Result<SemaStage<LoopLabelling>> {
-        let SemaStage { program, .. } = stage;
+        let valid_functions = stage
+            .program
+            .functions
+            .into_iter()
+            .map(resolve_function)
+            .collect::<Result<Vec<ast::FunDecl>, Error>>()?;
         Ok(SemaStage {
             program: ast::Program {
-                function: resolve_function(program.function)?,
+                functions: valid_functions,
             },
             stage: PhantomData::<LoopLabelling>,
         })
     }
 
-    fn resolve_function(function: ast::Function) -> Result<ast::Function> {
+    fn resolve_function(function: ast::FunDecl) -> Result<ast::FunDecl> {
         if let Some(block) = function.block {
             let mut count = 0;
             let mut unique_name_generator = |name: &str| -> String {
@@ -1024,7 +1519,7 @@ mod loops {
                 count += 1;
                 new_name
             };
-            Ok(ast::Function {
+            Ok(ast::FunDecl {
                 block: Some(resolve_block(block, None, &mut unique_name_generator)?),
                 ..function
             })

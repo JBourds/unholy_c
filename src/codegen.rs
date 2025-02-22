@@ -799,34 +799,21 @@ impl From<tacky::Instruction> for Vec<Instruction<Initial>> {
                     ]
                 }
                 tacky::BinaryOp::Divide => {
-                    let rax = Operand::Reg(Reg::X86 {
-                        reg: X86Reg::Ax,
-                        section: RegSection::Qword,
-                    });
                     let eax = Operand::Reg(Reg::X86 {
                         reg: X86Reg::Ax,
                         section: RegSection::Dword,
                     });
-                    let rdx = Operand::Reg(Reg::X86 {
-                        reg: X86Reg::Dx,
-                        section: RegSection::Qword,
-                    });
                     vec![
-                        // Push rax and rdx since they get used here
-                        new_instr(InstructionType::Push(rax.clone())),
-                        new_instr(InstructionType::Push(rdx.clone())),
                         new_instr(InstructionType::Mov {
                             src: src1.into(),
-                            dst: eax,
+                            dst: eax.clone(),
                         }),
                         new_instr(InstructionType::Cdq),
                         new_instr(InstructionType::Idiv(src2.into())),
                         new_instr(InstructionType::Mov {
-                            src: rax.clone(),
+                            src: eax,
                             dst: dst.into(),
                         }),
-                        new_instr(InstructionType::Pop(rdx.clone())),
-                        new_instr(InstructionType::Push(rax.clone())),
                     ]
                 }
                 tacky::BinaryOp::Remainder => vec![

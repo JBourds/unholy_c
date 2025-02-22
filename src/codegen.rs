@@ -64,7 +64,7 @@ impl From<tacky::Function> for Function {
             let reg_args = params
                 .drain(..to_drain)
                 .collect::<Vec<Option<Rc<String>>>>();
-            let stack_args = params.drain(..);
+            let stack_args: Vec<Option<Rc<String>>> = std::mem::take(&mut params);
             (reg_args, stack_args)
         };
         let mut instructions = vec![
@@ -84,31 +84,42 @@ impl From<tacky::Function> for Function {
             }),
             Instruction::<Initial>::new(InstructionType::AllocStack(0)),
         ];
+
+        let mut mappings = HashMap::new();
+        // We always start with a stack bound of 8 for RBP
+        // Include register args here since we move into them
+        for (src_reg, dst_arg) in
+            std::iter::zip(SYSTEM_V_REGS.into_iter(), reg_args.into_iter().flatten())
+        {
+            instructions.push(Instruction::<Initial>::new(InstructionType::Mov {
+                src: src_reg,
+                dst: Operand::Pseudo {
+                    name: dst_arg,
+                    size: 4,
+                },
+            }));
+        }
+
+        // Hardcoded 8 here due to pushing RBP
+        let mut stack_bound = 8;
+        for arg in stack_args.into_iter().flatten() {
+            stack_bound += 8;
+            instructions.push(Instruction::<Initial>::new(InstructionType::Mov {
+                src: Operand::StackOffset {
+                    offset: stack_bound,
+                    size: 4,
+                },
+                dst: Operand::Pseudo { name: arg, size: 4 },
+            }));
+        }
+
         for instr in fun_instructions.into_iter() {
             instructions.extend(Vec::<Instruction<Initial>>::from(instr));
         }
 
-        let mut mappings = HashMap::new();
-        // We always start with a stack bound of 8 for RBP
-        // Stack arg sizes are hardcoded currently
-        let mut stack_bound = 8;
-        for arg in stack_args.flatten() {
-            stack_bound += 8;
-            mappings.insert(
-                arg,
-                Operand::StackOffset {
-                    offset: stack_bound,
-                    size: 4,
-                },
-            );
-        }
-        for (reg_arg, src) in std::iter::zip(reg_args.into_iter().flatten(), SYSTEM_V_REGS.iter()) {
-            mappings.insert(reg_arg, src.clone());
-        }
-
         // Get stack offsets for each pseudoregister as we fix them up
         // Start moving down for arguments & temp vars used here
-        stack_bound = 0;
+        let mut stack_bound = 0;
         let mut requires_fixup = vec![];
         let mut fixed_instructions: Vec<Instruction<Offset>> = instructions
             .drain(..)
@@ -135,7 +146,9 @@ impl From<tacky::Function> for Function {
             let instr = match fixed_instructions[i].op.clone() {
                 InstructionType::Mov { src, dst } => {
                     let src = match src {
-                        Operand::StackOffset { offset, size } => Operand::StackOffset { offset: offset + stack_bound, size },
+                        // Don't fixup stack args (+ offset)
+                        Operand::StackOffset { offset, size } if offset < 0 => Operand::StackOffset { offset: offset - stack_bound, size },
+                        op @ Operand::StackOffset { .. } => op,
                         _ => unreachable!("This applies to args passed on the stack only")
                     };
                     InstructionType::Mov { src , dst }
@@ -933,15 +946,11 @@ impl From<tacky::Instruction> for Vec<Instruction<Initial>> {
                 };
 
                 let num_stack_args = stack_args.len();
-                let num_reg_args = reg_args.len();
                 let stack_padding = if num_stack_args % 2 == 1 { 8 } else { 0 };
                 let mut v = vec![];
 
                 if stack_padding != 0 {
                     v.push(new_instr(InstructionType::AllocStack(stack_padding)));
-                }
-                for dst_reg in SYSTEM_V_REGS.iter().take(num_reg_args) {
-                    v.push(new_instr(InstructionType::Push(dst_reg.clone())));
                 }
                 for (dst_reg, src_arg) in std::iter::zip(SYSTEM_V_REGS.iter(), reg_args.into_iter())
                 {
@@ -995,10 +1004,6 @@ impl From<tacky::Instruction> for Vec<Instruction<Initial>> {
                     }
                 }
                 v.push(new_instr(InstructionType::Call(name)));
-
-                for dst_reg in SYSTEM_V_REGS.iter().take(num_reg_args).rev() {
-                    v.push(new_instr(InstructionType::Pop(dst_reg.clone())));
-                }
 
                 let bytes_to_remove = 8 * num_stack_args + stack_padding;
                 if bytes_to_remove != 0 {

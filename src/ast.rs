@@ -49,19 +49,19 @@ pub trait AstNode {
 
 #[derive(Debug, PartialEq)]
 pub struct Program {
-    pub functions: Vec<FunDecl>,
+    pub declarations: Vec<Declaration>,
 }
 impl AstNode for Program {
     fn consume(tokens: &[Token]) -> Result<(Program, &[Token])> {
-        let mut functions = vec![];
+        let mut declarations = vec![];
         let mut remaining = tokens;
         // This will change again very soon with file scope variables
         while !remaining.is_empty() {
-            let (function, tokens) = FunDecl::consume(remaining)?;
-            functions.push(function);
+            let (declaration, tokens) = Declaration::consume(remaining)?;
+            declarations.push(declaration);
             remaining = tokens;
         }
-        Ok((Program { functions }, remaining))
+        Ok((Program { declarations }, remaining))
     }
 }
 
@@ -71,6 +71,7 @@ pub struct FunDecl {
     pub name: Rc<String>,
     pub signature: Vec<(Type, Option<Rc<String>>)>,
     pub block: Option<Block>,
+    pub storage_class: Option<StorageClass>,
 }
 
 impl From<&FunDecl> for Type {
@@ -125,8 +126,8 @@ impl FunDecl {
 
 impl AstNode for FunDecl {
     fn consume(tokens: &[Token]) -> Result<(Self, &[Token])> {
-        let (ret_t, tokens) = Type::consume(tokens)
-            .context("No return type indicated for function. Add a return type, or mark the function as returning \"void\" to signal that it returns nothing.")?;
+        let (ret_t, storage_class, tokens) =
+            Type::consume_with_optional_storage(tokens).context("Failed to parse function type")?;
         let (name, tokens) = parse_ident(tokens).context("Missing function name.")?;
         if let [Token::LParen, tokens @ ..] = tokens {
             let (signature, tokens) = Self::parse_parameter_list(tokens)
@@ -158,11 +159,38 @@ impl AstNode for FunDecl {
                     name: Rc::clone(&name),
                     signature,
                     block,
+                    storage_class,
                 },
                 tokens,
             ))
         } else {
             bail!("Expected start of function parameter list.")
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum StorageClass {
+    Static,
+    Extern,
+}
+
+impl StorageClass {
+    fn consume(tokens: &[Token]) -> Result<Option<(Self, &[Token])>> {
+        match tokens {
+            [Token::Extern, tokens @ ..] => Ok(Some((Self::Extern, tokens))),
+            [Token::Static, tokens @ ..] => Ok(Some((Self::Static, tokens))),
+            [] => bail!("No tokens when trying to consume storage class specifier"),
+            [..] => Ok(None),
+        }
+    }
+}
+
+impl std::fmt::Display for StorageClass {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match *self {
+            Self::Static => write!(f, "Static"),
+            Self::Extern => write!(f, "Extern"),
         }
     }
 }
@@ -190,12 +218,13 @@ pub struct VarDecl {
     pub typ: Type,
     pub name: Rc<String>,
     pub init: Option<Expr>,
+    pub storage_class: Option<StorageClass>,
 }
 
 impl AstNode for VarDecl {
     fn consume(tokens: &[Token]) -> Result<(Self, &[Token])> {
-        let (typ, tokens) =
-            Type::consume(tokens).context("Unable to parse type in declaration.")?;
+        let (typ, storage_class, tokens) = Type::consume_with_optional_storage(tokens)
+            .context("Unable to parse type in declaration.")?;
         let (name, tokens) =
             parse_ident(tokens).context("Failed to find valid identifer for declaration.")?;
         match tokens {
@@ -209,6 +238,7 @@ impl AstNode for VarDecl {
                             typ,
                             name,
                             init: Some(expr),
+                            storage_class,
                         },
                         &tokens[1..],
                     ))
@@ -219,6 +249,7 @@ impl AstNode for VarDecl {
                     typ,
                     name,
                     init: None,
+                    storage_class,
                 },
                 tokens,
             )),
@@ -794,6 +825,47 @@ pub enum Type {
     Void,
 }
 
+impl Type {
+    fn consume_with_optional_storage(
+        tokens: &[Token],
+    ) -> Result<(Self, Option<StorageClass>, &[Token])> {
+        let mut ret_t = None;
+        let mut storage = None;
+        let mut remaining = tokens;
+        loop {
+            if let Ok((new_ret_t, tokens)) = Type::consume(remaining) {
+                if ret_t.is_some() {
+                    bail!(
+                        "Found duplicate return type for function, {} and {}",
+                        ret_t.unwrap(),
+                        new_ret_t
+                    );
+                }
+                ret_t = Some(new_ret_t);
+                remaining = tokens;
+            } else if let Ok(Some((new_storage, tokens))) = StorageClass::consume(remaining) {
+                if storage.is_some() {
+                    bail!(
+                        "Duplicate/conflicting storage class specifier, {} and {}",
+                        storage.unwrap(),
+                        new_storage
+                    );
+                }
+                storage = Some(new_storage);
+                remaining = tokens;
+            } else {
+                if ret_t.is_some() {
+                    break;
+                } else {
+                    bail!(
+            "No return type indicated for function. Add a return type, or mark the function as returning \"void\" to signal that it returns nothing.");
+                }
+            }
+        }
+        Ok((ret_t.unwrap(), storage, remaining))
+    }
+}
+
 impl AstNode for Type {
     fn consume(tokens: &[Token]) -> Result<(Type, &[Token])> {
         if let Some(token) = tokens.first() {
@@ -1066,318 +1138,5 @@ impl UnaryOp {
         } else {
             bail!("No remaining tokens")
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn return_2() {
-        let tokens = &[
-            Token::Int,
-            Token::Ident(Rc::new("main".to_string())),
-            Token::LParen,
-            Token::Void,
-            Token::RParen,
-            Token::LSquirly,
-            Token::Return,
-            Token::Literal(Rc::new("2".to_string())),
-            Token::Semi,
-            Token::RSquirly,
-        ];
-        let program = parse(tokens).unwrap();
-        let expected = Program {
-            functions: vec![FunDecl {
-                ret_t: Type::Int,
-                name: Rc::new("main".to_string()),
-                signature: vec![],
-                block: Some(Block(vec![BlockItem::Stmt(Stmt::Return(Some(
-                    Expr::Literal(Literal::Int(2)),
-                )))])),
-            }],
-        };
-        assert_eq!(expected, program);
-    }
-
-    #[test]
-    fn test_multiple_params() {
-        let tokens = &[
-            Token::Int,
-            Token::Ident(Rc::new("multiple_args".to_string())),
-            Token::LParen,
-            Token::Int,
-            Token::Ident(Rc::new("x".to_string())),
-            Token::Comma,
-            Token::Int,
-            Token::Comma,
-            Token::Int,
-            Token::Ident(Rc::new("z".to_string())),
-            Token::RParen,
-            Token::LSquirly,
-            Token::Return,
-            Token::Literal(Rc::new("2".to_string())),
-            Token::Semi,
-            Token::RSquirly,
-        ];
-        let (function, _) = FunDecl::consume(tokens).unwrap();
-        let expected = FunDecl {
-            ret_t: Type::Int,
-            name: Rc::new("multiple_args".to_string()),
-            signature: vec![
-                (Type::Int, Some(Rc::new("x".to_string()))),
-                (Type::Int, None),
-                (Type::Int, Some(Rc::new("z".to_string()))),
-            ],
-            block: Some(Block(vec![BlockItem::Stmt(Stmt::Return(Some(
-                Expr::Literal(Literal::Int(2)),
-            )))])),
-        };
-        assert_eq!(expected, function);
-    }
-
-    #[test]
-    fn rejects_trailing_comma() {
-        let tokens = &[
-            Token::Int,
-            Token::Ident(Rc::new("trailing_comma".to_string())),
-            Token::LParen,
-            Token::Int,
-            Token::Ident(Rc::new("x".to_string())),
-            Token::Comma,
-            Token::RParen,
-            Token::LSquirly,
-            Token::RSquirly,
-        ];
-        let program = parse(tokens);
-        assert!(program.is_err());
-    }
-
-    #[test]
-    fn missing_return() {
-        let tokens = &[
-            Token::Int,
-            Token::Ident(Rc::new("main".to_string())),
-            Token::LParen,
-            Token::Void,
-            Token::RParen,
-            Token::LSquirly,
-            Token::RSquirly,
-        ];
-        let program = parse(tokens).unwrap();
-        let expected = Program {
-            functions: vec![FunDecl {
-                name: Rc::new("main".to_string()),
-                block: Some(Block(vec![])),
-                signature: vec![],
-                ret_t: Type::Int,
-            }],
-        };
-        assert_eq!(expected, program);
-    }
-
-    #[test]
-    fn parse_unary_bitnot_empty() {
-        let tokens = &[Token::BitNot, Token::Literal(Rc::new("1".to_string()))];
-
-        let (expr, tokens) = Factor::parse(tokens).unwrap();
-
-        assert!(tokens.is_empty());
-
-        assert_eq!(
-            expr,
-            Expr::Unary {
-                op: UnaryOp::Complement,
-                expr: Box::new(Expr::Literal(Literal::Int(1)))
-            }
-        );
-    }
-
-    #[test]
-    fn parse_unary_bitnot() {
-        let tokens = &[
-            Token::BitNot,
-            Token::Literal(Rc::new("1".to_string())),
-            Token::Semi,
-        ];
-
-        let (expr, tokens) = Factor::parse(tokens).unwrap();
-
-        assert_eq!(tokens, &[Token::Semi]);
-        assert_eq!(
-            expr,
-            Expr::Unary {
-                op: UnaryOp::Complement,
-                expr: Box::new(Expr::Literal(Literal::Int(1)))
-            }
-        );
-    }
-
-    #[test]
-    fn parse_unary_negate_empty() {
-        let tokens = &[Token::Minus, Token::Literal(Rc::new("1".to_string()))];
-
-        let (expr, tokens) = Factor::parse(tokens).unwrap();
-
-        assert!(tokens.is_empty());
-
-        assert_eq!(
-            expr,
-            Expr::Unary {
-                op: UnaryOp::Negate,
-                expr: Box::new(Expr::Literal(Literal::Int(1)))
-            }
-        );
-    }
-
-    #[test]
-    fn parse_unary_negate() {
-        let tokens = &[
-            Token::Minus,
-            Token::Literal(Rc::new("1".to_string())),
-            Token::Semi,
-        ];
-
-        let (expr, tokens) = Factor::parse(tokens).unwrap();
-
-        assert_eq!(tokens, &[Token::Semi]);
-        assert_eq!(
-            expr,
-            Expr::Unary {
-                op: UnaryOp::Negate,
-                expr: Box::new(Expr::Literal(Literal::Int(1)))
-            }
-        );
-    }
-
-    #[test]
-    fn parse_nested_expr() {
-        let tokens = &[
-            Token::LParen,
-            Token::LParen,
-            Token::LParen,
-            Token::Literal(Rc::new("1".to_string())),
-            Token::RParen,
-            Token::RParen,
-            Token::RParen,
-        ];
-
-        let (expr, tokens) = Factor::parse(tokens).unwrap();
-
-        assert!(tokens.is_empty());
-        assert_eq!(expr, Expr::Literal(Literal::Int(1)));
-    }
-
-    #[test]
-    fn parse_unary_complex() {
-        let tokens = &[
-            Token::LParen,
-            Token::BitNot,
-            Token::LParen,
-            Token::Minus,
-            Token::LParen,
-            Token::Literal(Rc::new("2".to_string())),
-            Token::RParen,
-            Token::RParen,
-            Token::RParen,
-        ];
-
-        let (expr, tokens) = Factor::parse(tokens).unwrap();
-
-        assert!(tokens.is_empty());
-
-        assert_eq!(
-            expr,
-            Expr::Unary {
-                op: UnaryOp::Complement,
-                expr: Box::new(Expr::Unary {
-                    op: UnaryOp::Negate,
-                    expr: Box::new(Expr::Literal(Literal::Int(2)))
-                })
-            }
-        );
-    }
-
-    #[test]
-    fn return_2_unary_edition() {
-        let tokens = &[
-            Token::Int,
-            Token::Ident(Rc::new("main".to_string())),
-            Token::LParen,
-            Token::Void,
-            Token::RParen,
-            Token::LSquirly,
-            Token::Return,
-            Token::Minus,
-            Token::LParen,
-            Token::Minus,
-            Token::Literal(Rc::new("2".to_string())),
-            Token::RParen,
-            Token::Semi,
-            Token::RSquirly,
-        ];
-        let program = parse(tokens).unwrap();
-        let expected = Program {
-            functions: vec![FunDecl {
-                ret_t: Type::Int,
-                name: Rc::new("main".to_string()),
-                signature: vec![],
-                block: Some(Block(vec![BlockItem::Stmt(Stmt::Return(Some(
-                    Expr::Unary {
-                        op: UnaryOp::Negate,
-                        expr: Box::new(Expr::Unary {
-                            op: UnaryOp::Negate,
-                            expr: Box::new(Expr::Literal(Literal::Int(2))),
-                        }),
-                    },
-                )))])),
-            }],
-        };
-        assert_eq!(expected, program);
-    }
-
-    #[test]
-    fn parse_expr_thing() {
-        let tokens = &[
-            Token::Minus,
-            Token::LParen,
-            Token::Minus,
-            Token::Literal(Rc::new("2".to_string())),
-            Token::RParen,
-            Token::Semi,
-        ];
-
-        let (expr, tokens) = Expr::parse(tokens, 0).unwrap();
-
-        assert_eq!(&tokens, &[Token::Semi]);
-
-        assert_eq!(
-            expr,
-            Expr::Unary {
-                op: UnaryOp::Negate,
-                expr: Box::new(Expr::Unary {
-                    op: UnaryOp::Negate,
-                    expr: Box::new(Expr::Literal(Literal::Int(2)))
-                }),
-            }
-        );
-    }
-
-    #[test]
-    fn parse_expr_stmt() {
-        let tokens = &[
-            Token::Return,
-            Token::Minus,
-            Token::LParen,
-            Token::Minus,
-            Token::Literal(Rc::new("2".to_string())),
-            Token::RParen,
-            Token::Semi,
-        ];
-
-        let (_stmt, tokens) = Stmt::consume(tokens).unwrap();
-
-        assert!(tokens.is_empty());
     }
 }

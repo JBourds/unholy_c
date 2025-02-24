@@ -51,7 +51,16 @@ pub fn validate(stage: SemaStage<Initial>) -> Result<SemaStage<IdentResolution>>
         .program
         .declarations
         .into_iter()
-        .map(|d| resolve_decl(d, &mut ident_map, &mut unique_name_generator))
+        .map(|d| match d {
+            ast::Declaration::FunDecl(f) => Ok(ast::Declaration::FunDecl(resolve_fun_decl(
+                f,
+                &mut ident_map,
+                &mut unique_name_generator,
+            )?)),
+            ast::Declaration::VarDecl(v) => Ok(ast::Declaration::VarDecl(
+                resolve_file_scope_var_decl(v, &mut ident_map),
+            )),
+        })
         .collect::<Result<Vec<ast::Declaration>, Error>>()?;
 
     Ok(SemaStage {
@@ -78,22 +87,50 @@ fn validate_block(
     Ok(ast::Block(valid_items))
 }
 
-fn resolve_var_decl(
+fn resolve_local_var_decl(
     decl: ast::VarDecl,
     ident_map: &mut HashMap<Rc<String>, IdentEntry>,
     make_temporary: &mut impl FnMut(&str) -> String,
 ) -> Result<ast::VarDecl> {
-    let unique_name = resolve_automatic(decl.name, ident_map, make_temporary)?;
-    let init = match decl.init {
-        Some(expr) => Some(resolve_expr(expr, ident_map)?),
-        None => None,
-    };
+    if let Some(prev_entry) = ident_map.get(&decl.name) {
+        if prev_entry.from_current_scope {
+            if !(prev_entry.has_external_linkage
+                && decl.storage_class == Some(ast::StorageClass::Extern))
+            {
+                bail!("Conflicting local declaration '{}' ", decl.name);
+            }
+        }
+    }
+    if let Some(ast::StorageClass::Extern) = decl.storage_class {
+        _ = ident_map.insert(
+            Rc::clone(&decl.name),
+            IdentEntry::new_external(Rc::clone(&decl.name)),
+        );
+        return Ok(decl);
+    } else {
+        let unique_name = resolve_automatic(decl.name, ident_map, make_temporary)?;
+        let init = match decl.init {
+            Some(expr) => Some(resolve_expr(expr, ident_map)?),
+            None => None,
+        };
 
-    Ok(ast::VarDecl {
-        name: unique_name,
-        init,
-        ..decl
-    })
+        Ok(ast::VarDecl {
+            name: unique_name,
+            init,
+            ..decl
+        })
+    }
+}
+
+fn resolve_file_scope_var_decl(
+    decl: ast::VarDecl,
+    ident_map: &mut HashMap<Rc<String>, IdentEntry>,
+) -> ast::VarDecl {
+    _ = ident_map.insert(
+        Rc::clone(&decl.name),
+        IdentEntry::new_external(Rc::clone(&decl.name)),
+    );
+    decl
 }
 
 fn resolve_automatic(
@@ -174,7 +211,7 @@ fn resolve_decl(
 ) -> Result<ast::Declaration> {
     match decl {
         ast::Declaration::VarDecl(decl) => {
-            resolve_var_decl(decl, ident_map, make_temporary).map(ast::Declaration::VarDecl)
+            resolve_local_var_decl(decl, ident_map, make_temporary).map(ast::Declaration::VarDecl)
         }
         ast::Declaration::FunDecl(decl) => {
             resolve_fun_decl(decl, ident_map, make_temporary).map(ast::Declaration::FunDecl)
@@ -254,7 +291,7 @@ fn resolve_stmt(
             let mut new_map = make_new_scope(ident_map);
             let init = match init {
                 ast::ForInit::Decl(decl) => {
-                    ast::ForInit::Decl(resolve_var_decl(decl, &mut new_map, make_temporary)?)
+                    ast::ForInit::Decl(resolve_local_var_decl(decl, &mut new_map, make_temporary)?)
                 }
                 ast::ForInit::Expr(Some(expr)) => {
                     ast::ForInit::Expr(Some(resolve_expr(expr, &new_map)?))

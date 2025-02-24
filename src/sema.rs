@@ -85,16 +85,16 @@ mod identifiers {
             count += 1;
             new_name
         };
-        let valid_functions = stage
+        let valid_declarations = stage
             .program
-            .functions
+            .declarations
             .into_iter()
-            .map(|f| resolve_fun_decl(f, &mut ident_map, &mut unique_name_generator))
-            .collect::<Result<Vec<ast::FunDecl>, Error>>()?;
+            .map(|d| resolve_decl(d, &mut ident_map, &mut unique_name_generator))
+            .collect::<Result<Vec<ast::Declaration>, Error>>()?;
 
         Ok(SemaStage {
             program: ast::Program {
-                functions: valid_functions,
+                declarations: valid_declarations,
             },
             stage: PhantomData::<IdentResolution>,
         })
@@ -520,9 +520,12 @@ mod typechecking {
                     ast::Type::from(fun),
                     fun.block.is_some(),
                 ),
-                ast::Declaration::VarDecl(ast::VarDecl { typ, name, init }) => {
-                    (Rc::clone(name), typ.clone(), init.is_some())
-                }
+                ast::Declaration::VarDecl(ast::VarDecl {
+                    typ,
+                    name,
+                    init,
+                    storage_class: _,
+                }) => (Rc::clone(name), typ.clone(), init.is_some()),
             }
         }
 
@@ -585,6 +588,7 @@ mod typechecking {
                             name: Rc::clone(name),
                             init: None,
                             typ: typ.clone(),
+                            storage_class: todo!(),
                         });
                         self.declare_in_scope(&param_decl, scope)?;
                     }
@@ -632,8 +636,8 @@ mod typechecking {
     }
 
     fn typecheck_program(program: &ast::Program, symbols: &mut SymbolTable) -> Result<()> {
-        for f in program.functions.iter() {
-            typecheck_fun_decl(f, symbols)?;
+        for d in program.declarations.iter() {
+            typecheck_decl(d, symbols)?;
         }
         Ok(())
     }
@@ -818,26 +822,31 @@ mod typechecking {
 mod gotos {
     use super::*;
     pub fn validate(stage: SemaStage<TypeChecking>) -> Result<SemaStage<GotoValidation>> {
-        let valid_functions = stage
+        let valid_declarations = stage
             .program
-            .functions
+            .declarations
             .into_iter()
-            .map(|f| {
-                let mut label_map = HashMap::new();
-                let block = if let Some(b) = f.block {
-                    let b = resolve_block(b, &f.name, &mut label_map)?;
-                    let b = validate_block(b, &mut label_map)?;
-                    Some(b)
-                } else {
-                    None
-                };
-                Ok(ast::FunDecl { block, ..f })
+            .map(|d| match d {
+                ast::Declaration::FunDecl(f) => {
+                    let mut label_map = HashMap::new();
+                    let block = if let Some(b) = f.block {
+                        let b = resolve_block(b, &f.name, &mut label_map)?;
+                        let b = validate_block(b, &mut label_map)?;
+                        Some(b)
+                    } else {
+                        None
+                    };
+                    Ok(ast::Declaration::FunDecl(ast::FunDecl { block, ..f }))
+                }
+                ast::Declaration::VarDecl(..) => {
+                    unimplemented!()
+                }
             })
-            .collect::<Result<Vec<ast::FunDecl>, Error>>()?;
+            .collect::<Result<Vec<ast::Declaration>, Error>>()?;
 
         Ok(SemaStage {
             program: ast::Program {
-                functions: valid_functions,
+                declarations: valid_declarations,
             },
             stage: PhantomData::<GotoValidation>,
         })
@@ -1095,15 +1104,18 @@ mod switch {
     }
 
     pub fn validate(stage: SemaStage<GotoValidation>) -> Result<SemaStage<SwitchLabelling>> {
-        let valid_functions = stage
+        let valid_declarations = stage
             .program
-            .functions
+            .declarations
             .into_iter()
-            .map(resolve_function)
-            .collect::<Result<Vec<ast::FunDecl>, Error>>()?;
+            .map(|d| match d {
+                ast::Declaration::FunDecl(f) => Ok(ast::Declaration::FunDecl(resolve_function(f)?)),
+                ast::Declaration::VarDecl(..) => unimplemented!(),
+            })
+            .collect::<Result<Vec<ast::Declaration>, Error>>()?;
         Ok(SemaStage {
             program: ast::Program {
-                functions: valid_functions,
+                declarations: valid_declarations,
             },
             stage: PhantomData::<SwitchLabelling>,
         })
@@ -1497,15 +1509,18 @@ mod loops {
     use super::*;
 
     pub fn validate(stage: SemaStage<SwitchLabelling>) -> Result<SemaStage<LoopLabelling>> {
-        let valid_functions = stage
+        let valid_declarations = stage
             .program
-            .functions
+            .declarations
             .into_iter()
-            .map(resolve_function)
-            .collect::<Result<Vec<ast::FunDecl>, Error>>()?;
+            .map(|d| match d {
+                ast::Declaration::FunDecl(f) => Ok(ast::Declaration::FunDecl(resolve_function(f)?)),
+                ast::Declaration::VarDecl(..) => unimplemented!(),
+            })
+            .collect::<Result<Vec<ast::Declaration>, Error>>()?;
         Ok(SemaStage {
             program: ast::Program {
-                functions: valid_functions,
+                declarations: valid_declarations,
             },
             stage: PhantomData::<LoopLabelling>,
         })

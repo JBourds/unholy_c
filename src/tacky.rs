@@ -9,13 +9,15 @@ pub struct Program {
 
 impl From<sema::SemaStage<sema::Final>> for Program {
     fn from(stage: sema::SemaStage<sema::Final>) -> Self {
-        let valid_functions = stage
-            .program
-            .functions
-            .into_iter()
-            .map(Option::<Function>::from)
-            .collect::<Vec<Option<Function>>>();
+        // let valid_functions = stage
+        //     .program
+        //     .functions
+        //     .into_iter()
+        //     .map(Option::<Function>::from)
+        //     .collect::<Vec<Option<Function>>>();
 
+        // FIXME: Ast changes
+        let valid_functions: Vec<Option<Function>> = todo!();
         let valid_function_definitions = valid_functions.into_iter().flatten().collect();
         Self {
             functions: valid_function_definitions,

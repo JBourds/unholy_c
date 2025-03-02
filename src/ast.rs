@@ -169,7 +169,7 @@ impl AstNode for FunDecl {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Copy, Clone, Debug, PartialEq)]
 pub enum StorageClass {
     Static,
     Extern,

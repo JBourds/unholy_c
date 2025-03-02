@@ -7,7 +7,7 @@ pub fn validate(stage: SemaStage<SwitchLabelling>) -> Result<SemaStage<LoopLabel
         .into_iter()
         .map(|d| match d {
             ast::Declaration::FunDecl(f) => Ok(ast::Declaration::FunDecl(resolve_function(f)?)),
-            ast::Declaration::VarDecl(..) => unimplemented!(),
+            ast::Declaration::VarDecl(v) => Ok(ast::Declaration::VarDecl(v)),
         })
         .collect::<Result<Vec<ast::Declaration>, Error>>()?;
     Ok(SemaStage {

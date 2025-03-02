@@ -408,6 +408,10 @@ fn typecheck_stmt(stmt: &ast::Stmt, symbols: &mut SymbolTable) -> Result<()> {
             match init {
                 ast::ForInit::Decl(decl) => {
                     typecheck_var_decl(decl, symbols)?;
+                    ensure!(
+                        decl.storage_class == None,
+                        "Cannot have storage class identifiers in ForInit decl"
+                    );
                 }
                 ast::ForInit::Expr(Some(expr)) => {
                     typecheck_expr(expr, symbols)?;

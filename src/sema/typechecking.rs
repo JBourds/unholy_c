@@ -199,6 +199,12 @@ impl SymbolTable {
 
     fn declare_in_scope(&mut self, decl: &ast::Declaration, scope: Scope) -> Result<()> {
         let (name, new_type, defining_ident, storage_class) = Self::get_decl_info(decl);
+        // Regardless if function or var, in a local scope an extern cannot have an initial value
+        if matches!(scope, Scope::Local(..)) && storage_class == Some(ast::StorageClass::Extern) {
+            if defining_ident {
+                bail!("Initial value provided for {name} when declared extern in local scope");
+            }
+        }
         if let Some(SymbolEntry {
             r#type: old_type,
             defined: already_defined,
@@ -216,6 +222,7 @@ impl SymbolTable {
             //  2. It is a variable:
             //      I)  New declaration shadows existing one (OK)
             //      II) New declaration doesn't shadow (ERROR)
+
             if !scope.shadows(old_scope) {
                 if *old_type != new_type {
                     match new_type {
@@ -251,15 +258,6 @@ impl SymbolTable {
                         true,
                     ) => bail!("Var {name} has conflicting variable initial values"),
                     _ => {}
-                }
-                if matches!(scope, Scope::Local(n) if n > 0)
-                    && storage_class == Some(ast::StorageClass::Extern)
-                {
-                    if defining_ident {
-                        bail!(
-                            "Initial value provided for {name} when declared extern in local scope"
-                        );
-                    }
                 }
             } else {
                 // Local variables can shadow, but functions cannot

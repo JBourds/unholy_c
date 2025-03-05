@@ -1,3 +1,5 @@
+use anyhow::Context;
+
 use super::*;
 
 #[derive(Debug)]
@@ -8,84 +10,128 @@ pub struct SymbolEntry {
     attribute: Attribute,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Copy, Debug)]
 pub enum Attribute {
-    Func {
+    Fun {
         external_linkage: bool,
     },
     Static {
-        value: InitialValue,
+        initial_value: InitialValue,
         external_linkage: bool,
     },
     Local,
 }
 
-impl From<&ast::Declaration> for Result<Attribute> {
-    fn from(value: &ast::Declaration) -> Self {
-        match value {
-            ast::Declaration::FunDecl(f) => Ok(Attribute::Func {
-                external_linkage: f.storage_class != Some(ast::StorageClass::Static),
-            }),
-            ast::Declaration::VarDecl(v) => match v.storage_class {
-                Some(ast::StorageClass::Static) => Ok(Attribute::Static {
-                    value: InitialValue::from_init(v.init.as_ref(), InitialValue::Tentative)?,
-                    external_linkage: false,
-                }),
-                Some(ast::StorageClass::Extern) => Ok(Attribute::Static {
-                    value: InitialValue::from_init(v.init.as_ref(), InitialValue::None)?,
-                    external_linkage: true,
-                }),
-                None => Ok(Attribute::Local),
+impl Attribute {
+    fn from_var_with_scope(var: &ast::VarDecl, scope: Scope) -> Result<Self> {
+        if matches!(scope, Scope::Local(..)) {
+            if var.storage_class == Some(ast::StorageClass::Extern) {
+                ensure!(
+                    var.init.is_none(),
+                    "Local var '{}' is extern but has an initial value",
+                    var.name
+                );
+            }
+        }
+        let initial_value = if let Some(init_val) = InitialValue::from_var_with_scope(var, scope)? {
+            init_val
+        } else {
+            match scope {
+                Scope::Global => match var.storage_class {
+                    Some(ast::StorageClass::Static) | None => InitialValue::Tentative, // Global non-externals with no initilizer are marked as tentative
+                    Some(ast::StorageClass::Extern) => InitialValue::None,
+                },
+                Scope::Local(..) => match var.storage_class {
+                    Some(ast::StorageClass::Static) => InitialValue::Initial(0), // Local Statics with no initilizer get defaulted to zero
+                    Some(ast::StorageClass::Extern) | None => InitialValue::None,
+                },
+            }
+        };
+
+        if initial_value == InitialValue::None
+            && var.storage_class.is_none()
+            && matches!(scope, Scope::Local(..))
+        {
+            return Ok(Attribute::Local);
+        }
+
+        let external_linkage = match scope {
+            Scope::Global => match var.storage_class {
+                Some(ast::StorageClass::Static) => false,
+                Some(ast::StorageClass::Extern) | None => true,
+            },
+            Scope::Local(..) => match var.storage_class {
+                Some(ast::StorageClass::Static) | None => false,
+                Some(ast::StorageClass::Extern) => true,
+            },
+        };
+
+        Ok(Attribute::Static {
+            initial_value,
+            external_linkage,
+        })
+    }
+
+    fn from_fun(fun: &ast::FunDecl) -> Self {
+        match fun.storage_class {
+            Some(ast::StorageClass::Static) => Attribute::Fun {
+                external_linkage: false,
+            },
+            Some(ast::StorageClass::Extern) | None => Attribute::Fun {
+                external_linkage: true,
             },
         }
     }
-}
 
-impl Attribute {
-    fn from_decl_with_scope(decl: &ast::Declaration, scope: &Scope) -> Result<Self> {
-        let attr = Into::<Result<Self>>::into(decl)?;
-        match (scope, attr) {
-            (Scope::Global, Attribute::Local) => {
-                let ast::Declaration::VarDecl(v) = decl else {
-                    unreachable!();
-                };
-                Ok(Attribute::Static {
-                    value: InitialValue::from_init(v.init.as_ref(), InitialValue::Tentative)?,
-                    external_linkage: true,
-                })
-            }
-            (_, attr) => Ok(attr),
+    fn from_decl_with_scope(decl: &ast::Declaration, scope: Scope) -> Result<Self> {
+        match decl {
+            ast::Declaration::FunDecl(f) => Ok(Self::from_fun(f)),
+            ast::Declaration::VarDecl(v) => Self::from_var_with_scope(v, scope).context(format!(
+                "Failed to process attributes for variable '{}'",
+                v.name
+            )),
         }
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum InitialValue {
     Initial(i32),
     Tentative,
     None,
 }
 
-impl From<ast::Expr> for Result<InitialValue> {
-    fn from(value: ast::Expr) -> Self {
-        let val = const_eval::eval(value)?;
+impl InitialValue {
+    fn from_expr(expr: &ast::Expr) -> Result<Self> {
+        let val = const_eval::eval(expr.clone()).context("Failed to const eval expression")?;
         match val {
             ast::Literal::Int(i) => Ok(InitialValue::Initial(i)),
         }
     }
-}
 
-impl InitialValue {
-    fn from_init(init: Option<&ast::Expr>, alternative: Self) -> Result<Self> {
-        match init {
-            Some(expr) => {
-                // I don't know why but I was forced at compiler gunpoint
-                // to annotate these variables
-                let copy: ast::Expr = ast::Expr::clone(expr);
-                let iv: Result<InitialValue> = copy.into();
-                Ok(iv?)
+    fn from_var_with_scope(var: &ast::VarDecl, scope: Scope) -> Result<Option<Self>> {
+        match (scope, var.init.as_ref()) {
+            (Scope::Global, Some(expr)) => {
+                let init = Self::from_expr(expr)
+                    .context(format!("Evaluating expression for '{}' failed", var.name))?;
+                Ok(Some(init))
             }
-            None => Ok(alternative),
+            (Scope::Local(..), Some(expr)) => match var.storage_class {
+                Some(ast::StorageClass::Static) => Ok(Some(
+                    Self::from_expr(expr)
+                        .context(format!("Evaluating expression for '{}' failed", var.name))?,
+                )),
+                None => Ok(None), // Locals technically dont have initial values
+                Some(ast::StorageClass::Extern) => unreachable!(),
+            },
+            (Scope::Global, None) => match var.storage_class {
+                Some(ast::StorageClass::Static) | None => Ok(Some(InitialValue::Tentative)), // Global non-externals with no initilizer are marked as tentative
+                Some(ast::StorageClass::Extern) => Ok(Some(InitialValue::None)),
+            },
+            (Scope::Local(..), None) => match var.storage_class {
+                Some(ast::StorageClass::Static) => Ok(Some(InitialValue::Initial(0))), // Local Statics with no initilizer get defaulted to zero
+                Some(ast::StorageClass::Extern) | None => Ok(Some(InitialValue::None)),
+            },
         }
     }
 }
@@ -122,22 +168,11 @@ impl SymbolTable {
     }
 
     fn new_entry(&self, decl: &ast::Declaration, scope: Scope) -> Result<SymbolEntry> {
-        let attribute = Attribute::from_decl_with_scope(decl, &scope)?;
         Ok(SymbolEntry {
             r#type: decl.into(),
             defined: decl.defining(),
-            scope: if matches!(
-                &attribute,
-                Attribute::Static {
-                    value: _,
-                    external_linkage: true
-                }
-            ) {
-                Scope::Global
-            } else {
-                scope
-            },
-            attribute,
+            scope,
+            attribute: Attribute::from_decl_with_scope(decl, scope)?,
         })
     }
 
@@ -197,19 +232,82 @@ impl SymbolTable {
         }
     }
 
+    fn check_attribute(
+        old_attrib: &Attribute,
+        name: &str,
+        storage_class: Option<ast::StorageClass>,
+        scope: Scope,
+    ) -> Result<Attribute> {
+        match old_attrib {
+            Attribute::Fun { external_linkage } => {
+                if !(*external_linkage) {
+                    // If we are `static void foo(void)`, then
+                    // ```
+                    // void foo(void);
+                    // static void foo(void);
+                    // extern void foo(void);
+                    // ```
+                    // are all okay
+                } else {
+                    if storage_class == Some(ast::StorageClass::Static) {
+                        bail!("Redeclaring function '{name}' as static when it was previously defined with external linkage");
+                    }
+                }
+            }
+            Attribute::Static {
+                external_linkage, ..
+            } => {
+                match scope {
+                    Scope::Global => {
+                        if !(*external_linkage) {
+                            // If we (foo) are declared as static, then following declarations are okay
+                            // ```
+                            // static int foo;
+                            // extern int foo;
+                            // ```
+                            // However just `int foo;` is not.
+
+                            if storage_class == None {
+                                bail!("Global variable '{name}' was previously declared as static");
+                            }
+                            // match initial_value {
+                            //     InitialValue::Initial(..) => {
+                            //         if defining_ident {
+                            //             // FIXME: This case might be redundent
+                            //             bail!("Redefining variable '{name}'");
+                            //         }
+                            //     }
+                            //     InitialValue::Tentative => {}
+                            //     InitialValue::None => {}
+                            // }
+                        } else {
+                            // If we (foo) are declared extern,
+                            // then we cannot be redeclared as static
+                            if storage_class == Some(ast::StorageClass::Static) {
+                                bail!("Redeclaring variable '{name}' as static when it was previously defined with external linkage");
+                            }
+                        }
+                    }
+                    Scope::Local(..) => match storage_class {
+                        Some(ast::StorageClass::Extern) => {} // Vars with linkage can be declared multiple times
+                        Some(ast::StorageClass::Static) | None => {
+                            bail!("Variable '{name}' declared multiple times in scope")
+                        }
+                    },
+                }
+            }
+            Attribute::Local => {}
+        };
+        Ok(*old_attrib)
+    }
+
     fn declare_in_scope(&mut self, decl: &ast::Declaration, scope: Scope) -> Result<()> {
         let (name, new_type, defining_ident, storage_class) = Self::get_decl_info(decl);
-        // Regardless if function or var, in a local scope an extern cannot have an initial value
-        if matches!(scope, Scope::Local(..)) && storage_class == Some(ast::StorageClass::Extern) {
-            if defining_ident {
-                bail!("Initial value provided for {name} when declared extern in local scope");
-            }
-        }
         if let Some(SymbolEntry {
             r#type: old_type,
             defined: already_defined,
             scope: old_scope,
-            attribute: old_attribute,
+            attribute: old_attrib,
         }) = self.get(&name)
         {
             // There is already a declaration for this name, cases include:
@@ -219,48 +317,39 @@ impl SymbolTable {
             //           any number of args- still OK)
             //      III) New declaration type doesn't match existing (ERROR)
             //      IV)  New declaration redefines existing definition
+            //      V)   New declaration conflicts with previous declarations
+            //           linkage (ERROR)
             //  2. It is a variable:
-            //      I)  New declaration shadows existing one (OK)
-            //      II) New declaration doesn't shadow (ERROR)
+            //      I)   New declaration shadows existing one (OK)
+            //      II)  New declaration doesn't shadow (ERROR)
+            //      III) New declaration storage class conflicts with previous
+            //           one (ERROR)
 
+            let mut new_type = new_type;
             if !scope.shadows(old_scope) {
                 if *old_type != new_type {
-                    match new_type {
-                            ast::Type::Fun { param_types, .. } if param_types.is_empty() => {},
+                    match (old_type, &new_type) {
+                            (ast::Type::Fun {..}, ast::Type::Fun { param_types, .. }) if param_types.is_empty() => new_type = old_type.clone(),
                             _ => bail!(
-                                "Redeclaring {name} as {new_type} when it was previously declared as {old_type}"
+                                "Redeclaring '{name}' as {new_type} when it was previously declared as {old_type}"
                             )
                         }
                 }
                 if *already_defined && defining_ident {
-                    bail!("Redefining {name} when it is already defined.")
+                    bail!("Redefining '{name}' when it is already defined.")
                 }
-                if *old_scope == Scope::Global && storage_class == Some(ast::StorageClass::Static) {
-                    bail!("Redeclaring {name} as static when it has been declared as non-static");
-                }
-                if *old_scope == Scope::Global
-                    && matches!(
-                        old_attribute,
-                        Attribute::Static {
-                            value: _value,
-                            external_linkage: false
-                        }
-                    )
-                {
-                    bail!("Redeclaring {name} as non-static when it has been declared as static")
-                }
-                match (old_attribute, defining_ident) {
-                    (
-                        Attribute::Static {
-                            value: InitialValue::Initial(_),
-                            ..
-                        },
-                        true,
-                    ) => bail!("Var {name} has conflicting variable initial values"),
-                    _ => {}
-                }
+                let attribute = Self::check_attribute(old_attrib, &name, storage_class, scope)?;
+                self.insert_scope(
+                    name,
+                    SymbolEntry {
+                        r#type: new_type,
+                        defined: *already_defined || defining_ident,
+                        scope: scope,
+                        attribute,
+                    },
+                );
             } else {
-                // Local variables can shadow, but functions cannot
+                // Local variables can shadow (only if not extern), but functions cannot
                 self.insert_scope(name, self.new_entry(decl, scope)?);
             }
         } else {
@@ -273,17 +362,14 @@ impl SymbolTable {
     fn declare_fun(&mut self, decl: &ast::FunDecl) -> Result<()> {
         if decl.block.is_some() && matches!(self.scope(), Scope::Local(n) if n > 0) {
             bail!(
-                "Attempted to define function '{}' outside of global scope.",
+                "Attempted to define function {} outside of global scope.",
                 decl.name
             );
         }
-        if matches!(self.scope(), Scope::Local(n) if n > 0)
-            && decl.storage_class == Some(ast::StorageClass::Static)
+        if decl.storage_class == Some(ast::StorageClass::Static)
+            && matches!(self.scope(), Scope::Local(n) if n > 0)
         {
-            bail!(
-                "Cannot declare static function '{}' in local scope",
-                decl.name
-            );
+            bail!("Attempted to define local function {} as static", decl.name);
         }
         let wrapped_decl = ast::Declaration::FunDecl(decl.clone());
         self.declare_in_scope(&wrapped_decl, Scope::Global)?;
@@ -304,9 +390,13 @@ impl SymbolTable {
         }
         Ok(())
     }
-
     fn declare_var(&mut self, decl: &ast::VarDecl) -> Result<()> {
+        let storage_class = decl.storage_class;
         let decl = ast::Declaration::VarDecl(decl.clone());
+        match storage_class {
+            Some(ast::StorageClass::Extern) => self.declare_in_scope(&decl, Scope::Global)?,
+            Some(ast::StorageClass::Static) | None => {}
+        }
         self.declare_in_scope(&decl, self.scope())
     }
 
@@ -347,8 +437,11 @@ pub fn validate(stage: SemaStage<IdentResolution>) -> Result<SemaStage<TypeCheck
 }
 
 fn typecheck_program(program: &ast::Program, symbols: &mut SymbolTable) -> Result<()> {
-    for d in program.declarations.iter() {
-        typecheck_decl(d, symbols)?;
+    for decl in program.declarations.iter() {
+        match decl {
+            ast::Declaration::FunDecl(f) => typecheck_fun_decl(f, symbols)?,
+            ast::Declaration::VarDecl(v) => typecheck_global_var_decl(v, symbols)?,
+        }
     }
     Ok(())
 }
@@ -405,11 +498,13 @@ fn typecheck_stmt(stmt: &ast::Stmt, symbols: &mut SymbolTable) -> Result<()> {
         } => {
             match init {
                 ast::ForInit::Decl(decl) => {
+                    if decl.storage_class.is_some() {
+                        bail!(
+                            "For-loop counter var '{}' cannot have storage class specifier",
+                            decl.name
+                        );
+                    }
                     typecheck_var_decl(decl, symbols)?;
-                    ensure!(
-                        decl.storage_class == None,
-                        "Cannot have storage class identifiers in ForInit decl"
-                    );
                 }
                 ast::ForInit::Expr(Some(expr)) => {
                     typecheck_expr(expr, symbols)?;
@@ -522,6 +617,15 @@ fn typecheck_fun_decl(decl: &ast::FunDecl, symbols: &mut SymbolTable) -> Result<
         }
     }
     symbols.pop_scope()
+}
+
+fn typecheck_global_var_decl(decl: &ast::VarDecl, symbols: &mut SymbolTable) -> Result<()> {
+    ensure!(
+        symbols.scope() == Scope::Global,
+        "Global vars must be declared in global scope"
+    );
+    symbols.declare_var(decl)?;
+    Ok(())
 }
 
 fn typecheck_var_decl(decl: &ast::VarDecl, symbols: &mut SymbolTable) -> Result<()> {

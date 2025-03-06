@@ -38,7 +38,7 @@ pub struct Program {
 
 impl From<tacky::Program> for Program {
     fn from(node: tacky::Program) -> Self {
-        let valid_functions = node.functions.into_iter().map(Function::from).collect();
+        let valid_functions = todo!(); // node.functions.into_iter().map(Function::from).collect();
         Program {
             functions: valid_functions,
         }
@@ -56,6 +56,7 @@ impl From<tacky::Function> for Function {
         let tacky::Function {
             name,
             mut params,
+            external_linkage: _,
             instructions: fun_instructions,
         } = node;
         // Create the System V register/stack mappings here
@@ -1203,6 +1204,7 @@ mod tests {
                     dst: tacky::Val::Var(Rc::new("tmp.3".to_string())),
                 },
             ],
+            external_linkage: false,
         };
         // Because the resulting AST is huge just check that it parses
         let _ = Function::from(tacky_fn);

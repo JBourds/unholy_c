@@ -107,7 +107,7 @@ fn resolve_local_var_decl(
             Rc::clone(&decl.name),
             IdentEntry::new_external(Rc::clone(&decl.name)),
         );
-        return Ok(decl);
+        Ok(decl)
     } else {
         let unique_name = resolve_automatic(decl.name, ident_map, make_temporary)?;
         let init = match decl.init {

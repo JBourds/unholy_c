@@ -53,10 +53,11 @@ impl From<sema::SemaStage<sema::Final>> for Program {
         let mut valid_functions = vec![];
         for decl in stage.program.declarations.into_iter() {
             match decl {
-                ast::Declaration::FunDecl(f) => match Option::<Function>::from(f) {
-                    Some(f) => valid_functions.push(f),
-                    None => {}
-                },
+                ast::Declaration::FunDecl(f) => {
+                    if let Some(f) = Option::<Function>::from(f) {
+                        valid_functions.push(f);
+                    }
+                }
                 ast::Declaration::VarDecl(..) => {}
             };
         }
@@ -65,9 +66,8 @@ impl From<sema::SemaStage<sema::Final>> for Program {
         );
         let mut statics = vec![];
         for (name, symbol) in symbols.global.drain() {
-            match StaticVariable::from_symbol_with_name(name, symbol) {
-                Some(r#static) => statics.push(r#static),
-                None => {}
+            if let Some(r#static) = StaticVariable::from_symbol_with_name(name, symbol) {
+                statics.push(r#static);
             }
         }
         let top_level = valid_functions

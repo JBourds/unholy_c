@@ -267,7 +267,7 @@ impl SymbolTable {
                             // ```
                             // However just `int foo;` is not.
 
-                            if storage_class == None {
+                            if storage_class.is_none() {
                                 bail!("Global variable '{name}' was previously declared as static");
                             }
                             // match initial_value {

@@ -7,7 +7,7 @@ pub struct SymbolEntry {
     r#type: ast::Type,
     defined: bool,
     scope: Scope,
-    attribute: Attribute,
+    pub attribute: Attribute,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -138,7 +138,7 @@ impl InitialValue {
 
 #[derive(Debug)]
 pub struct SymbolTable {
-    global: HashMap<Rc<String>, SymbolEntry>,
+    pub global: HashMap<Rc<String>, SymbolEntry>,
     scopes: Vec<HashMap<Rc<String>, SymbolEntry>>,
 }
 

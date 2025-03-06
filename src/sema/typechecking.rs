@@ -338,7 +338,16 @@ impl SymbolTable {
                 if *already_defined && defining_ident {
                     bail!("Redefining '{name}' when it is already defined.")
                 }
-                let attribute = Self::check_attribute(old_attrib, &name, storage_class, scope)?;
+                let mut attribute = Self::check_attribute(old_attrib, &name, storage_class, scope)?;
+                match decl {
+                    ast::Declaration::FunDecl(..) => {}
+                    ast::Declaration::VarDecl(var) => {
+                        if defining_ident {
+                            // Need to update inital_value to be correct
+                            attribute = Attribute::from_var_with_scope(var, scope)?;
+                        }
+                    }
+                }
                 self.insert_scope(
                     name,
                     SymbolEntry {

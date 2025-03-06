@@ -14,6 +14,7 @@ pub fn validate(stage: SemaStage<SwitchLabelling>) -> Result<SemaStage<LoopLabel
         program: ast::Program {
             declarations: valid_declarations,
         },
+        symbols: stage.symbols,
         stage: PhantomData::<LoopLabelling>,
     })
 }

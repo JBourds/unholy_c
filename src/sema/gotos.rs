@@ -24,6 +24,7 @@ pub fn validate(stage: SemaStage<TypeChecking>) -> Result<SemaStage<GotoValidati
         program: ast::Program {
             declarations: valid_declarations,
         },
+        symbols: stage.symbols,
         stage: PhantomData::<GotoValidation>,
     })
 }

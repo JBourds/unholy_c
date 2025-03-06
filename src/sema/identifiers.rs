@@ -67,6 +67,7 @@ pub fn validate(stage: SemaStage<Initial>) -> Result<SemaStage<IdentResolution>>
         program: ast::Program {
             declarations: valid_declarations,
         },
+        symbols: stage.symbols,
         stage: PhantomData::<IdentResolution>,
     })
 }

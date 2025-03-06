@@ -44,6 +44,7 @@ pub fn validate(stage: SemaStage<GotoValidation>) -> Result<SemaStage<SwitchLabe
         program: ast::Program {
             declarations: valid_declarations,
         },
+        symbols: stage.symbols,
         stage: PhantomData::<SwitchLabelling>,
     })
 }

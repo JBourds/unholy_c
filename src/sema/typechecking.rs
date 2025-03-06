@@ -441,6 +441,7 @@ pub fn validate(stage: SemaStage<IdentResolution>) -> Result<SemaStage<TypeCheck
     typecheck_program(&stage.program, &mut symbols)?;
     Ok(SemaStage {
         program: stage.program,
+        symbols: Some(symbols),
         stage: PhantomData::<TypeChecking>,
     })
 }

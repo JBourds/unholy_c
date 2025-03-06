@@ -4,30 +4,85 @@ use std::rc::Rc;
 
 #[derive(Debug, PartialEq)]
 pub struct Program {
-    pub functions: Vec<Function>,
+    pub top_level: Vec<TopLevel>,
+}
+
+#[derive(Debug, PartialEq)]
+pub enum TopLevel {
+    Fun(Function),
+    Static(StaticVariable),
+}
+
+impl StaticVariable {
+    fn from_symbol_with_name(
+        name: Rc<String>,
+        symbol: sema::typechecking::SymbolEntry,
+    ) -> Option<Self> {
+        match symbol.attribute {
+            sema::typechecking::Attribute::Fun { .. } => None,
+            sema::typechecking::Attribute::Static {
+                initial_value,
+                external_linkage,
+            } => match initial_value {
+                sema::typechecking::InitialValue::Initial(i) => Some(StaticVariable {
+                    identifier: name,
+                    external_linkage,
+                    init: Some(i),
+                }),
+                sema::typechecking::InitialValue::Tentative => Some(StaticVariable {
+                    identifier: name,
+                    external_linkage,
+                    init: Some(0),
+                }),
+                sema::typechecking::InitialValue::None => None,
+            },
+            sema::typechecking::Attribute::Local => None,
+        }
+    }
+}
+
+#[derive(Debug, PartialEq)]
+pub struct StaticVariable {
+    identifier: Rc<String>,
+    external_linkage: bool,
+    init: Option<i32>,
 }
 
 impl From<sema::SemaStage<sema::Final>> for Program {
     fn from(stage: sema::SemaStage<sema::Final>) -> Self {
-        // let valid_functions = stage
-        //     .program
-        //     .functions
-        //     .into_iter()
-        //     .map(Option::<Function>::from)
-        //     .collect::<Vec<Option<Function>>>();
-
-        // FIXME: Ast changes
-        let valid_functions: Vec<Option<Function>> = todo!();
-        let valid_function_definitions = valid_functions.into_iter().flatten().collect();
-        Self {
-            functions: valid_function_definitions,
+        let mut valid_functions = vec![];
+        for decl in stage.program.declarations.into_iter() {
+            match decl {
+                ast::Declaration::FunDecl(f) => match Option::<Function>::from(f) {
+                    Some(f) => valid_functions.push(f),
+                    None => {}
+                },
+                ast::Declaration::VarDecl(..) => {}
+            };
         }
+        let mut symbols = stage.symbols.expect(
+            "Symbols should not be None at `sema::Final`, yes I know this is bad type design",
+        );
+        let mut statics = vec![];
+        for (name, symbol) in symbols.global.drain() {
+            match StaticVariable::from_symbol_with_name(name, symbol) {
+                Some(r#static) => statics.push(r#static),
+                None => {}
+            }
+        }
+        let top_level = valid_functions
+            .into_iter()
+            .map(TopLevel::Fun)
+            .chain(statics.into_iter().map(TopLevel::Static))
+            .collect::<Vec<TopLevel>>();
+        Self { top_level }
     }
 }
 
 #[derive(Debug, PartialEq)]
 pub struct Function {
     pub name: Rc<String>,
+    pub external_linkage: bool,
     pub params: Vec<Option<Rc<String>>>,
     pub instructions: Vec<Instruction>,
 }
@@ -67,9 +122,11 @@ impl From<ast::FunDecl> for Option<Function> {
             .map(|x| x.1)
             .collect::<Vec<Option<Rc<String>>>>();
 
+        let external_linkage = node.storage_class != Some(ast::StorageClass::Static);
         Some(Function {
             name: Rc::new(name.to_string()),
             params,
+            external_linkage,
             instructions,
         })
     }

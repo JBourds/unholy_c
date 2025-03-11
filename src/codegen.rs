@@ -39,9 +39,9 @@ pub enum TopLevel {
 
 #[derive(Debug, PartialEq)]
 pub struct StaticVariable {
-    identifier: Rc<String>,
-    global: bool,
-    init: Option<i32>,
+    pub identifier: Rc<String>,
+    pub global: bool,
+    pub init: Option<i32>,
 }
 
 impl From<tacky::StaticVariable> for StaticVariable {
@@ -999,10 +999,12 @@ impl fmt::Display for Operand {
             Self::StackOffset { offset, .. } => {
                 write!(f, "[rbp{offset:+}]")
             }
+            Self::Data { name, .. } => {
+                write!(f, "{name}[rip]")
+            }
             Self::Pseudo { .. } => {
                 unreachable!("Cannot create asm representation for a pseudioregister.")
             }
-            _ => todo!(),
         }
     }
 }

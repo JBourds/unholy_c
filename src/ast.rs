@@ -923,7 +923,6 @@ impl std::fmt::Display for Literal {
         }
     }
 }
-
 impl AstNode for Literal {
     fn consume(tokens: &[Token]) -> Result<(Literal, &[Token])> {
         if let Some(token) = tokens.first() {

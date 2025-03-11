@@ -14,29 +14,26 @@ pub enum TopLevel {
 }
 
 impl StaticVariable {
-    fn from_symbol_with_name(
-        name: Rc<String>,
-        symbol: sema::typechecking::SymbolEntry,
-    ) -> Option<Self> {
+    fn from_symbol_with_name(name: Rc<String>, symbol: sema::tc::SymbolEntry) -> Option<Self> {
         match symbol.attribute {
-            sema::typechecking::Attribute::Fun { .. } => None,
-            sema::typechecking::Attribute::Static {
+            sema::tc::Attribute::Fun { .. } => None,
+            sema::tc::Attribute::Static {
                 initial_value,
                 external_linkage,
             } => match initial_value {
-                sema::typechecking::InitialValue::Initial(i) => Some(StaticVariable {
+                sema::tc::InitialValue::Initial(i) => Some(StaticVariable {
                     identifier: name,
                     external_linkage,
                     init: Some(i),
                 }),
-                sema::typechecking::InitialValue::Tentative => Some(StaticVariable {
+                sema::tc::InitialValue::Tentative => Some(StaticVariable {
                     identifier: name,
                     external_linkage,
                     init: Some(0),
                 }),
-                sema::typechecking::InitialValue::None => None,
+                sema::tc::InitialValue::None => None,
             },
-            sema::typechecking::Attribute::Local => None,
+            sema::tc::Attribute::Local => None,
         }
     }
 }
@@ -48,8 +45,8 @@ pub struct StaticVariable {
     init: Option<i32>,
 }
 
-impl From<sema::SemaStage<sema::Final>> for Program {
-    fn from(stage: sema::SemaStage<sema::Final>) -> Self {
+impl From<sema::ValidAst> for Program {
+    fn from(stage: sema::ValidAst) -> Self {
         let mut valid_functions = vec![];
         for decl in stage.program.declarations.into_iter() {
             match decl {
@@ -61,11 +58,8 @@ impl From<sema::SemaStage<sema::Final>> for Program {
                 ast::Declaration::VarDecl(..) => {}
             };
         }
-        let mut symbols = stage.symbols.expect(
-            "Symbols should not be None at `sema::Final`, yes I know this is bad type design",
-        );
         let mut statics = vec![];
-        for (name, symbol) in symbols.global.drain() {
+        for (name, symbol) in stage.symbols.global.into_iter() {
             if let Some(r#static) = StaticVariable::from_symbol_with_name(name, symbol) {
                 statics.push(r#static);
             }

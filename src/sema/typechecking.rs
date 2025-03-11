@@ -297,7 +297,7 @@ impl SymbolTable {
     }
 
     fn declare_in_scope(&mut self, decl: &ast::Declaration, scope: Scope) -> Result<()> {
-        let (name, new_type, defining_ident, storage_class) = Self::get_decl_info(decl);
+        let (name, mut new_type, defining_ident, storage_class) = Self::get_decl_info(decl);
         if let Some(SymbolEntry {
             r#type: old_type,
             defined: already_defined,
@@ -311,7 +311,7 @@ impl SymbolTable {
             //      II)  New declaration has no args specified (Potentially
             //           any number of args- still OK)
             //      III) New declaration type doesn't match existing (ERROR)
-            //      IV)  New declaration redefines existing definition
+            //      IV)  New declaration redefines existing definition (ERROR)
             //      V)   New declaration conflicts with previous declarations
             //           linkage (ERROR)
             //  2. It is a variable:
@@ -319,8 +319,6 @@ impl SymbolTable {
             //      II)  New declaration doesn't shadow (ERROR)
             //      III) New declaration storage class conflicts with previous
             //           one (ERROR)
-
-            let mut new_type = new_type;
             if !scope.shadows(old_scope) {
                 if *old_type != new_type {
                     match (old_type, &new_type) {

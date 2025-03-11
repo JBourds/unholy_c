@@ -118,7 +118,7 @@ fn parse_ast(args: &Args, tokens: Vec<lexer::Token>) -> Result<Option<ast::Progr
     }
 }
 
-fn validate_ast(args: &Args, ast: ast::Program) -> Result<Option<sema::SemaStage<sema::Final>>> {
+fn validate_ast(args: &Args, ast: ast::Program) -> Result<Option<sema::ValidAst>> {
     let ast_valid = sema::validate(ast)?;
     if args.validate {
         println!("Validated AST:\n{:#?}", ast_valid.program);
@@ -128,7 +128,7 @@ fn validate_ast(args: &Args, ast: ast::Program) -> Result<Option<sema::SemaStage
     }
 }
 
-fn generate_ir(args: &Args, stage: sema::SemaStage<sema::Final>) -> Result<Option<tacky::Program>> {
+fn generate_ir(args: &Args, stage: sema::ValidAst) -> Result<Option<tacky::Program>> {
     let tacky = tacky::Program::from(stage);
     if args.tacky {
         println!("Generated Intermediate Representation:\n{:#?}", tacky);

@@ -24,14 +24,13 @@ pub enum Attribute {
 
 impl Attribute {
     fn from_var_with_scope(var: &ast::VarDecl, scope: Scope) -> Result<Self> {
-        if matches!(scope, Scope::Local(..)) {
-            if var.storage_class == Some(ast::StorageClass::Extern) {
-                ensure!(
-                    var.init.is_none(),
-                    "Local var '{}' is extern but has an initial value",
-                    var.name
-                );
-            }
+        if matches!(scope, Scope::Local(..)) && var.storage_class == Some(ast::StorageClass::Extern)
+        {
+            ensure!(
+                var.init.is_none(),
+                "Local var '{}' is extern but has an initial value",
+                var.name
+            );
         }
         let initial_value = if let Some(init_val) = InitialValue::from_var_with_scope(var, scope)? {
             init_val
@@ -243,10 +242,8 @@ impl SymbolTable {
                     // extern void foo(void);
                     // ```
                     // are all okay
-                } else {
-                    if storage_class == Some(ast::StorageClass::Static) {
-                        bail!("Redeclaring function '{name}' as static when it was previously defined with external linkage");
-                    }
+                } else if storage_class == Some(ast::StorageClass::Static) {
+                    bail!("Redeclaring function '{name}' as static when it was previously defined with external linkage");
                 }
             }
             Attribute::Static {
@@ -346,7 +343,7 @@ impl SymbolTable {
                     SymbolEntry {
                         r#type: new_type,
                         defined: *already_defined || defining_ident,
-                        scope: scope,
+                        scope,
                         attribute,
                     },
                 );

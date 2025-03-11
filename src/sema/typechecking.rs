@@ -170,7 +170,7 @@ impl SymbolTable {
         })
     }
 
-    fn get(&self, key: &Rc<String>) -> Option<&SymbolEntry> {
+    pub fn get(&self, key: &Rc<String>) -> Option<&SymbolEntry> {
         let local = self.get_local(key);
         if local.is_none() {
             self.get_global(key)

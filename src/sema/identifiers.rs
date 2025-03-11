@@ -94,12 +94,9 @@ fn resolve_local_var_decl(
     make_temporary: &mut impl FnMut(&str) -> String,
 ) -> Result<ast::VarDecl> {
     if let Some(prev_entry) = ident_map.get(&decl.name) {
-        if prev_entry.from_current_scope {
-            if !(prev_entry.has_external_linkage
-                && decl.storage_class == Some(ast::StorageClass::Extern))
-            {
-                bail!("Conflicting local declaration '{}' ", decl.name);
-            }
+        if prev_entry.from_current_scope && !(prev_entry.has_external_linkage
+                && decl.storage_class == Some(ast::StorageClass::Extern)) {
+            bail!("Conflicting local declaration '{}' ", decl.name);
         }
     }
     if let Some(ast::StorageClass::Extern) = decl.storage_class {

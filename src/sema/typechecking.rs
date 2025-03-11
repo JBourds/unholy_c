@@ -4,7 +4,7 @@ use anyhow::Context;
 
 use super::*;
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct SymbolEntry {
     pub r#type: ast::Type,
     pub defined: bool,
@@ -202,9 +202,18 @@ impl SymbolTable {
     }
 
     fn insert_scope(&mut self, key: Rc<String>, entry: SymbolEntry) -> Option<SymbolEntry> {
+        // Declare local static vars in global scope as well so it is
+        // easy to iterate over (unique names make this legal)
         match entry.scope {
             Scope::Global => self.global.insert(key, entry),
-            Scope::Local(frame) => self.scopes[frame].insert(key, entry),
+            Scope::Local(frame) => {
+                if matches!(entry.attribute, Attribute::Static { .. })
+                    && !self.global.contains_key(&key)
+                {
+                    self.global.insert(Rc::clone(&key), entry.clone());
+                }
+                self.scopes[frame].insert(key, entry)
+            }
         }
     }
 

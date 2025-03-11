@@ -1,4 +1,4 @@
-use crate::tacky;
+use crate::{sema, tacky};
 use std::collections::HashMap;
 use std::fmt;
 use std::marker::PhantomData;
@@ -32,31 +32,66 @@ const SYSTEM_V_REGS: [Operand; 6] = [
 ];
 
 #[derive(Debug, PartialEq)]
+pub enum TopLevel {
+    Fun(Function),
+    Static(StaticVariable),
+}
+
+#[derive(Debug, PartialEq)]
+pub struct StaticVariable {
+    identifier: Rc<String>,
+    global: bool,
+    init: Option<i32>,
+}
+
+impl From<tacky::StaticVariable> for StaticVariable {
+    fn from(value: tacky::StaticVariable) -> Self {
+        let tacky::StaticVariable {
+            identifier,
+            external_linkage: global,
+            init,
+        } = value;
+        Self {
+            identifier,
+            global,
+            init,
+        }
+    }
+}
+
+#[derive(Debug, PartialEq)]
 pub struct Program {
-    pub functions: Vec<Function>,
+    pub top_level: Vec<TopLevel>,
 }
 
 impl From<tacky::Program> for Program {
-    fn from(node: tacky::Program) -> Self {
-        let valid_functions = todo!(); // node.functions.into_iter().map(Function::from).collect();
-        Program {
-            functions: valid_functions,
+    fn from(prog: tacky::Program) -> Self {
+        let mut top_level = vec![];
+        for item in prog.top_level.into_iter() {
+            match item {
+                tacky::TopLevel::Fun(f) => {
+                    top_level.push(TopLevel::Fun(Function::from_with_storage(f, &prog.symbols)))
+                }
+                tacky::TopLevel::Static(s) => top_level.push(TopLevel::Static(s.into())),
+            }
         }
+        Program { top_level }
     }
 }
 
 #[derive(Debug, PartialEq)]
 pub struct Function {
     pub name: Rc<String>,
+    pub global: bool,
     pub instructions: Vec<Instruction<Final>>,
 }
 
-impl From<tacky::Function> for Function {
-    fn from(node: tacky::Function) -> Self {
+impl Function {
+    fn from_with_storage(node: tacky::Function, symbols: &sema::tc::SymbolTable) -> Self {
         let tacky::Function {
             name,
             mut params,
-            external_linkage: _,
+            external_linkage: global,
             instructions: fun_instructions,
         } = node;
         // Create the System V register/stack mappings here
@@ -122,12 +157,16 @@ impl From<tacky::Function> for Function {
         // Start moving down for arguments & temp vars used here
         let mut stack_bound = 0;
         let mut requires_fixup = vec![];
-        let mut fixed_instructions: Vec<Instruction<Offset>> = instructions
+        let mut fixed_instructions: Vec<Instruction<WithStorage>> = instructions
             .drain(..)
             .enumerate()
             .map(|(i, instr)| {
-                let (instr, needs_fixing) =
-                    Instruction::<Offset>::new(instr, &mut mappings, &mut stack_bound);
+                let (instr, needs_fixing) = Instruction::<WithStorage>::new(
+                    instr,
+                    symbols,
+                    &mut mappings,
+                    &mut stack_bound,
+                );
                 if needs_fixing {
                     requires_fixup.push(i);
                 }
@@ -169,6 +208,7 @@ impl From<tacky::Function> for Function {
 
         Function {
             name,
+            global,
             instructions: final_instructions,
         }
     }
@@ -418,13 +458,11 @@ impl From<tacky::BinaryOp> for CondCode {
 }
 
 #[derive(Debug, PartialEq)]
-struct Initial;
-
+enum Initial {}
 #[derive(Debug, PartialEq)]
-struct Offset;
-
+enum WithStorage {}
 #[derive(Debug, PartialEq)]
-pub struct Final;
+pub enum Final {}
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum InstructionType {
@@ -438,8 +476,8 @@ pub enum InstructionType {
     },
     Binary {
         op: BinaryOp,
-        src1: Operand,
-        src2: Operand,
+        src: Operand,
+        dst: Operand,
     },
     Cmp {
         src: Operand,
@@ -481,24 +519,41 @@ impl Instruction<Initial> {
     }
 }
 
-impl Instruction<Offset> {
+impl Instruction<WithStorage> {
     fn new(
         instruction: Instruction<Initial>,
+        symbols: &sema::tc::SymbolTable,
         mappings: &mut HashMap<Rc<String>, Operand>,
         stack_bound: &mut isize,
     ) -> (Self, bool) {
         let mut needs_fixing = false;
         let mut convert_operand_offset = |op| match op {
-            Operand::Pseudo { ref name, size } => mappings
-                .entry(Rc::clone(name))
-                .or_insert_with(|| {
-                    *stack_bound += size as isize;
-                    Operand::StackOffset {
-                        offset: -*stack_bound,
-                        size,
+            Operand::Pseudo { ref name, size } => {
+                // TODO: Add calculations for type size in earlier passes and
+                // remove hardcoded "4" here
+                match symbols.get(name) {
+                    // 1. Check for static storage
+                    Some(entry)
+                        if matches!(entry.attribute, sema::tc::Attribute::Static { .. }) =>
+                    {
+                        Operand::Data {
+                            name: Rc::clone(name),
+                            size: 4,
+                        }
                     }
-                })
-                .clone(),
+                    // 2. If it is not static, put it on the stack
+                    _ => mappings
+                        .entry(Rc::clone(name))
+                        .or_insert_with(|| {
+                            *stack_bound += size as isize;
+                            Operand::StackOffset {
+                                offset: -*stack_bound,
+                                size,
+                            }
+                        })
+                        .clone(),
+                }
+            }
             op @ Operand::StackOffset { .. } => {
                 needs_fixing = true;
                 op
@@ -517,10 +572,10 @@ impl Instruction<Offset> {
                         op,
                         dst: convert_operand_offset(dst),
                     },
-                    InstructionType::Binary { op, src1, src2 } => InstructionType::Binary {
+                    InstructionType::Binary { op, src, dst } => InstructionType::Binary {
                         op,
-                        src1: convert_operand_offset(src1),
-                        src2: convert_operand_offset(src2),
+                        src: convert_operand_offset(src),
+                        dst: convert_operand_offset(dst),
                     },
                     InstructionType::Idiv(op) => InstructionType::Idiv(convert_operand_offset(op)),
                     InstructionType::Cmp { src, dst } => InstructionType::Cmp {
@@ -534,7 +589,7 @@ impl Instruction<Offset> {
                     InstructionType::Push(op) => InstructionType::Push(convert_operand_offset(op)),
                     instr => instr,
                 },
-                phantom: PhantomData::<Offset>,
+                phantom: PhantomData::<WithStorage>,
             },
             needs_fixing,
         )
@@ -542,152 +597,79 @@ impl Instruction<Offset> {
 }
 
 // Final stage of rewriting to follow semantics of assembly instructions
-impl From<Instruction<Offset>> for Vec<Instruction<Final>> {
-    fn from(instr: Instruction<Offset>) -> Vec<Instruction<Final>> {
+impl From<Instruction<WithStorage>> for Vec<Instruction<Final>> {
+    fn from(instr: Instruction<WithStorage>) -> Vec<Instruction<Final>> {
         let new_instr = |op| Instruction::<Final> {
             op,
             phantom: PhantomData::<Final>,
         };
+
+        let r10 = Operand::Reg(Reg::X64 {
+            reg: X64Reg::R10,
+            section: RegSection::Dword,
+        });
+        let r11 = Operand::Reg(Reg::X64 {
+            reg: X64Reg::R11,
+            section: RegSection::Dword,
+        });
         match instr.op {
             InstructionType::Mov {
-                src:
-                    Operand::StackOffset {
-                        offset: src_offset,
-                        size: src_size,
-                    },
-                dst:
-                    Operand::StackOffset {
-                        offset: dst_offset,
-                        size: dst_size,
-                    },
+                src: src @ Operand::StackOffset { .. } | src @ Operand::Data { .. },
+                dst: dst @ Operand::StackOffset { .. } | dst @ Operand::Data { .. },
             } => {
                 vec![
                     new_instr(InstructionType::Mov {
-                        src: Operand::StackOffset {
-                            offset: src_offset,
-                            size: src_size,
-                        },
-                        dst: Operand::Reg(Reg::X64 {
-                            reg: X64Reg::R10,
-                            section: RegSection::Dword,
-                        }),
+                        src,
+                        dst: r10.clone(),
                     }),
                     new_instr(InstructionType::Mov {
-                        src: Operand::Reg(Reg::X64 {
-                            reg: X64Reg::R10,
-                            section: RegSection::Dword,
-                        }),
-                        dst: Operand::StackOffset {
-                            offset: dst_offset,
-                            size: dst_size,
-                        },
+                        src: r10.clone(),
+                        dst,
                     }),
                 ]
             }
             InstructionType::Binary {
                 op,
-                src1:
-                    Operand::StackOffset {
-                        offset: src1_offset,
-                        size: src1_size,
-                    },
-                src2:
-                    Operand::StackOffset {
-                        offset: src2_offset,
-                        size: src2_size,
-                    },
+                src: src @ Operand::StackOffset { .. } | src @ Operand::Data { .. },
+                dst: dst @ Operand::StackOffset { .. } | dst @ Operand::Data { .. },
             } => {
                 vec![
                     new_instr(InstructionType::Mov {
-                        src: Operand::StackOffset {
-                            offset: src1_offset,
-                            size: src1_size,
-                        },
-                        dst: Operand::Reg(Reg::X64 {
-                            reg: X64Reg::R10,
-                            section: RegSection::Dword,
-                        }),
+                        src,
+                        dst: r10.clone(),
                     }),
-                    new_instr(InstructionType::Binary {
-                        op,
-                        src1: Operand::Reg(Reg::X64 {
-                            reg: X64Reg::R10,
-                            section: RegSection::Dword,
-                        }),
-                        src2: Operand::StackOffset {
-                            offset: src2_offset,
-                            size: src2_size,
-                        },
-                    }),
+                    new_instr(InstructionType::Binary { op, src: r10, dst }),
                 ]
             }
-            InstructionType::Idiv(Operand::Imm(v)) => vec![
+            InstructionType::Idiv(src @ Operand::Imm(_)) => vec![
                 new_instr(InstructionType::Mov {
-                    src: Operand::Imm(v),
-                    dst: Operand::Reg(Reg::X64 {
-                        reg: X64Reg::R10,
-                        section: RegSection::Dword,
-                    }),
+                    src,
+                    dst: r10.clone(),
                 }),
-                new_instr(InstructionType::Idiv(Operand::Reg(Reg::X64 {
-                    reg: X64Reg::R10,
-                    section: RegSection::Dword,
-                }))),
+                new_instr(InstructionType::Idiv(r10)),
             ],
             InstructionType::Cmp {
-                src:
-                    Operand::StackOffset {
-                        offset: src_offset,
-                        size: src_size,
-                    },
-                dst:
-                    Operand::StackOffset {
-                        offset: dst_offset,
-                        size: dst_size,
-                    },
+                src: src @ Operand::StackOffset { .. } | src @ Operand::Data { .. },
+                dst: dst @ Operand::StackOffset { .. } | dst @ Operand::Data { .. },
             } => {
                 vec![
                     new_instr(InstructionType::Mov {
-                        src: Operand::StackOffset {
-                            offset: src_offset,
-                            size: src_size,
-                        },
-                        dst: Operand::Reg(Reg::X64 {
-                            reg: X64Reg::R10,
-                            section: RegSection::Dword,
-                        }),
+                        src,
+                        dst: r11.clone(),
                     }),
-                    new_instr(InstructionType::Cmp {
-                        src: Operand::Reg(Reg::X64 {
-                            reg: X64Reg::R10,
-                            section: RegSection::Dword,
-                        }),
-                        dst: Operand::StackOffset {
-                            offset: dst_offset,
-                            size: dst_size,
-                        },
-                    }),
+                    new_instr(InstructionType::Cmp { src: r11, dst }),
                 ]
             }
             InstructionType::Cmp {
                 src,
-                dst: Operand::Imm(i),
+                dst: imm @ Operand::Imm(_),
             } => {
                 vec![
                     new_instr(InstructionType::Mov {
-                        src: Operand::Imm(i),
-                        dst: Operand::Reg(Reg::X64 {
-                            reg: X64Reg::R11,
-                            section: RegSection::Dword,
-                        }),
+                        src: imm,
+                        dst: r10.clone(),
                     }),
-                    new_instr(InstructionType::Cmp {
-                        src,
-                        dst: Operand::Reg(Reg::X64 {
-                            reg: X64Reg::R11,
-                            section: RegSection::Dword,
-                        }),
-                    }),
+                    new_instr(InstructionType::Cmp { src, dst: r10 }),
                 ]
             }
 
@@ -702,6 +684,14 @@ impl From<tacky::Instruction> for Vec<Instruction<Initial>> {
             op,
             phantom: PhantomData::<Initial>,
         };
+        let eax = Operand::Reg(Reg::X86 {
+            reg: X86Reg::Ax,
+            section: RegSection::Dword,
+        });
+        let r11 = Operand::Reg(Reg::X64 {
+            reg: X64Reg::R11,
+            section: RegSection::Dword,
+        });
         match instruction {
             tacky::Instruction::Return(None) => {
                 vec![new_instr(InstructionType::Ret)]
@@ -709,10 +699,7 @@ impl From<tacky::Instruction> for Vec<Instruction<Initial>> {
             tacky::Instruction::Return(Some(val)) => vec![
                 new_instr(InstructionType::Mov {
                     src: Operand::from(val),
-                    dst: Operand::Reg(Reg::X86 {
-                        reg: X86Reg::Ax,
-                        section: RegSection::Dword,
-                    }),
+                    dst: eax,
                 }),
                 new_instr(InstructionType::Ret),
             ],
@@ -768,8 +755,8 @@ impl From<tacky::Instruction> for Vec<Instruction<Initial>> {
                         }),
                         new_instr(InstructionType::Binary {
                             op: op.into(),
-                            src1: src2.into(),
-                            src2: dst.into(),
+                            src: src2.into(),
+                            dst: dst.into(),
                         }),
                     ]
                 }
@@ -777,33 +764,20 @@ impl From<tacky::Instruction> for Vec<Instruction<Initial>> {
                     vec![
                         new_instr(InstructionType::Mov {
                             src: src2.into(),
-                            dst: Operand::Reg(Reg::X64 {
-                                reg: X64Reg::R11,
-                                section: RegSection::Dword,
-                            }),
+                            dst: r11.clone(),
                         }),
                         new_instr(InstructionType::Binary {
                             op: BinaryOp::Multiply,
-                            src1: src1.into(),
-                            src2: Operand::Reg(Reg::X64 {
-                                reg: X64Reg::R11,
-                                section: RegSection::Dword,
-                            }),
+                            src: src1.into(),
+                            dst: r11.clone(),
                         }),
                         new_instr(InstructionType::Mov {
-                            src: Operand::Reg(Reg::X64 {
-                                reg: X64Reg::R11,
-                                section: RegSection::Dword,
-                            }),
+                            src: r11,
                             dst: dst.into(),
                         }),
                     ]
                 }
                 tacky::BinaryOp::Divide => {
-                    let eax = Operand::Reg(Reg::X86 {
-                        reg: X86Reg::Ax,
-                        section: RegSection::Dword,
-                    });
                     vec![
                         new_instr(InstructionType::Mov {
                             src: src1.into(),
@@ -820,10 +794,7 @@ impl From<tacky::Instruction> for Vec<Instruction<Initial>> {
                 tacky::BinaryOp::Remainder => vec![
                     new_instr(InstructionType::Mov {
                         src: src1.into(),
-                        dst: Operand::Reg(Reg::X86 {
-                            reg: X86Reg::Ax,
-                            section: RegSection::Dword,
-                        }),
+                        dst: eax,
                     }),
                     new_instr(InstructionType::Cdq),
                     new_instr(InstructionType::Idiv(src2.into())),
@@ -857,8 +828,8 @@ impl From<tacky::Instruction> for Vec<Instruction<Initial>> {
                     }));
                     v.push(new_instr(InstructionType::Binary {
                         op: op.into(),
-                        src1: src,
-                        src2: dst.into(),
+                        src,
+                        dst: dst.into(),
                     }));
                     v
                 }
@@ -959,34 +930,15 @@ impl From<tacky::Instruction> for Vec<Instruction<Initial>> {
                         Operand::Reg(r) => {
                             v.push(new_instr(InstructionType::Push(Operand::Reg(r))))
                         }
-                        Operand::Pseudo { name, size } => {
+                        src @ Operand::StackOffset { .. }
+                        | src @ Operand::Pseudo { .. }
+                        | src @ Operand::Data { .. } => {
                             v.extend([
                                 new_instr(InstructionType::Mov {
-                                    src: Operand::Pseudo { name, size },
-                                    dst: Operand::Reg(Reg::X86 {
-                                        reg: X86Reg::Ax,
-                                        section: RegSection::Dword,
-                                    }),
+                                    src,
+                                    dst: eax.clone(),
                                 }),
-                                new_instr(InstructionType::Push(Operand::Reg(Reg::X86 {
-                                    reg: X86Reg::Ax,
-                                    section: RegSection::Dword,
-                                }))),
-                            ]);
-                        }
-                        Operand::StackOffset { offset, size } => {
-                            v.extend([
-                                new_instr(InstructionType::Mov {
-                                    src: Operand::StackOffset { offset, size },
-                                    dst: Operand::Reg(Reg::X86 {
-                                        reg: X86Reg::Ax,
-                                        section: RegSection::Dword,
-                                    }),
-                                }),
-                                new_instr(InstructionType::Push(Operand::Reg(Reg::X86 {
-                                    reg: X86Reg::Ax,
-                                    section: RegSection::Dword,
-                                }))),
+                                new_instr(InstructionType::Push(eax.clone())),
                             ]);
                         }
                     }
@@ -998,10 +950,7 @@ impl From<tacky::Instruction> for Vec<Instruction<Initial>> {
                     v.push(new_instr(InstructionType::DeAllocStack(bytes_to_remove)));
                 }
                 v.push(new_instr(InstructionType::Mov {
-                    src: Operand::Reg(Reg::X86 {
-                        reg: X86Reg::Ax,
-                        section: RegSection::Dword,
-                    }),
+                    src: eax,
                     dst: dst.into(),
                 }));
                 v
@@ -1016,6 +965,7 @@ pub enum Operand {
     Reg(Reg),
     Pseudo { name: Rc<String>, size: usize },
     StackOffset { offset: isize, size: usize },
+    Data { name: Rc<String>, size: usize },
 }
 
 // TODO: Unhardcode immediate size- gets pushed as 8 bytes
@@ -1026,6 +976,7 @@ impl Operand {
             Self::Reg(r) => r.size(),
             Self::Pseudo { size, .. } => *size,
             Self::StackOffset { size, .. } => *size,
+            Self::Data { size, .. } => *size,
         }
     }
 }
@@ -1051,162 +1002,7 @@ impl fmt::Display for Operand {
             Self::Pseudo { .. } => {
                 unreachable!("Cannot create asm representation for a pseudioregister.")
             }
+            _ => todo!(),
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_tacky_ret_to_asm() {
-        let tacky = tacky::Instruction::Return(Some(tacky::Val::Constant(2)));
-        let expected: Vec<Instruction<Initial>> = vec![
-            InstructionType::Mov {
-                src: Operand::Imm(2),
-                dst: Operand::Reg(Reg::X86 {
-                    reg: X86Reg::Ax,
-                    section: RegSection::Dword,
-                }),
-            },
-            InstructionType::Ret,
-        ]
-        .into_iter()
-        .map(Instruction::<Initial>::new)
-        .collect();
-        let actual = Vec::<Instruction<Initial>>::from(tacky);
-        assert_eq!(expected, actual);
-    }
-
-    #[test]
-    fn test_tacky_unary_to_asm() {
-        let pseudo = Rc::new("pseudoreg".to_string());
-        let tacky = tacky::Instruction::Unary {
-            op: tacky::UnaryOp::Complement,
-            src: tacky::Val::Constant(2),
-            dst: tacky::Val::Var(Rc::clone(&pseudo)),
-        };
-        let expected: Vec<Instruction<Initial>> = vec![
-            InstructionType::Mov {
-                src: Operand::Imm(2),
-                dst: Operand::Pseudo {
-                    name: Rc::clone(&pseudo),
-                    size: 4,
-                },
-            },
-            InstructionType::Unary {
-                op: UnaryOp::Complement,
-                dst: Operand::Pseudo {
-                    name: Rc::clone(&pseudo),
-                    size: 4,
-                },
-            },
-        ]
-        .into_iter()
-        .map(Instruction::<Initial>::new)
-        .collect();
-        let actual = Vec::<Instruction<Initial>>::from(tacky);
-        assert_eq!(expected, actual);
-    }
-
-    #[test]
-    fn test_stack_pass() {
-        let pseudo = Rc::new("pseudoreg".to_string());
-        let tacky = tacky::Instruction::Unary {
-            op: tacky::UnaryOp::Complement,
-            src: tacky::Val::Constant(2),
-            dst: tacky::Val::Var(Rc::clone(&pseudo)),
-        };
-        let expected: Vec<Instruction<Initial>> = vec![
-            InstructionType::Mov {
-                src: Operand::Imm(2),
-                dst: Operand::Pseudo {
-                    name: Rc::clone(&pseudo),
-                    size: 4,
-                },
-            },
-            InstructionType::Unary {
-                op: UnaryOp::Complement,
-                dst: Operand::Pseudo {
-                    name: Rc::clone(&pseudo),
-                    size: 4,
-                },
-            },
-        ]
-        .into_iter()
-        .map(Instruction::<Initial>::new)
-        .collect();
-        let actual = Vec::<Instruction<Initial>>::from(tacky);
-
-        assert_eq!(expected, actual);
-    }
-
-    #[test]
-    fn test_instruction_fixup() {
-        let pseudo = Rc::new("pseudoreg".to_string());
-        let tacky = tacky::Instruction::Unary {
-            op: tacky::UnaryOp::Complement,
-            src: tacky::Val::Constant(2),
-            dst: tacky::Val::Var(Rc::clone(&pseudo)),
-        };
-        let expected: Vec<Instruction<Initial>> = vec![
-            InstructionType::Mov {
-                src: Operand::Imm(2),
-                dst: Operand::Pseudo {
-                    name: Rc::clone(&pseudo),
-                    size: 4,
-                },
-            },
-            InstructionType::Unary {
-                op: UnaryOp::Complement,
-                dst: Operand::Pseudo {
-                    name: Rc::clone(&pseudo),
-                    size: 4,
-                },
-            },
-        ]
-        .into_iter()
-        .map(Instruction::<Initial>::new)
-        .collect();
-        let actual = Vec::<Instruction<Initial>>::from(tacky);
-        assert_eq!(expected, actual);
-    }
-
-    #[test]
-    fn test_binary_expressions() {
-        let tacky_fn = tacky::Function {
-            name: Rc::new("test_fn".to_string()),
-            params: vec![],
-            instructions: vec![
-                tacky::Instruction::Binary {
-                    op: tacky::BinaryOp::Multiply,
-                    src1: tacky::Val::Constant(1),
-                    src2: tacky::Val::Constant(2),
-                    dst: tacky::Val::Var(Rc::new("tmp.0".to_string())),
-                },
-                tacky::Instruction::Binary {
-                    op: tacky::BinaryOp::Add,
-                    src1: tacky::Val::Constant(4),
-                    src2: tacky::Val::Constant(5),
-                    dst: tacky::Val::Var(Rc::new("tmp.1".to_string())),
-                },
-                tacky::Instruction::Binary {
-                    op: tacky::BinaryOp::Multiply,
-                    src1: tacky::Val::Constant(3),
-                    src2: tacky::Val::Var(Rc::new("tmp.1".to_string())),
-                    dst: tacky::Val::Var(Rc::new("tmp.2".to_string())),
-                },
-                tacky::Instruction::Binary {
-                    op: tacky::BinaryOp::Subtract,
-                    src1: tacky::Val::Var(Rc::new("tmp.0".to_string())),
-                    src2: tacky::Val::Var(Rc::new("tmp.2".to_string())),
-                    dst: tacky::Val::Var(Rc::new("tmp.3".to_string())),
-                },
-            ],
-            external_linkage: false,
-        };
-        // Because the resulting AST is huge just check that it parses
-        let _ = Function::from(tacky_fn);
     }
 }

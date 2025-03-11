@@ -2,9 +2,10 @@ use crate::ast;
 use crate::sema;
 use std::rc::Rc;
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug)]
 pub struct Program {
     pub top_level: Vec<TopLevel>,
+    pub symbols: sema::tc::SymbolTable,
 }
 
 #[derive(Debug, PartialEq)]
@@ -14,7 +15,7 @@ pub enum TopLevel {
 }
 
 impl StaticVariable {
-    fn from_symbol_with_name(name: Rc<String>, symbol: sema::tc::SymbolEntry) -> Option<Self> {
+    fn from_symbol_with_name(name: Rc<String>, symbol: &sema::tc::SymbolEntry) -> Option<Self> {
         match symbol.attribute {
             sema::tc::Attribute::Fun { .. } => None,
             sema::tc::Attribute::Static {
@@ -40,15 +41,15 @@ impl StaticVariable {
 
 #[derive(Debug, PartialEq)]
 pub struct StaticVariable {
-    identifier: Rc<String>,
-    external_linkage: bool,
-    init: Option<i32>,
+    pub identifier: Rc<String>,
+    pub external_linkage: bool,
+    pub init: Option<i32>,
 }
 
 impl From<sema::ValidAst> for Program {
-    fn from(stage: sema::ValidAst) -> Self {
+    fn from(ast: sema::ValidAst) -> Self {
         let mut valid_functions = vec![];
-        for decl in stage.program.declarations.into_iter() {
+        for decl in ast.program.declarations.into_iter() {
             match decl {
                 ast::Declaration::FunDecl(f) => {
                     if let Some(f) = Option::<Function>::from(f) {
@@ -59,8 +60,8 @@ impl From<sema::ValidAst> for Program {
             };
         }
         let mut statics = vec![];
-        for (name, symbol) in stage.symbols.global.into_iter() {
-            if let Some(r#static) = StaticVariable::from_symbol_with_name(name, symbol) {
+        for (name, symbol) in ast.symbols.global.iter() {
+            if let Some(r#static) = StaticVariable::from_symbol_with_name(Rc::clone(name), symbol) {
                 statics.push(r#static);
             }
         }
@@ -69,7 +70,10 @@ impl From<sema::ValidAst> for Program {
             .map(TopLevel::Fun)
             .chain(statics.into_iter().map(TopLevel::Static))
             .collect::<Vec<TopLevel>>();
-        Self { top_level }
+        Self {
+            top_level,
+            symbols: ast.symbols,
+        }
     }
 }
 

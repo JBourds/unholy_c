@@ -29,9 +29,10 @@ pub mod x64 {
     fn gen_program(w: &mut impl Write, program: codegen::Program) -> Result<()> {
         w.write_str("\t.intel_syntax noprefix\n\n")?;
 
-        for f in program.functions.into_iter() {
-            gen_function(w, f)?;
-        }
+        todo!();
+        //for f in program.functions.into_iter() {
+        //    gen_function(w, f)?;
+        //}
 
         w.write_str("\n\t.section .note.GNU-stack,\"\",@progbits\n")?;
         Ok(())
@@ -90,8 +91,8 @@ pub mod x64 {
             }
             codegen::InstructionType::Binary {
                 op,
-                src1: src,
-                src2: dst,
+                src,
+                dst,
             } => {
                 // Special case- if we are bitshifting then the "cl" register
                 // can be the src2 operand but says nothing about the size of

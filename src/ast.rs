@@ -854,11 +854,11 @@ impl Type {
                 storage = Some(new_storage);
                 remaining = tokens;
             } else if ret_t.is_some() {
-                    break;
-                } else {
-                    bail!(
+                break;
+            } else {
+                bail!(
             "No return type indicated for function. Add a return type, or mark the function as returning \"void\" to signal that it returns nothing.");
-                }
+            }
         }
         Ok((ret_t.unwrap(), storage, remaining))
     }

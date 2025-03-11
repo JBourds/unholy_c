@@ -51,8 +51,12 @@ impl From<sema::ValidAst> for Program {
         let mut valid_functions = vec![];
         for decl in ast.program.declarations.into_iter() {
             match decl {
+                // Only declarations with bodies will be returned here.
+                // We need to do some fixup so that if the definition for a
+                // function was not marked static but the first declaration was
+                // that the function gets defined as static.
                 ast::Declaration::FunDecl(f) => {
-                    if let Some(f) = Option::<Function>::from(f) {
+                    if let Some(f) = Function::from_symbol(f, &ast.symbols) {
                         valid_functions.push(f);
                     }
                 }
@@ -96,13 +100,13 @@ impl Function {
 }
 
 impl From<ast::FunDecl> for Option<Function> {
-    fn from(node: ast::FunDecl) -> Self {
+    fn from(decl: ast::FunDecl) -> Self {
         let ast::FunDecl {
             name,
             signature,
             block: Some(block),
             ..
-        } = node
+        } = decl
         else {
             return None;
         };
@@ -120,13 +124,45 @@ impl From<ast::FunDecl> for Option<Function> {
             .map(|x| x.1)
             .collect::<Vec<Option<Rc<String>>>>();
 
-        let external_linkage = node.storage_class != Some(ast::StorageClass::Static);
         Some(Function {
             name: Rc::new(name.to_string()),
             params,
-            external_linkage,
+            external_linkage: decl.storage_class != Some(ast::StorageClass::Static),
             instructions,
         })
+    }
+}
+
+impl Function {
+    fn from_symbol(decl: ast::FunDecl, symbols: &sema::tc::SymbolTable) -> Option<Self> {
+        if let Some(f @ Function { .. }) = Option::<Self>::from(decl) {
+            // Check symbol table to get external linkage since the function
+            // declaration could be static but the definition can elide it.
+            // ```
+            // static int foo();
+            // int foo() {
+            //      ...
+            // }
+            // ```
+            let external_linkage = {
+                if let Some(sema::tc::SymbolEntry {
+                    r#type: ast::Type::Fun { .. },
+                    attribute: sema::tc::Attribute::Fun { external_linkage },
+                    ..
+                }) = symbols.get(&f.name)
+                {
+                    external_linkage
+                } else {
+                    unreachable!()
+                }
+            };
+            Some(Function {
+                external_linkage: *external_linkage,
+                ..f
+            })
+        } else {
+            None
+        }
     }
 }
 

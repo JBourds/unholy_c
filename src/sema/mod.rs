@@ -11,13 +11,20 @@ use crate::ast;
 use anyhow::{bail, ensure, Error, Result};
 
 // Module internals
+#[derive(Debug)]
 enum Initial {}
+#[derive(Debug)]
 enum IdentResolution {}
+#[derive(Debug)]
 enum TypeChecking {}
+#[derive(Debug)]
 enum GotoValidation {}
+#[derive(Debug)]
 enum LoopLabelling {}
+#[derive(Debug)]
 enum SwitchLabelling {}
 
+#[derive(Debug)]
 struct SemaStage<T> {
     program: ast::Program,
     symbols: Option<typechecking::SymbolTable>,

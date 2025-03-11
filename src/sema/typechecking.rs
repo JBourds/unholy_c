@@ -6,9 +6,9 @@ use super::*;
 
 #[derive(Debug)]
 pub struct SymbolEntry {
-    r#type: ast::Type,
-    defined: bool,
-    scope: Scope,
+    pub r#type: ast::Type,
+    pub defined: bool,
+    pub scope: Scope,
     pub attribute: Attribute,
 }
 
@@ -284,16 +284,6 @@ impl SymbolTable {
                             if storage_class.is_none() {
                                 bail!("Global variable '{name}' was previously declared as static");
                             }
-                            // match initial_value {
-                            //     InitialValue::Initial(..) => {
-                            //         if defining_ident {
-                            //             // FIXME: This case might be redundent
-                            //             bail!("Redefining variable '{name}'");
-                            //         }
-                            //     }
-                            //     InitialValue::Tentative => {}
-                            //     InitialValue::None => {}
-                            // }
                         } else {
                             // If we (foo) are declared extern,
                             // then we cannot be redeclared as static
@@ -358,7 +348,7 @@ impl SymbolTable {
                         if let (
                             Attribute::Static {
                                 initial_value: old_val,
-                                ..
+                                external_linkage,
                             },
                             Attribute::Static {
                                 initial_value: new_val,
@@ -366,8 +356,12 @@ impl SymbolTable {
                             },
                         ) = (attribute, new_attribute)
                         {
+                            // If it takes precedence
                             if new_val > old_val {
-                                attribute = new_attribute;
+                                attribute = Attribute::Static {
+                                    initial_value: new_val,
+                                    external_linkage,
+                                };
                             }
                         }
                     }

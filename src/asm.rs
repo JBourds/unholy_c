@@ -41,6 +41,7 @@ pub mod x64 {
     }
 
     fn gen_static(w: &mut impl Write, var: codegen::StaticVariable) -> Result<()> {
+        println!("{var:?}");
         if var.global {
             w.write_fmt(format_args!("\t.globl {}\n", var.identifier))?;
         }

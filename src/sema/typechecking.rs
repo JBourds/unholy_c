@@ -1,3 +1,5 @@
+use std::cmp;
+
 use anyhow::Context;
 
 use super::*;
@@ -93,6 +95,26 @@ pub enum InitialValue {
     Initial(i32),
     Tentative,
     None,
+}
+
+impl Ord for InitialValue {
+    fn cmp(&self, other: &Self) -> cmp::Ordering {
+        match (self, other) {
+            (Self::Initial(_), Self::Initial(_)) => cmp::Ordering::Equal,
+            (Self::None, Self::None) => cmp::Ordering::Equal,
+            (Self::Tentative, Self::Tentative) => cmp::Ordering::Equal,
+            (_, Self::None) => cmp::Ordering::Greater,
+            (Self::Initial(_), Self::Tentative) => cmp::Ordering::Greater,
+            (Self::None, _) => cmp::Ordering::Less,
+            (Self::Tentative, Self::Initial(_)) => cmp::Ordering::Less,
+        }
+    }
+}
+
+impl PartialOrd for InitialValue {
+    fn partial_cmp(&self, other: &Self) -> Option<cmp::Ordering> {
+        Some(self.cmp(other))
+    }
 }
 
 impl InitialValue {
@@ -319,11 +341,11 @@ impl SymbolTable {
             if !scope.shadows(old_scope) {
                 if *old_type != new_type {
                     match (old_type, &new_type) {
-                            (ast::Type::Fun {..}, ast::Type::Fun { param_types, .. }) if param_types.is_empty() => new_type = old_type.clone(),
-                            _ => bail!(
-                                "Redeclaring '{name}' as {new_type} when it was previously declared as {old_type}"
-                            )
-                        }
+                        (ast::Type::Fun {..}, ast::Type::Fun { param_types, .. }) if param_types.is_empty() => new_type = old_type.clone(),
+                        _ => bail!(
+                            "Redeclaring '{name}' as {new_type} when it was previously declared as {old_type}"
+                        )
+                    }
                 }
                 if *already_defined && defining_ident {
                     bail!("Redefining '{name}' when it is already defined.")
@@ -332,9 +354,21 @@ impl SymbolTable {
                 match decl {
                     ast::Declaration::FunDecl(..) => {}
                     ast::Declaration::VarDecl(var) => {
-                        if defining_ident {
-                            // Need to update inital_value to be correct
-                            attribute = Attribute::from_var_with_scope(var, scope)?;
+                        let new_attribute = Attribute::from_var_with_scope(var, scope)?;
+                        if let (
+                            Attribute::Static {
+                                initial_value: old_val,
+                                ..
+                            },
+                            Attribute::Static {
+                                initial_value: new_val,
+                                ..
+                            },
+                        ) = (attribute, new_attribute)
+                        {
+                            if new_val > old_val {
+                                attribute = new_attribute;
+                            }
                         }
                     }
                 }

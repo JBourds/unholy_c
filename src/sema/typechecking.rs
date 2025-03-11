@@ -73,13 +73,8 @@ impl Attribute {
     }
 
     fn from_fun(fun: &ast::FunDecl) -> Self {
-        match fun.storage_class {
-            Some(ast::StorageClass::Static) => Attribute::Fun {
-                external_linkage: false,
-            },
-            Some(ast::StorageClass::Extern) | None => Attribute::Fun {
-                external_linkage: true,
-            },
+        Attribute::Fun {
+            external_linkage: fun.storage_class != Some(ast::StorageClass::Static),
         }
     }
 

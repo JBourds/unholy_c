@@ -60,7 +60,7 @@ impl From<sema::ValidAst> for Program {
                         valid_functions.push(f);
                     }
                 }
-                ast::Declaration::VarDecl(..) => {}
+                ast::Declaration::VarDecl(_) => {}
             };
         }
         let mut statics = vec![];
@@ -525,6 +525,13 @@ impl Instruction {
         let mut block_instructions = vec![];
         for item in node.into_items().into_iter() {
             match item {
+                // Statics already get initialized at the top level.
+                // If we reinitialized them here they would act like local
+                // variables (suboptimal)
+                ast::BlockItem::Decl(ast::Declaration::VarDecl(ast::VarDecl {
+                    storage_class: Some(ast::StorageClass::Static),
+                    ..
+                })) => {}
                 ast::BlockItem::Decl(decl) => {
                     block_instructions.extend(Self::parse_decl_with(decl, make_temp_var));
                 }

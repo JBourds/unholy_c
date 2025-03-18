@@ -29,16 +29,45 @@ pub mod x64 {
     fn gen_program(w: &mut impl Write, program: codegen::Program) -> Result<()> {
         w.write_str("\t.intel_syntax noprefix\n\n")?;
 
-        for f in program.functions.into_iter() {
-            gen_function(w, f)?;
+        for entry in program.top_level.into_iter() {
+            match entry {
+                codegen::TopLevel::Fun(f) => gen_function(w, f)?,
+                codegen::TopLevel::Static(v) => gen_static(w, v)?,
+            }
         }
 
         w.write_str("\n\t.section .note.GNU-stack,\"\",@progbits\n")?;
         Ok(())
     }
 
+    fn gen_static(w: &mut impl Write, var: codegen::StaticVariable) -> Result<()> {
+        if var.global {
+            w.write_fmt(format_args!("\t.globl {}\n", var.identifier))?;
+        }
+        let init_value = var.init.unwrap_or(0);
+        if init_value == 0 {
+            w.write_fmt(format_args!("\t.bss\n"))?;
+        } else {
+            w.write_fmt(format_args!("\t.data\n"))?;
+        }
+        // TODO: Unhardcode 4 here - take symbol info into this pass and calculate alignment
+        w.write_fmt(format_args!("\t.align 4\n"))?;
+        w.write_fmt(format_args!("{}:\n", var.identifier))?;
+        if init_value == 0 {
+            w.write_fmt(format_args!("\t.zero {}\n", 4))?;
+        } else {
+            w.write_fmt(format_args!("\t.long {}\n", init_value))?;
+        }
+        w.write_char('\n')?;
+
+        Ok(())
+    }
+
     fn gen_function(w: &mut impl Write, function: codegen::Function) -> Result<()> {
-        w.write_fmt(format_args!("\t.globl {}\n", function.name))?;
+        if function.global {
+            w.write_fmt(format_args!("\t.globl {}\n", function.name))?;
+        }
+        w.write_fmt(format_args!("\t.text\n"))?;
         w.write_fmt(format_args!("{}:\n", function.name))?;
 
         for instr in function.instructions.into_iter() {
@@ -52,9 +81,15 @@ pub mod x64 {
     fn gen_instruction(w: &mut impl Write, instr: codegen::InstructionType) -> Result<()> {
         let get_specifier = |src: Option<&Operand>, dst: &Operand| {
             let size = match (src, dst) {
-                (None, Operand::StackOffset { size, .. })
-                | (Some(Operand::Imm(_)), Operand::StackOffset { size, .. }) => Some(*size),
-                (Some(Operand::StackOffset { size, .. }), Operand::Imm(_)) => Some(*size),
+                (None, Operand::StackOffset { size, .. } | Operand::Data { size, .. })
+                | (
+                    Some(Operand::Imm(_)),
+                    Operand::StackOffset { size, .. } | Operand::Data { size, .. },
+                ) => Some(*size),
+                (
+                    Some(Operand::StackOffset { size, .. } | Operand::Data { size, .. }),
+                    Operand::Imm(_),
+                ) => Some(*size),
                 _ => None,
             };
             match size {
@@ -90,8 +125,8 @@ pub mod x64 {
             }
             codegen::InstructionType::Binary {
                 op,
-                src1: src,
-                src2: dst,
+                src,
+                dst,
             } => {
                 // Special case- if we are bitshifting then the "cl" register
                 // can be the src2 operand but says nothing about the size of

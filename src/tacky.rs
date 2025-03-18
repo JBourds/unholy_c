@@ -2,23 +2,81 @@ use crate::ast;
 use crate::sema;
 use std::rc::Rc;
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug)]
 pub struct Program {
-    pub functions: Vec<Function>,
+    pub top_level: Vec<TopLevel>,
+    pub symbols: sema::tc::SymbolTable,
 }
 
-impl From<sema::SemaStage<sema::Final>> for Program {
-    fn from(stage: sema::SemaStage<sema::Final>) -> Self {
-        let valid_functions = stage
-            .program
-            .functions
-            .into_iter()
-            .map(Option::<Function>::from)
-            .collect::<Vec<Option<Function>>>();
+#[derive(Debug, PartialEq)]
+pub enum TopLevel {
+    Fun(Function),
+    Static(StaticVariable),
+}
 
-        let valid_function_definitions = valid_functions.into_iter().flatten().collect();
+impl StaticVariable {
+    fn from_symbol_with_name(name: Rc<String>, symbol: &sema::tc::SymbolEntry) -> Option<Self> {
+        match symbol.attribute {
+            sema::tc::Attribute::Fun { .. } => None,
+            sema::tc::Attribute::Static {
+                initial_value,
+                external_linkage,
+            } => match initial_value {
+                sema::tc::InitialValue::Initial(i) => Some(StaticVariable {
+                    identifier: name,
+                    external_linkage,
+                    init: Some(i),
+                }),
+                sema::tc::InitialValue::Tentative => Some(StaticVariable {
+                    identifier: name,
+                    external_linkage,
+                    init: Some(0),
+                }),
+                sema::tc::InitialValue::None => None,
+            },
+            sema::tc::Attribute::Local => None,
+        }
+    }
+}
+
+#[derive(Debug, PartialEq)]
+pub struct StaticVariable {
+    pub identifier: Rc<String>,
+    pub external_linkage: bool,
+    pub init: Option<i32>,
+}
+
+impl From<sema::ValidAst> for Program {
+    fn from(ast: sema::ValidAst) -> Self {
+        let mut valid_functions = vec![];
+        for decl in ast.program.declarations.into_iter() {
+            match decl {
+                // Only declarations with bodies will be returned here.
+                // We need to do some fixup so that if the definition for a
+                // function was not marked static but the first declaration was
+                // that the function gets defined as static.
+                ast::Declaration::FunDecl(f) => {
+                    if let Some(f) = Function::from_symbol(f, &ast.symbols) {
+                        valid_functions.push(f);
+                    }
+                }
+                ast::Declaration::VarDecl(_) => {}
+            };
+        }
+        let mut statics = vec![];
+        for (name, symbol) in ast.symbols.global.iter() {
+            if let Some(r#static) = StaticVariable::from_symbol_with_name(Rc::clone(name), symbol) {
+                statics.push(r#static);
+            }
+        }
+        let top_level = valid_functions
+            .into_iter()
+            .map(TopLevel::Fun)
+            .chain(statics.into_iter().map(TopLevel::Static))
+            .collect::<Vec<TopLevel>>();
         Self {
-            functions: valid_function_definitions,
+            top_level,
+            symbols: ast.symbols,
         }
     }
 }
@@ -26,6 +84,7 @@ impl From<sema::SemaStage<sema::Final>> for Program {
 #[derive(Debug, PartialEq)]
 pub struct Function {
     pub name: Rc<String>,
+    pub external_linkage: bool,
     pub params: Vec<Option<Rc<String>>>,
     pub instructions: Vec<Instruction>,
 }
@@ -41,13 +100,13 @@ impl Function {
 }
 
 impl From<ast::FunDecl> for Option<Function> {
-    fn from(node: ast::FunDecl) -> Self {
+    fn from(decl: ast::FunDecl) -> Self {
         let ast::FunDecl {
             name,
             signature,
             block: Some(block),
             ..
-        } = node
+        } = decl
         else {
             return None;
         };
@@ -68,8 +127,42 @@ impl From<ast::FunDecl> for Option<Function> {
         Some(Function {
             name: Rc::new(name.to_string()),
             params,
+            external_linkage: decl.storage_class != Some(ast::StorageClass::Static),
             instructions,
         })
+    }
+}
+
+impl Function {
+    fn from_symbol(decl: ast::FunDecl, symbols: &sema::tc::SymbolTable) -> Option<Self> {
+        if let Some(f @ Function { .. }) = Option::<Self>::from(decl) {
+            // Check symbol table to get external linkage since the function
+            // declaration could be static but the definition can elide it.
+            // ```
+            // static int foo();
+            // int foo() {
+            //      ...
+            // }
+            // ```
+            let external_linkage = {
+                if let Some(sema::tc::SymbolEntry {
+                    r#type: ast::Type::Fun { .. },
+                    attribute: sema::tc::Attribute::Fun { external_linkage },
+                    ..
+                }) = symbols.get(&f.name)
+                {
+                    external_linkage
+                } else {
+                    unreachable!()
+                }
+            };
+            Some(Function {
+                external_linkage: *external_linkage,
+                ..f
+            })
+        } else {
+            None
+        }
     }
 }
 
@@ -432,6 +525,13 @@ impl Instruction {
         let mut block_instructions = vec![];
         for item in node.into_items().into_iter() {
             match item {
+                // Statics already get initialized at the top level.
+                // If we reinitialized them here they would act like local
+                // variables (suboptimal)
+                ast::BlockItem::Decl(ast::Declaration::VarDecl(ast::VarDecl {
+                    storage_class: Some(ast::StorageClass::Static),
+                    ..
+                })) => {}
                 ast::BlockItem::Decl(decl) => {
                     block_instructions.extend(Self::parse_decl_with(decl, make_temp_var));
                 }

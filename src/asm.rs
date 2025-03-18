@@ -53,7 +53,11 @@ pub mod x64 {
         // TODO: Unhardcode 4 here - take symbol info into this pass and calculate alignment
         w.write_fmt(format_args!("\t.align 4\n"))?;
         w.write_fmt(format_args!("{}:\n", var.identifier))?;
-        w.write_fmt(format_args!("\t.long {}\n", init_value))?;
+        if init_value == 0 {
+            w.write_fmt(format_args!("\t.zero {}\n", 4))?;
+        } else {
+            w.write_fmt(format_args!("\t.long {}\n", init_value))?;
+        }
         w.write_char('\n')?;
 
         Ok(())

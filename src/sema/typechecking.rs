@@ -206,14 +206,7 @@ impl SymbolTable {
         // easy to iterate over (unique names make this legal)
         match entry.scope {
             Scope::Global => self.global.insert(key, entry),
-            Scope::Local(frame) => {
-                if matches!(entry.attribute, Attribute::Static { .. })
-                    && !self.global.contains_key(&key)
-                {
-                    self.global.insert(Rc::clone(&key), entry.clone());
-                }
-                self.scopes[frame].insert(key, entry)
-            }
+            Scope::Local(frame) => self.scopes[frame].insert(key, entry),
         }
     }
 
@@ -427,11 +420,18 @@ impl SymbolTable {
         Ok(())
     }
     fn declare_var(&mut self, decl: &ast::VarDecl) -> Result<()> {
+        let key = decl.name.clone();
         let storage_class = decl.storage_class;
         let decl = ast::Declaration::VarDecl(decl.clone());
         match storage_class {
             Some(ast::StorageClass::Extern) => self.declare_in_scope(&decl, Scope::Global)?,
-            Some(ast::StorageClass::Static) | None => {}
+            // If we declare a static in
+            Some(ast::StorageClass::Static)
+                if self.get_global(&key).is_none() && self.scope() != Scope::Global =>
+            {
+                self.declare_in_scope(&decl, Scope::Global)?;
+            }
+            _ => {}
         }
         self.declare_in_scope(&decl, self.scope())
     }

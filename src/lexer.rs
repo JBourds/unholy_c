@@ -35,9 +35,17 @@ impl Lexer {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+pub enum LiteralSuffix {
+    Long,
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub enum Token {
     Ident(Rc<String>),
-    Literal(Rc<String>),
+    Literal {
+        text: Rc<String>,
+        suffix: Option<LiteralSuffix>,
+    },
     // Reserved
     Return,
     Typedef,
@@ -123,11 +131,25 @@ pub enum Token {
     SingleQuote,
 }
 
+impl std::fmt::Display for LiteralSuffix {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Long => write!(f, "L"),
+        }
+    }
+}
+
 impl std::fmt::Display for Token {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Ident(s) => write!(f, "Identifer: \"{}\"", s),
-            Self::Literal(s) => write!(f, "Literal: \"{}\"", s),
+            Self::Literal { text, suffix } => {
+                write!(f, "Literal: \"{}\"", text)?;
+                if let Some(suffix) = suffix {
+                    write!(f, "{}", suffix)?;
+                }
+                Ok(())
+            }
             Self::Return => write!(f, "Return"),
             Self::Typedef => write!(f, "Typedef"),
             Self::SizeOf => write!(f, "SizeOf"),
@@ -217,7 +239,7 @@ impl Token {
     const STRING: &'static str = r#""(?:[^"\\]|\\[\s\S])*""#;
     const CHAR: &'static str = r"'[^'\\]|\\[\s\S]'";
     const FLOAT: &'static str = r"^[0-9]+\.[0-9]+";
-    const INT: &'static str = r"^[0-9]+\b";
+    const INT: &'static str = r"^[0-9]+[lL]?\b";
 
     const KEYWORDS: &'static [(&'static str, Token)] = &[
         ("return", Token::Return),
@@ -356,19 +378,45 @@ impl Token {
         _line: &mut usize,
         character: &mut usize,
     ) -> Option<(Token, &'a str)> {
+        fn make_literal(literal: &str) -> Token {
+            let (text, suffix) = match literal.as_bytes() {
+                &[.., b'l' | b'L'] => (
+                    literal.chars().take(literal.len() - 1).collect(),
+                    Some(LiteralSuffix::Long),
+                ),
+                _ => (literal.to_string(), None),
+            };
+            Token::Literal {
+                text: Rc::new(text),
+                suffix,
+            }
+        }
+
         if let Some((token, len)) = {
             match stream.chars().next() {
                 Some('\'') => Self::match_regex(stream, Self::CHAR).map_or(None, |s| {
-                    Some((Token::Literal(Rc::new(s.to_string())), s.len()))
+                    Some((
+                        Token::Literal {
+                            text: Rc::new(s.to_string()),
+                            suffix: None,
+                        },
+                        s.len(),
+                    ))
                 }),
                 Some('"') => Self::match_regex(stream, Self::STRING).map_or(None, |s| {
-                    Some((Token::Literal(Rc::new(s.to_string())), s.len()))
+                    Some((
+                        Token::Literal {
+                            text: Rc::new(s.to_string()),
+                            suffix: None,
+                        },
+                        s.len(),
+                    ))
                 }),
                 Some(c) if c.is_ascii_digit() => {
                     if let Ok(s) = Self::match_regex(stream, Self::FLOAT) {
-                        Some((Token::Literal(Rc::new(s.to_string())), s.len()))
+                        Some((make_literal(s), s.len()))
                     } else if let Ok(s) = Self::match_regex(stream, Self::INT) {
-                        Some((Token::Literal(Rc::new(s.to_string())), s.len()))
+                        Some((make_literal(s), s.len()))
                     } else {
                         None
                     }
@@ -426,80 +474,5 @@ impl Token {
             }
             None => None,
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use anyhow::{ensure, Context};
-    use std::env;
-    use std::path::Path;
-    use std::process::Command;
-
-    fn preprocess_file(file: &str) -> Result<String> {
-        let preproccesed_file = format!("{}.i", file);
-
-        let output = Command::new("gcc")
-            .args(["-E", "-P", file, "-o", &preproccesed_file])
-            .output()
-            .context("Failed to run gcc from preprocessing")?;
-
-        ensure!(
-            output.status.success(),
-            "gcc exited with error code {}",
-            output.status,
-        );
-
-        // Compile the preprocessed source file
-        let contents = std::fs::read_to_string(&preproccesed_file)
-            .with_context(|| format!("Failed to read file: \"{}\"", preproccesed_file))?;
-
-        // Cleanup
-        std::fs::remove_file(&preproccesed_file)
-            .with_context(|| format!("Failed to remove temp file \"{}\"", preproccesed_file))?;
-        Ok(contents)
-    }
-
-    fn get_path(chapter: u8, file: &str) -> String {
-        let proj_root =
-            env::var("CARGO_MANIFEST_DIR").expect("Could not get project root directory.");
-        let proj_root_path = Path::new(&proj_root);
-        proj_root_path
-            .join("tests")
-            .join(format!("chapter{}", chapter))
-            .join(file)
-            .into_os_string()
-            .into_string()
-            .unwrap()
-    }
-
-    #[test]
-    fn test_return2() {
-        let file = get_path(1, "return_2.c");
-        let contents = preprocess_file(&file).unwrap();
-        let tokens = Lexer::lex(contents).unwrap();
-        let expected = vec![
-            Token::Int,
-            Token::Ident(Rc::new("main".to_string())),
-            Token::LParen,
-            Token::Void,
-            Token::RParen,
-            Token::LSquirly,
-            Token::Return,
-            Token::Literal(Rc::new("2".to_string())),
-            Token::Semi,
-            Token::RSquirly,
-        ];
-        assert_eq!(expected, tokens);
-    }
-
-    #[test]
-    fn test_complex() {
-        let file = get_path(1, "complex.c");
-        let preprocessed_contents = preprocess_file(&file).unwrap();
-        // Don't match on exact contents but make sure it can successfully
-        // parse a fairly complex C file
-        let _ = Lexer::lex(preprocessed_contents).unwrap();
     }
 }

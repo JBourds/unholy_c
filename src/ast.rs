@@ -790,7 +790,7 @@ impl Factor {
                 ))
             }
             _ => match tokens {
-                [Token::Literal(_), ..] => {
+                [Token::Literal { .. }, ..] => {
                     let (lit, tokens) = Literal::consume(tokens)?;
                     Ok((Expr::Literal(lit), tokens))
                 }
@@ -925,8 +925,8 @@ impl AstNode for Literal {
     fn consume(tokens: &[Token]) -> Result<(Literal, &[Token])> {
         if let Some(token) = tokens.first() {
             match token {
-                Token::Literal(s) => {
-                    if let Ok(int) = s.parse::<i32>() {
+                Token::Literal { text, suffix: _ } => {
+                    if let Ok(int) = text.parse::<i32>() {
                         Ok((Self::Int(int), &tokens[1..]))
                     } else {
                         bail!("Could not parse token into literal.")

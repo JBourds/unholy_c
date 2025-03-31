@@ -818,6 +818,7 @@ impl Factor {
 #[derive(Debug, PartialEq, Clone)]
 pub enum Type {
     Int,
+    Long,
     Fun {
         ret_t: Box<Self>,
         param_types: Vec<Self>,
@@ -883,6 +884,7 @@ impl std::fmt::Display for Type {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Int => write!(f, "int"),
+            Self::Long => write!(f, "long"),
             Self::Fun { ret_t, param_types } => {
                 write!(f, "(")?;
                 for (index, t) in param_types.iter().enumerate() {

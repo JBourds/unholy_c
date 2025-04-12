@@ -146,7 +146,11 @@ impl Function {
             // ```
             let external_linkage = {
                 if let Some(sema::tc::SymbolEntry {
-                    r#type: ast::Type::Fun { .. },
+                    r#type:
+                        ast::Type {
+                            base: ast::BaseType::Fun { .. },
+                            ..
+                        },
                     attribute: sema::tc::Attribute::Fun { external_linkage },
                     ..
                 }) = symbols.get(&f.name)
@@ -529,7 +533,11 @@ impl Instruction {
                 // If we reinitialized them here they would act like local
                 // variables (suboptimal)
                 ast::BlockItem::Decl(ast::Declaration::VarDecl(ast::VarDecl {
-                    storage_class: Some(ast::StorageClass::Static),
+                    typ:
+                        ast::Type {
+                            storage: Some(ast::StorageClass::Static),
+                            ..
+                        },
                     ..
                 })) => {}
                 ast::BlockItem::Decl(decl) => {

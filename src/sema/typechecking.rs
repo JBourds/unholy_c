@@ -26,8 +26,7 @@ pub enum Attribute {
 
 impl Attribute {
     fn from_var_with_scope(var: &ast::VarDecl, scope: Scope) -> Result<Self> {
-        if matches!(scope, Scope::Local(..)) && var.storage_class == Some(ast::StorageClass::Extern)
-        {
+        if matches!(scope, Scope::Local(..)) && var.typ.storage == Some(ast::StorageClass::Extern) {
             ensure!(
                 var.init.is_none(),
                 "Local var '{}' is extern but has an initial value",
@@ -38,32 +37,36 @@ impl Attribute {
             init_val
         } else {
             match scope {
-                Scope::Global => match var.storage_class {
+                Scope::Global => match var.typ.storage {
                     Some(ast::StorageClass::Static) | None => InitialValue::Tentative, // Global non-externals with no initilizer are marked as tentative
                     Some(ast::StorageClass::Extern) => InitialValue::None,
+                    _ => unreachable!("Earlier passes of the compiler should have reduced \"auto\" and \"register\" storage classes to be None")
                 },
-                Scope::Local(..) => match var.storage_class {
+                Scope::Local(..) => match var.typ.storage {
                     Some(ast::StorageClass::Static) => InitialValue::Initial(0), // Local Statics with no initilizer get defaulted to zero
                     Some(ast::StorageClass::Extern) | None => InitialValue::None,
+                    _ => unreachable!("Earlier passes of the compiler should have reduced \"auto\" and \"register\" storage classes to be None")
                 },
             }
         };
 
         if initial_value == InitialValue::None
-            && var.storage_class.is_none()
+            && var.typ.storage.is_none()
             && matches!(scope, Scope::Local(..))
         {
             return Ok(Attribute::Local);
         }
 
         let external_linkage = match scope {
-            Scope::Global => match var.storage_class {
+            Scope::Global => match var.typ.storage {
                 Some(ast::StorageClass::Static) => false,
                 Some(ast::StorageClass::Extern) | None => true,
+                _ => unreachable!("Earlier passes of the compiler should have reduced \"auto\" and \"register\" storage classes to be None")
             },
-            Scope::Local(..) => match var.storage_class {
+            Scope::Local(..) => match var.typ.storage {
                 Some(ast::StorageClass::Static) | None => false,
                 Some(ast::StorageClass::Extern) => true,
+                _ => unreachable!("Earlier passes of the compiler should have reduced \"auto\" and \"register\" storage classes to be None")
             },
         };
 
@@ -133,21 +136,24 @@ impl InitialValue {
                     .context(format!("Evaluating expression for '{}' failed", var.name))?;
                 Ok(Some(init))
             }
-            (Scope::Local(..), Some(expr)) => match var.storage_class {
+            (Scope::Local(..), Some(expr)) => match var.typ.storage {
                 Some(ast::StorageClass::Static) => Ok(Some(
                     Self::from_expr(expr)
                         .context(format!("Evaluating expression for '{}' failed", var.name))?,
                 )),
                 None => Ok(None), // Locals technically dont have initial values
                 Some(ast::StorageClass::Extern) => unreachable!(),
+                _ => unreachable!("Earlier passes of the compiler should have reduced \"auto\" and \"register\" storage classes to be None")
             },
-            (Scope::Global, None) => match var.storage_class {
+            (Scope::Global, None) => match var.typ.storage {
                 Some(ast::StorageClass::Static) | None => Ok(Some(InitialValue::Tentative)), // Global non-externals with no initilizer are marked as tentative
                 Some(ast::StorageClass::Extern) => Ok(Some(InitialValue::None)),
+                _ => unreachable!("Earlier passes of the compiler should have reduced \"auto\" and \"register\" storage classes to be None")
             },
-            (Scope::Local(..), None) => match var.storage_class {
+            (Scope::Local(..), None) => match var.typ.storage {
                 Some(ast::StorageClass::Static) => Ok(Some(InitialValue::Initial(0))), // Local Statics with no initilizer get defaulted to zero
                 Some(ast::StorageClass::Extern) | None => Ok(Some(InitialValue::None)),
+                _ => unreachable!("Earlier passes of the compiler should have reduced \"auto\" and \"register\" storage classes to be None")
             },
         }
     }
@@ -242,12 +248,9 @@ impl SymbolTable {
                 fun.block.is_some(),
                 fun.storage_class,
             ),
-            ast::Declaration::VarDecl(ast::VarDecl {
-                typ,
-                name,
-                init,
-                storage_class,
-            }) => (Rc::clone(name), typ.clone(), init.is_some(), *storage_class),
+            ast::Declaration::VarDecl(ast::VarDecl { typ, name, init }) => {
+                (Rc::clone(name), typ.clone(), init.is_some(), typ.storage)
+            }
         }
     }
 
@@ -300,6 +303,7 @@ impl SymbolTable {
                         Some(ast::StorageClass::Static) | None => {
                             bail!("Variable '{name}' declared multiple times in scope")
                         }
+                        _ => unreachable!("Earlier passes of the compiler should have reduced \"auto\" and \"register\" storage classes to be None")
                     },
                 }
             }
@@ -333,8 +337,8 @@ impl SymbolTable {
             //           one (ERROR)
             if !scope.shadows(old_scope) {
                 if *old_type != new_type {
-                    match (old_type, &new_type) {
-                        (ast::Type::Fun {..}, ast::Type::Fun { param_types, .. }) if param_types.is_empty() => new_type = old_type.clone(),
+                    match (&old_type.base, &new_type.base) {
+                        (ast::BaseType::Fun {..}, ast::BaseType::Fun { param_types, .. }) if param_types.is_empty() => new_type = old_type.clone(),
                         _ => bail!(
                             "Redeclaring '{name}' as {new_type} when it was previously declared as {old_type}"
                         )
@@ -412,7 +416,6 @@ impl SymbolTable {
                         name: Rc::clone(name),
                         init: None,
                         typ: typ.clone(),
-                        storage_class: None,
                     });
                     self.declare_in_scope(&param_decl, scope)?;
                 }
@@ -422,7 +425,7 @@ impl SymbolTable {
     }
     fn declare_var(&mut self, decl: &ast::VarDecl) -> Result<()> {
         let key = decl.name.clone();
-        let storage_class = decl.storage_class;
+        let storage_class = decl.typ.storage;
         let decl = ast::Declaration::VarDecl(decl.clone());
         match storage_class {
             Some(ast::StorageClass::Extern) => self.declare_in_scope(&decl, Scope::Global)?,
@@ -435,19 +438,6 @@ impl SymbolTable {
             _ => {}
         }
         self.declare_in_scope(&decl, self.scope())
-    }
-
-    fn has_type(&self, key: &Rc<String>, expected: ast::Type) -> Result<()> {
-        match self.get(key) {
-            Some(SymbolEntry { r#type, .. }) if *r#type == expected => Ok(()),
-
-            Some(SymbolEntry { r#type, .. }) => {
-                bail!(
-                    "Expected type \"{expected}\" for \"{key}\" but found type \"{type}\" instead."
-                )
-            }
-            None => bail!("Found no type information for symbol \"{key}\"."),
-        }
     }
 
     fn push_scope(&mut self) {
@@ -536,7 +526,7 @@ fn typecheck_stmt(stmt: &ast::Stmt, symbols: &mut SymbolTable) -> Result<()> {
         } => {
             match init {
                 ast::ForInit::Decl(decl) => {
-                    if decl.storage_class.is_some() {
+                    if decl.typ.storage.is_some() {
                         bail!(
                             "For-loop counter var '{}' cannot have storage class specifier",
                             decl.name
@@ -584,9 +574,12 @@ fn typecheck_stmt(stmt: &ast::Stmt, symbols: &mut SymbolTable) -> Result<()> {
 
 fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<()> {
     match expr {
-        ast::Expr::Var(name) => {
-            // TODO: Fix this once we have more types
-            symbols.has_type(name, ast::Type::Int)
+        ast::Expr::Var(var) => {
+            if symbols.get(var).is_none() {
+                bail!("Attempted to typecheck {var} but there was no type associated with it.");
+            } else {
+                Ok(())
+            }
         }
         ast::Expr::Assignment { lvalue, rvalue } => {
             typecheck_expr(lvalue, symbols)?;
@@ -609,7 +602,11 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<()> {
         ast::Expr::FunCall { name, args } => {
             match symbols.get(name) {
                 Some(SymbolEntry {
-                    r#type: ast::Type::Fun { param_types, .. },
+                    r#type:
+                        ast::Type {
+                            base: ast::BaseType::Fun { param_types, .. },
+                            ..
+                        },
                     ..
                 }) => {
                     if args.len() != param_types.len() {

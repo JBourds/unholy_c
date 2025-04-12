@@ -54,6 +54,7 @@ pub enum Token {
     Static,
     Auto,
     Register,
+    Restrict,
     // Loop
     Case,
     Default,
@@ -157,6 +158,7 @@ impl std::fmt::Display for Token {
             Self::Static => write!(f, "Static"),
             Self::Auto => write!(f, "Auto"),
             Self::Register => write!(f, "Register"),
+            Self::Restrict => write!(f, "Restrict"),
             Self::Case => write!(f, "Case"),
             Self::Default => write!(f, "Default"),
             Self::If => write!(f, "If"),
@@ -249,6 +251,7 @@ impl Token {
         ("static", Token::Static),
         ("auto", Token::Auto),
         ("register", Token::Register),
+        ("restrict", Token::Restrict),
         ("case", Token::Case),
         ("default", Token::Default),
         ("if", Token::If),

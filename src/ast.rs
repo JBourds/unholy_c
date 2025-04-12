@@ -906,12 +906,14 @@ impl std::fmt::Display for Type {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Literal {
     Int(i32),
+    Long(i64),
 }
 
 impl Literal {
     pub fn is_int(&self) -> bool {
         match self {
             Self::Int(_) => true,
+            Self::Long(_) => false,
         }
     }
 }
@@ -920,6 +922,7 @@ impl std::fmt::Display for Literal {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Int(v) => write!(f, "{v}"),
+            Self::Long(v) => write!(f, "{v}"),
         }
     }
 }

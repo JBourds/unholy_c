@@ -122,6 +122,7 @@ impl InitialValue {
         let val = const_eval::eval(expr.clone()).context("Failed to const eval expression")?;
         match val {
             ast::Literal::Int(i) => Ok(InitialValue::Initial(i)),
+            ast::Literal::Long(..) => todo!(),
         }
     }
 

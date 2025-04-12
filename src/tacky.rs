@@ -874,6 +874,7 @@ impl From<ast::Literal> for Val {
     fn from(node: ast::Literal) -> Self {
         match node {
             ast::Literal::Int(i) => Self::Constant(i),
+            ast::Literal::Long(..) => todo!(),
         }
     }
 }

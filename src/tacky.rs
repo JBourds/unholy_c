@@ -474,7 +474,7 @@ impl Instruction {
                         default.unwrap_or(Rc::clone(&break_label)),
                     ));
                     block_instructions.extend(Self::parse_stmt_with(*body, make_temp_var));
-                } else if let ast::Expr::Literal(cond) = condition {
+                } else if let ast::Expr::Constant(cond) = condition {
                     let jump_label = cases
                         .iter()
                         .find(|&&(case, _)| case == cond)
@@ -496,7 +496,7 @@ impl Instruction {
                         let Expr {
                             instructions,
                             val: case_val,
-                        } = Expr::parse_with(ast::Expr::Literal(*case), make_temp_var);
+                        } = Expr::parse_with(ast::Expr::Constant(*case), make_temp_var);
                         block_instructions.extend(instructions);
                         let dst = Val::Var(Rc::new(make_temp_var()));
                         block_instructions.push(Self::Binary {
@@ -553,7 +553,7 @@ pub struct Expr {
 impl Expr {
     fn parse_with(node: ast::Expr, make_temp_var: &mut impl FnMut() -> String) -> Expr {
         match node {
-            ast::Expr::Literal(v) => Self {
+            ast::Expr::Constant(v) => Self {
                 instructions: vec![],
                 val: Val::from(v),
             },
@@ -870,11 +870,11 @@ pub enum Val {
     Constant(i32),
     Var(Rc<String>),
 }
-impl From<ast::Literal> for Val {
-    fn from(node: ast::Literal) -> Self {
+impl From<ast::Constant> for Val {
+    fn from(node: ast::Constant) -> Self {
         match node {
-            ast::Literal::Int(i) => Self::Constant(i),
-            ast::Literal::Long(..) => todo!(),
+            ast::Constant::Int(i) => Self::Constant(i),
+            ast::Constant::Long(..) => todo!(),
         }
     }
 }
@@ -974,7 +974,7 @@ mod tests {
     #[test]
     fn test_return_literal() {
         let ast = ast::Block(vec![ast::BlockItem::Stmt(ast::Stmt::Return(Some(
-            ast::Expr::Literal(ast::Literal::Int(2)),
+            ast::Expr::Constant(ast::Constant::Int(2)),
         )))]);
         let mut counter = 0;
         let mut make_temp_var = Function::make_temp_var(Rc::new("test".to_string()), &mut counter);
@@ -988,7 +988,7 @@ mod tests {
         let ast = ast::Block(vec![ast::BlockItem::Stmt(ast::Stmt::Return(Some(
             ast::Expr::Unary {
                 op: ast::UnaryOp::Complement,
-                expr: Box::new(ast::Expr::Literal(ast::Literal::Int(2))),
+                expr: Box::new(ast::Expr::Constant(ast::Constant::Int(2))),
             },
         )))]);
         let mut counter = 0;
@@ -1013,7 +1013,7 @@ mod tests {
                     op: ast::UnaryOp::Complement,
                     expr: Box::new(ast::Expr::Unary {
                         op: ast::UnaryOp::Negate,
-                        expr: Box::new(ast::Expr::Literal(ast::Literal::Int(2))),
+                        expr: Box::new(ast::Expr::Constant(ast::Constant::Int(2))),
                     }),
                 }),
             },
@@ -1048,16 +1048,16 @@ mod tests {
             op: ast::BinaryOp::Subtract,
             left: Box::new(ast::Expr::Binary {
                 op: ast::BinaryOp::Multiply,
-                left: Box::new(ast::Expr::Literal(ast::Literal::Int(1))),
-                right: Box::new(ast::Expr::Literal(ast::Literal::Int(2))),
+                left: Box::new(ast::Expr::Constant(ast::Constant::Int(1))),
+                right: Box::new(ast::Expr::Constant(ast::Constant::Int(2))),
             }),
             right: Box::new(ast::Expr::Binary {
                 op: ast::BinaryOp::Multiply,
-                left: Box::new(ast::Expr::Literal(ast::Literal::Int(3))),
+                left: Box::new(ast::Expr::Constant(ast::Constant::Int(3))),
                 right: Box::new(ast::Expr::Binary {
                     op: ast::BinaryOp::Add,
-                    left: Box::new(ast::Expr::Literal(ast::Literal::Int(4))),
-                    right: Box::new(ast::Expr::Literal(ast::Literal::Int(5))),
+                    left: Box::new(ast::Expr::Constant(ast::Constant::Int(4))),
+                    right: Box::new(ast::Expr::Constant(ast::Constant::Int(5))),
                 }),
             }),
         };

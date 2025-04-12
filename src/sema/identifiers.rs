@@ -374,7 +374,7 @@ fn resolve_expr(expr: ast::Expr, ident_map: &HashMap<Rc<String>, IdentEntry>) ->
                 bail!("Undeclared variable '{var}'")
             }
         }
-        ast::Expr::Literal(lit) => Ok(ast::Expr::Literal(lit)),
+        node @ ast::Expr::Constant(_) => Ok(node),
         ast::Expr::Unary { op, expr } => {
             if op.is_valid_for(&expr) {
                 Ok(ast::Expr::Unary {

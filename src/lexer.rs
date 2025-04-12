@@ -35,16 +35,16 @@ impl Lexer {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub enum LiteralSuffix {
+pub enum ConstantSuffix {
     Long,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Token {
     Ident(Rc<String>),
-    Literal {
+    Constant {
         text: Rc<String>,
-        suffix: Option<LiteralSuffix>,
+        suffix: Option<ConstantSuffix>,
     },
     // Reserved
     Return,
@@ -131,7 +131,7 @@ pub enum Token {
     SingleQuote,
 }
 
-impl std::fmt::Display for LiteralSuffix {
+impl std::fmt::Display for ConstantSuffix {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Long => write!(f, "L"),
@@ -143,8 +143,8 @@ impl std::fmt::Display for Token {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Ident(s) => write!(f, "Identifer: \"{}\"", s),
-            Self::Literal { text, suffix } => {
-                write!(f, "Literal: \"{}\"", text)?;
+            Self::Constant { text, suffix } => {
+                write!(f, "Constant: \"{}\"", text)?;
                 if let Some(suffix) = suffix {
                     write!(f, "{}", suffix)?;
                 }
@@ -382,11 +382,11 @@ impl Token {
             let (text, suffix) = match literal.as_bytes() {
                 &[.., b'l' | b'L'] => (
                     literal.chars().take(literal.len() - 1).collect(),
-                    Some(LiteralSuffix::Long),
+                    Some(ConstantSuffix::Long),
                 ),
                 _ => (literal.to_string(), None),
             };
-            Token::Literal {
+            Token::Constant {
                 text: Rc::new(text),
                 suffix,
             }
@@ -396,7 +396,7 @@ impl Token {
             match stream.chars().next() {
                 Some('\'') => Self::match_regex(stream, Self::CHAR).map_or(None, |s| {
                     Some((
-                        Token::Literal {
+                        Token::Constant {
                             text: Rc::new(s.to_string()),
                             suffix: None,
                         },
@@ -405,7 +405,7 @@ impl Token {
                 }),
                 Some('"') => Self::match_regex(stream, Self::STRING).map_or(None, |s| {
                     Some((
-                        Token::Literal {
+                        Token::Constant {
                             text: Rc::new(s.to_string()),
                             suffix: None,
                         },

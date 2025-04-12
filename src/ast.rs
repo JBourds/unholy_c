@@ -401,7 +401,7 @@ pub enum Stmt {
         condition: Expr,
         body: Box<Stmt>,
         label: Option<Rc<String>>,
-        cases: Option<Vec<(Literal, Rc<String>)>>,
+        cases: Option<Vec<(Constant, Rc<String>)>>,
         default: Option<Rc<String>>,
     },
     Goto(Rc<String>),
@@ -632,7 +632,7 @@ pub enum Expr {
         lvalue: Box<Expr>,
         rvalue: Box<Expr>,
     },
-    Literal(Literal),
+    Constant(Constant),
     Unary {
         op: UnaryOp,
         expr: Box<Expr>,
@@ -790,9 +790,9 @@ impl Factor {
                 ))
             }
             _ => match tokens {
-                [Token::Literal { .. }, ..] => {
-                    let (lit, tokens) = Literal::consume(tokens)?;
-                    Ok((Expr::Literal(lit), tokens))
+                [Token::Constant { .. }, ..] => {
+                    let (lit, tokens) = Constant::consume(tokens)?;
+                    Ok((Expr::Constant(lit), tokens))
                 }
                 [Token::Ident(s), tokens @ ..] => {
                     let (expr, tokens) = Self::check_for_postfix(Expr::Var(Rc::clone(s)), tokens);
@@ -904,12 +904,12 @@ impl std::fmt::Display for Type {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum Literal {
+pub enum Constant {
     Int(i32),
     Long(i64),
 }
 
-impl Literal {
+impl Constant {
     pub fn is_int(&self) -> bool {
         match self {
             Self::Int(_) => true,
@@ -918,7 +918,7 @@ impl Literal {
     }
 }
 
-impl std::fmt::Display for Literal {
+impl std::fmt::Display for Constant {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Int(v) => write!(f, "{v}"),
@@ -926,11 +926,11 @@ impl std::fmt::Display for Literal {
         }
     }
 }
-impl AstNode for Literal {
-    fn consume(tokens: &[Token]) -> Result<(Literal, &[Token])> {
+impl AstNode for Constant {
+    fn consume(tokens: &[Token]) -> Result<(Constant, &[Token])> {
         if let Some(token) = tokens.first() {
             match token {
-                Token::Literal { text, suffix: _ } => {
+                Token::Constant { text, suffix: _ } => {
                     if let Ok(int) = text.parse::<i32>() {
                         Ok((Self::Int(int), &tokens[1..]))
                     } else {

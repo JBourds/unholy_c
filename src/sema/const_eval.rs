@@ -3,9 +3,9 @@ use crate::ast;
 use anyhow::{bail, Context, Result};
 use num::cast::AsPrimitive;
 
-pub fn eval(expr: ast::Expr) -> Result<ast::Literal> {
+pub fn eval(expr: ast::Expr) -> Result<ast::Constant> {
     let constant = eval_constant(expr).context("Could not evaluate expression at compile time")?;
-    let literal = ast::Literal::from(&constant);
+    let literal = ast::Constant::from(&constant);
     Ok(literal)
 }
 
@@ -15,9 +15,9 @@ fn eval_constant(expr: ast::Expr) -> Result<Constant> {
         ast::Expr::Assignment { .. } => {
             bail!("Assignment cannot be constant evaluated")
         }
-        ast::Expr::Literal(literal) => {
-            let literal = Result::<Constant>::from(&literal);
-            Ok(literal.context("ast::Literal cannot be constant evaluated")?)
+        ast::Expr::Constant(constant) => {
+            let constant = Result::<Constant>::from(&constant);
+            Ok(constant.context("Failed to perform const evaluation on {constant:?}")?)
         }
         ast::Expr::Unary { op, expr } => eval_unary(op, *expr).context("UnaryOp const eval failed"),
         ast::Expr::Binary { op, left, right } => {
@@ -269,22 +269,22 @@ impl std::ops::Shr for Constant {
     }
 }
 
-impl From<&Constant> for ast::Literal {
+impl From<&Constant> for ast::Constant {
     fn from(value: &Constant) -> Self {
         match *value {
-            Constant::I32(num) => ast::Literal::Int(num),
-            Constant::I64(num) => ast::Literal::Long(num),
+            Constant::I32(num) => ast::Constant::Int(num),
+            Constant::I64(num) => ast::Constant::Long(num),
         }
     }
 }
 
-impl From<&ast::Literal> for Result<Constant> {
+impl From<&ast::Constant> for Result<Constant> {
     // Returning an error will make more sense as soon as we
     // have string literals
-    fn from(value: &ast::Literal) -> Self {
+    fn from(value: &ast::Constant) -> Self {
         match *value {
-            ast::Literal::Int(num) => Ok(Constant::I32(num)),
-            ast::Literal::Long(num) => Ok(Constant::I64(num)),
+            ast::Constant::Int(num) => Ok(Constant::I32(num)),
+            ast::Constant::Long(num) => Ok(Constant::I64(num)),
         }
     }
 }

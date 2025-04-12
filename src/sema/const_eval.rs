@@ -94,15 +94,15 @@ impl Constant {
         i64: AsPrimitive<T>,
     {
         match self {
-            &Self::I32(num) => num.as_(),
-            &Self::I64(num) => num.as_(),
+            Self::I32(num) => num.as_(),
+            Self::I64(num) => num.as_(),
         }
     }
 
     fn truthy(&self) -> bool {
-        match self {
-            &Self::I32(n) => n != 0,
-            &Self::I64(n) => n != 0,
+        match *self {
+            Self::I32(n) => n != 0,
+            Self::I64(n) => n != 0,
         }
     }
 
@@ -271,9 +271,9 @@ impl std::ops::Shr for Constant {
 
 impl From<&Constant> for ast::Literal {
     fn from(value: &Constant) -> Self {
-        match value {
-            &Constant::I32(num) => ast::Literal::Int(num),
-            &Constant::I64(num) => ast::Literal::Long(num),
+        match *value {
+            Constant::I32(num) => ast::Literal::Int(num),
+            Constant::I64(num) => ast::Literal::Long(num),
         }
     }
 }
@@ -282,9 +282,9 @@ impl From<&ast::Literal> for Result<Constant> {
     // Returning an error will make more sense as soon as we
     // have string literals
     fn from(value: &ast::Literal) -> Self {
-        match value {
-            &ast::Literal::Int(num) => Ok(Constant::I32(num)),
-            &ast::Literal::Long(num) => Ok(Constant::I64(num)),
+        match *value {
+            ast::Literal::Int(num) => Ok(Constant::I32(num)),
+            ast::Literal::Long(num) => Ok(Constant::I64(num)),
         }
     }
 }

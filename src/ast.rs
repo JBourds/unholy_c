@@ -824,7 +824,7 @@ impl Factor {
 pub enum BaseType {
     Int {
         nbytes: usize,
-        signed: bool,
+        signed: Option<bool>,
     },
     Float,
     Double,
@@ -842,7 +842,7 @@ impl Default for BaseType {
     fn default() -> Self {
         Self::Int {
             nbytes: 4,
-            signed: true,
+            signed: None,
         }
     }
 }
@@ -862,7 +862,7 @@ impl AstNode for BaseType {
                 Token::Int => Ok((
                     Self::Int {
                         nbytes: 4,
-                        signed: true,
+                        signed: None,
                     },
                     &tokens[1..],
                 )),
@@ -889,7 +889,7 @@ pub struct TypePtr {
 }
 
 impl TypePtr {
-    const BITVEC_LENGTH: usize = (std::u8::MAX / 8) as usize;
+    const BITVEC_LENGTH: usize = (u8::MAX / 8) as usize;
 
     #[allow(dead_code)]
     fn get(arr: &[u8], depth: NonZeroU8) -> bool {
@@ -1116,8 +1116,10 @@ impl AstNode for Type {
                     } else {
                         std::mem::size_of::<i32>()
                     };
-                    let signed = is_signed.unwrap_or(true);
-                    base.replace(BaseType::Int { nbytes, signed });
+                    base.replace(BaseType::Int {
+                        nbytes,
+                        signed: is_signed,
+                    });
                 }
                 _ => bail!(
                     "Cannot provide type specifiers specifiy to integers for non integer type."
@@ -1179,11 +1181,13 @@ impl std::fmt::Display for BaseType {
         match self {
             Self::Int { nbytes, signed } => {
                 let mut sign = 'i';
-                if *signed {
-                    write!(f, "signed ")?;
-                } else {
-                    write!(f, "unsigned ")?;
-                    sign = 'u';
+                if let Some(signed) = signed {
+                    if *signed {
+                        write!(f, "signed ")?;
+                    } else {
+                        write!(f, "unsigned ")?;
+                        sign = 'u';
+                    }
                 }
                 // When pretty printing, use the number of bytes rather than
                 // bending the knee to the wobbly-sized integers

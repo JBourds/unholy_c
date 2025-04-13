@@ -238,18 +238,15 @@ impl SymbolTable {
         self.global.get(key)
     }
 
-    fn get_decl_info(
-        decl: &ast::Declaration,
-    ) -> (Rc<String>, ast::Type, bool, Option<ast::StorageClass>) {
+    fn get_decl_info(decl: &ast::Declaration) -> (Rc<String>, ast::Type, bool) {
         match decl {
             ast::Declaration::FunDecl(fun) => (
                 Rc::clone(&fun.name),
                 ast::Type::from(fun),
                 fun.block.is_some(),
-                fun.storage_class,
             ),
             ast::Declaration::VarDecl(ast::VarDecl { typ, name, init }) => {
-                (Rc::clone(name), typ.clone(), init.is_some(), typ.storage)
+                (Rc::clone(name), typ.clone(), init.is_some())
             }
         }
     }
@@ -313,7 +310,7 @@ impl SymbolTable {
     }
 
     fn declare_in_scope(&mut self, decl: &ast::Declaration, scope: Scope) -> Result<()> {
-        let (name, mut new_type, defining_ident, storage_class) = Self::get_decl_info(decl);
+        let (name, mut new_type, defining_ident) = Self::get_decl_info(decl);
         if let Some(SymbolEntry {
             r#type: old_type,
             defined: already_defined,
@@ -336,8 +333,10 @@ impl SymbolTable {
             //      III) New declaration storage class conflicts with previous
             //           one (ERROR)
             if !scope.shadows(old_scope) {
-                if *old_type != new_type {
+                // Cases 1.1 and 2.1
+                if old_type.base != new_type.base {
                     match (&old_type.base, &new_type.base) {
+                        // Case 1.2
                         (ast::BaseType::Fun {..}, ast::BaseType::Fun { param_types, .. }) if param_types.is_empty() => new_type = old_type.clone(),
                         _ => bail!(
                             "Redeclaring '{name}' as {new_type} when it was previously declared as {old_type}"
@@ -347,7 +346,8 @@ impl SymbolTable {
                 if *already_defined && defining_ident {
                     bail!("Redefining '{name}' when it is already defined.")
                 }
-                let mut attribute = Self::check_attribute(old_attrib, &name, storage_class, scope)?;
+                let mut attribute =
+                    Self::check_attribute(old_attrib, &name, new_type.storage, scope)?;
                 match decl {
                     ast::Declaration::FunDecl(..) => {}
                     ast::Declaration::VarDecl(var) => {

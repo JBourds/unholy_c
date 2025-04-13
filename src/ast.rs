@@ -1189,9 +1189,10 @@ impl std::fmt::Display for BaseType {
                         sign = 'u';
                     }
                 }
+                let nbits = nbytes * 8;
                 // When pretty printing, use the number of bytes rather than
                 // bending the knee to the wobbly-sized integers
-                write!(f, "{sign}{nbytes}")
+                write!(f, "{sign}{nbits}")
             }
             Self::Float => write!(f, "float"),
             Self::Double => write!(f, "double"),

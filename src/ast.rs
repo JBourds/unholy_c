@@ -855,8 +855,8 @@ pub enum BaseType {
         nbytes: usize,
         signed: Option<bool>,
     },
-    Float,
-    Double,
+    Float(usize),
+    Double(usize),
     Char,
     Fun {
         ret_t: Box<Type>,
@@ -867,12 +867,80 @@ pub enum BaseType {
     Void,
 }
 
-impl Default for BaseType {
-    fn default() -> Self {
+impl BaseType {
+    // Shorthand initializations
+    pub fn bool() -> Self {
+        Self::int()
+    }
+
+    pub fn int() -> Self {
         Self::Int {
-            nbytes: 4,
+            nbytes: std::mem::size_of::<i32>(),
             signed: None,
         }
+    }
+
+    // Promotion rules
+
+    fn rank(&self) -> Option<usize> {
+        // Completely arbitrary numbers but this ensures that rank favors size,
+        // and that floating point representations will always win out
+        match self {
+            Self::Char => Some(0),
+            Self::Int { nbytes, .. } => Some(*nbytes + 1),
+            Self::Float(nbytes) => Some(*nbytes + 1000),
+            Self::Double(nbytes) => Some(*nbytes + 2000),
+            _ => None,
+        }
+    }
+
+    fn lift(lhs: Self, rhs: Self) -> Result<(Self, Self)> {
+        let left = lhs.default_promote();
+        let right = rhs
+            .promote(&left)
+            .context("Unable to promote lefthand side to match righthand side.")?;
+        let left = left
+            .promote(&right)
+            .context("Unable to promote righthand side to match lefthand side.")?;
+        Ok((left, right))
+    }
+
+    fn default_promote(self) -> Self {
+        match self {
+            // Integer types get promoted to a basic signed int by default
+            Self::Int { .. } | Self::Char => {
+                let int = Self::int();
+                let int_rank = int.rank().expect("Integer does not have a rank?");
+                if self.rank().expect("Integer does not have a rank?") >= int_rank {
+                    self
+                } else {
+                    self.promote(&int)
+                        .expect("We can always promote an integer to another integer type.")
+                }
+            }
+            _ => self,
+        }
+    }
+
+    fn promote(self, other: &Self) -> Result<Self> {
+        let other_rank = other
+            .rank()
+            .context("Could not establish a rank for type {other:#?}.")?;
+        if self
+            .rank()
+            .context("Could not establish a rank for type {self:#?}")?
+            >= other_rank
+        {
+            Ok(self)
+        } else {
+            Ok(other.clone())
+        }
+    }
+}
+
+impl Default for BaseType {
+    fn default() -> Self {
+        Self::int()
     }
 }
 
@@ -890,13 +958,13 @@ impl AstNode for BaseType {
                 // if there are specifiers which change this
                 Token::Int => Ok((
                     Self::Int {
-                        nbytes: 4,
+                        nbytes: std::mem::size_of::<i32>(),
                         signed: None,
                     },
                     &tokens[1..],
                 )),
-                Token::Float => Ok((Self::Float, &tokens[1..])),
-                Token::Double => Ok((Self::Double, &tokens[1..])),
+                Token::Float => Ok((Self::Float(std::mem::size_of::<f32>()), &tokens[1..])),
+                Token::Double => Ok((Self::Double(std::mem::size_of::<f64>()), &tokens[1..])),
                 Token::Char => Ok((Self::Char, &tokens[1..])),
                 // TODO: Recursive parsing logic for structs
                 Token::Struct => Ok((Self::Struct, &tokens[1..])),
@@ -981,11 +1049,27 @@ pub struct Type {
     pub is_const: bool,
 }
 
+impl Type {
+    pub fn bool() -> Self {
+        Self::int()
+    }
+
+    pub fn int() -> Self {
+        Self {
+            base: BaseType::int(),
+            ptr: None,
+            storage: None,
+            is_const: true,
+        }
+    }
+}
+
 impl AstNode for Type {
     fn consume<'a>(tokens: &'a [Token]) -> Result<(Self, &'a [Token])> {
         let mut remaining = tokens;
 
-        // Only integers have these specifiers attached to them
+        // Integers have these specifiers attached to them, and double can
+        // have up to a single "long" in its specifier
         let mut n_longs = 0;
         let mut is_signed = None;
         let mut is_short = false;
@@ -1146,7 +1230,9 @@ impl AstNode for Type {
         if n_longs > 0 && is_short {
             bail!("Integer cannot be both a long and a short.");
         }
-        if n_longs > 0 || is_signed.is_some() || is_short {
+        if n_longs > 0 && matches!(base, Some(BaseType::Double { .. })) {
+            base.replace(BaseType::Double(std::mem::size_of::<f64>()));
+        } else if n_longs > 0 || is_signed.is_some() || is_short {
             match base {
                 Some(BaseType::Int { .. }) | None => {
                     let nbytes = if n_longs > 0 {
@@ -1162,7 +1248,7 @@ impl AstNode for Type {
                     });
                 }
                 _ => bail!(
-                    "Cannot provide type specifiers specifiy to integers for non integer type."
+                    "Cannot provide type specifiers specific to integers for non integer type."
                 ),
             }
         }
@@ -1234,8 +1320,8 @@ impl std::fmt::Display for BaseType {
                 // bending the knee to the wobbly-sized integers
                 write!(f, "{sign}{nbits}")
             }
-            Self::Float => write!(f, "float"),
-            Self::Double => write!(f, "double"),
+            Self::Float(_) => write!(f, "float"),
+            Self::Double(_) => write!(f, "double"),
             Self::Char => write!(f, "char"),
             Self::Struct => todo!(),
             Self::Fun { ret_t, param_types } => {
@@ -1261,10 +1347,7 @@ pub enum Constant {
 
 impl Constant {
     pub fn is_int(&self) -> bool {
-        match self {
-            Self::Int(_) => true,
-            Self::Long(_) => false,
-        }
+        true
     }
 }
 
@@ -1475,6 +1558,10 @@ pub enum UnaryOp {
 }
 
 impl UnaryOp {
+    pub fn is_logical(&self) -> bool {
+        *self == Self::Not
+    }
+
     pub fn is_valid_for(&self, expr: &Expr) -> bool {
         !matches!(
             self,

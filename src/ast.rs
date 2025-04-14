@@ -1064,12 +1064,14 @@ impl AstNode for Type {
                     TypePtr::default()
                 };
                 // Eat up any const or restrict keywords
+                // Ignore the result type from set_const since we are using
+                // the type's own depth to set it
                 while let Some(t) = remaining.first() {
                     if check_for_const(t) {
-                        inner_ptr.set_const(inner_ptr.depth);
+                        let _ = inner_ptr.set_const(inner_ptr.depth);
                         remaining = &remaining[1..];
                     } else if check_for_restrict(t) {
-                        inner_ptr.set_restrict(inner_ptr.depth);
+                        let _ = inner_ptr.set_restrict(inner_ptr.depth);
                         remaining = &remaining[1..];
                     } else {
                         break;

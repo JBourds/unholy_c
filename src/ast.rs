@@ -1254,11 +1254,18 @@ impl AstNode for Constant {
     fn consume(tokens: &[Token]) -> Result<(Constant, &[Token])> {
         if let Some(token) = tokens.first() {
             match token {
+                // NOTE: The text in these nodes does not include the negative
+                // sign so we don't need to worry about absolute value sign
                 Token::Constant { text, suffix: None } => {
-                    if let Ok(int) = text.parse::<i32>() {
-                        Ok((Self::Int(int), &tokens[1..]))
+                    // TODO: Update this once we support unsigned types too?
+                    // Try all our parsing rules out until we get one which
+                    // has the necessary precision
+                    if let Ok(val) = text.parse::<i32>() {
+                        Ok((Self::Int(val), &tokens[1..]))
+                    } else if let Ok(val) = text.parse::<i64>() {
+                        Ok((Self::Long(val), &tokens[1..]))
                     } else {
-                        bail!("Could not parse token into constant.")
+                        bail!("Could not parse interger literal into constant.")
                     }
                 }
                 Token::Constant {

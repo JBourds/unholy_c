@@ -453,6 +453,11 @@ impl SymbolTable {
     }
 }
 
+struct TypedExpr {
+    expr: ast::Expr,
+    r#type: ast::Type,
+}
+
 pub fn validate(stage: SemaStage<IdentResolution>) -> Result<SemaStage<TypeChecking>> {
     let mut symbols = SymbolTable::new_table();
     typecheck_program(&stage.program, &mut symbols)?;
@@ -473,48 +478,101 @@ fn typecheck_program(program: &ast::Program, symbols: &mut SymbolTable) -> Resul
     Ok(())
 }
 
-fn typecheck_block(block: &ast::Block, symbols: &mut SymbolTable) -> Result<()> {
+fn typecheck_block(
+    block: &ast::Block,
+    symbols: &mut SymbolTable,
+    function: Option<Rc<String>>,
+) -> Result<()> {
     symbols.push_scope();
     for item in block.items().iter() {
-        typecheck_block_item(item, symbols)?;
+        typecheck_block_item(item, symbols, function.clone())
+            .map(|_| ())
+            .context(format!("Failed to typecheck block {block:#?}"))?;
     }
     symbols.pop_scope()
 }
 
-fn typecheck_block_item(item: &ast::BlockItem, symbols: &mut SymbolTable) -> Result<()> {
+fn typecheck_block_item(
+    item: &ast::BlockItem,
+    symbols: &mut SymbolTable,
+    function: Option<Rc<String>>,
+) -> Result<()> {
     match item {
-        ast::BlockItem::Stmt(stmt) => typecheck_stmt(stmt, symbols).map(|_| ()),
-        ast::BlockItem::Decl(decl) => typecheck_decl(decl, symbols).map(|_| ()),
+        ast::BlockItem::Stmt(stmt) => typecheck_stmt(stmt, symbols, function),
+        ast::BlockItem::Decl(decl) => typecheck_decl(decl, symbols),
     }
+    .map(|_| ())
+    .context(format!("Failed to typecheck block item: {item:#?}"))
 }
 
-fn typecheck_stmt(stmt: &ast::Stmt, symbols: &mut SymbolTable) -> Result<()> {
+fn typecheck_stmt(
+    stmt: &ast::Stmt,
+    symbols: &mut SymbolTable,
+    function: Option<Rc<String>>,
+) -> Result<()> {
     match stmt {
-        ast::Stmt::Compound(block) => typecheck_block(block, symbols),
-        ast::Stmt::Return(Some(expr)) => typecheck_expr(expr, symbols),
-        ast::Stmt::Expr(expr) => typecheck_expr(expr, symbols),
+        ast::Stmt::Compound(block) => typecheck_block(block, symbols, function),
+        ast::Stmt::Return(Some(expr)) => {
+            if let Some(function) = function {
+                let TypedExpr { r#type: found, .. } = typecheck_expr(expr, symbols)?;
+                if let Some(SymbolEntry {
+                    r#type:
+                        ast::Type {
+                            base: ast::BaseType::Fun { ret_t: expected, .. },
+                            ..
+                        },
+                    ..
+                }) = symbols.get(&function)
+                {
+                    if found.base != expected.base {
+                        bail!("Found return type: \"{found}\" in function \"{function}\" but expected return type: \"{expected}\"");
+                    } else {
+                        Ok(())
+                    }
+                } else {
+                    bail!("Could not find function {function} in symbol table.")
+                }
+            } else {
+                bail!("Invalid return statement out of function body.");
+            }
+        }
+        ast::Stmt::Expr(expr) => typecheck_expr(expr, symbols)
+            .map(|_| ())
+            .context("Failed to typecheck expression statement."),
         ast::Stmt::If {
             condition,
             then,
             r#else,
         } => {
-            typecheck_expr(condition, symbols)?;
-            typecheck_stmt(then, symbols)?;
+            typecheck_expr(condition, symbols)
+                .map(|_| ())
+                .context("Failed to typecheck if block condition.")?;
+            typecheck_stmt(then, symbols, function.clone())
+                .map(|_| ())
+                .context("Failed to typecheck if block body.")?;
             r#else
                 .as_ref()
-                .map_or(Ok(()), |stmt| typecheck_stmt(stmt, symbols))
+                .map_or(Ok(()), |stmt| typecheck_stmt(stmt, symbols, function))
         }
         ast::Stmt::While {
             condition, body, ..
         } => {
-            typecheck_expr(condition, symbols)?;
-            typecheck_stmt(body, symbols)
+            typecheck_expr(condition, symbols)
+                .map(|_| ())
+                .context("Failed to typecheck while loop condition.")?;
+            typecheck_stmt(body, symbols, function)
+                .map(|_| ())
+                .context("Failed to typecheck while loop body.")
         }
         ast::Stmt::DoWhile {
             body, condition, ..
         } => {
-            typecheck_expr(condition, symbols)?;
-            typecheck_stmt(body, symbols)
+            typecheck_expr(condition, symbols)
+                .map(|_| ())
+                .context("Failed to typecheck do-while loop condition.")?;
+            typecheck_stmt(body, symbols, function)
+                .map(|_| ())
+                .context("Failed to typecheck do-while loop body.")
         }
         ast::Stmt::For {
             init,
@@ -531,24 +589,38 @@ fn typecheck_stmt(stmt: &ast::Stmt, symbols: &mut SymbolTable) -> Result<()> {
                             decl.name
                         );
                     }
-                    typecheck_var_decl(decl, symbols)?;
+                    typecheck_var_decl(decl, symbols)
+                        .map(|_| ())
+                        .context("Failed to typecheck for loop initializations.")?;
                 }
                 ast::ForInit::Expr(Some(expr)) => {
-                    typecheck_expr(expr, symbols)?;
+                    typecheck_expr(expr, symbols)
+                        .map(|_| ())
+                        .context("Failed to typecheck for loop initialization expression.")?;
                 }
                 _ => {}
             }
             if let Some(condition) = condition {
-                typecheck_expr(condition, symbols)?;
+                typecheck_expr(condition, symbols)
+                    .map(|_| ())
+                    .context("Failed to typecheck for loop condition.")?;
             }
             if let Some(post) = post {
-                typecheck_expr(post, symbols)?;
+                typecheck_expr(post, symbols)
+                    .map(|_| ())
+                    .context("Failed to typecheck for loop post condition.")?;
             }
-            typecheck_stmt(body, symbols)
+            typecheck_stmt(body, symbols, function)
+                .map(|_| ())
+                .context("Failed to typecheck for loop body.")
         }
         ast::Stmt::Case { value, stmt, .. } => {
-            typecheck_expr(value, symbols)?;
-            typecheck_stmt(stmt, symbols)
+            typecheck_expr(value, symbols)
+                .map(|_| ())
+                .context("Failed to typecheck case value.")?;
+            typecheck_stmt(stmt, symbols, function)
+                .map(|_| ())
+                .context("Failed to typecheck case statement.")
         }
         ast::Stmt::Switch {
             condition,
@@ -556,8 +628,12 @@ fn typecheck_stmt(stmt: &ast::Stmt, symbols: &mut SymbolTable) -> Result<()> {
             cases,
             ..
         } => {
-            typecheck_expr(condition, symbols)?;
-            typecheck_stmt(body, symbols)?;
+            typecheck_expr(condition, symbols)
+                .map(|_| ())
+                .context("Failed to typecheck switch expression.")?;
+            typecheck_stmt(body, symbols, function)
+                .map(|_| ())
+                .context("Failed to typecheck switch body.")?;
             if let Some(cases) = cases {
                 for (literal, name) in cases.iter() {
                     if !literal.is_int() {
@@ -569,25 +645,130 @@ fn typecheck_stmt(stmt: &ast::Stmt, symbols: &mut SymbolTable) -> Result<()> {
         }
         _ => Ok(()),
     }
+    .map(|_| ())
+    .context(format!("Failed to typecheck statement: {stmt:#?}"))
 }
 
-fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<()> {
+fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedExpr> {
+    let bool_cast = |expr, symbols| {
+        let TypedExpr { expr, .. } =
+            typecheck_expr(expr, symbols).context("Failed to typecheck inner unary expression.")?;
+        Ok(TypedExpr {
+            expr: ast::Expr::Cast {
+                target: ast::Type::bool(),
+                exp: Box::new(expr),
+            },
+            r#type: ast::Type::bool(),
+        })
+    };
     match expr {
         ast::Expr::Var(var) => {
-            if symbols.get(var).is_none() {
-                bail!("Attempted to typecheck {var} but there was no type associated with it.");
+            if let Some(t) = symbols.get(var) {
+                Ok(TypedExpr {
+                    expr: expr.clone(),
+                    r#type: t.r#type.clone(),
+                })
             } else {
-                Ok(())
+                bail!("Attempted to typecheck {var} but there was no type associated with it.");
             }
         }
+        // TODO: Fix once we get to pointers
+        // This case has the semantics of a cast but rather than directly
+        // converting to a cast expression frame it as an implicit promotion
+        // so invalid assignments (e.g., Struct into an int) fail.
         ast::Expr::Assignment { lvalue, rvalue } => {
-            typecheck_expr(lvalue, symbols)?;
-            typecheck_expr(rvalue, symbols)
+            let TypedExpr {
+                expr: _,
+                r#type: left_t,
+            } = typecheck_expr(lvalue, symbols)
+                .context("Failed to typecheck lvalue argument of assignment.")?;
+            let TypedExpr {
+                expr: right,
+                r#type: right_t,
+            } = typecheck_expr(rvalue, symbols)
+                .context("Failed to typecheck rvalue argument of assignment.")?;
+            ensure!(right_t.base.can_assign_to(&left_t.base), "Incompatible types in assignment. Cannot assign value of type {right_t:#?} to value of type {left_t:#?}");
+            Ok(TypedExpr {
+                expr: ast::Expr::Cast {
+                    target: left_t.clone(),
+                    exp: Box::new(right),
+                },
+                r#type: left_t,
+            })
         }
-        ast::Expr::Unary { expr, .. } => typecheck_expr(expr, symbols),
-        ast::Expr::Binary { left, right, .. } => {
-            typecheck_expr(left, symbols)?;
-            typecheck_expr(right, symbols)
+        ast::Expr::Unary { op, expr } => {
+            if op.is_logical() {
+                bool_cast(expr, symbols)
+            } else {
+                typecheck_expr(expr, symbols)
+                    .context("Failed to typecheck nested unary expression.")
+            }
+        }
+        // TODO: Fix once we get to pointers
+        ast::Expr::Binary { op, left, right } => {
+            let TypedExpr {
+                expr: left,
+                r#type: left_t,
+            } = typecheck_expr(left, symbols)
+                .context("Failed to typecheck lefthand argument of binary operation.")?;
+            let TypedExpr {
+                expr: right,
+                r#type: right_t,
+            } = typecheck_expr(right, symbols)
+                .context("Failed to typecheck righthand argument of binary operation.")?;
+            if op.is_logical() {
+                Ok(TypedExpr {
+                    expr: ast::Expr::Binary {
+                        op: *op,
+                        left: Box::new(left),
+                        right: Box::new(right),
+                    },
+                    r#type: ast::Type::bool(),
+                })
+            } else {
+                let (conv_left_t, conv_right_t) =
+                    ast::BaseType::lift(left_t.base.clone(), right_t.base.clone()).context(
+                        "Unable to promote {left_t:#?} and {right_t:#?} to a common type.",
+                    )?;
+                let left_changed = conv_left_t != left_t.base;
+                let right_changed = conv_right_t != right_t.base;
+                // With a binary expression, we force both operands to be of
+                // the same type so the decision between left or right is
+                // arbitrary
+                let common_t = ast::Type {
+                    base: conv_left_t,
+                    ..left_t
+                };
+                let left = if left_changed {
+                    ast::Expr::Cast {
+                        target: common_t.clone(),
+                        exp: Box::new(left),
+                    }
+                } else {
+                    left
+                };
+                let right = if right_changed {
+                    ast::Expr::Cast {
+                        target: common_t.clone(),
+                        exp: Box::new(right),
+                    }
+                } else {
+                    right
+                };
+                let exp = ast::Expr::Binary {
+                    op: *op,
+                    left: Box::new(left),
+                    right: Box::new(right),
+                };
+                if op.is_logical() {
+                    bool_cast(&exp, symbols)
+                } else {
+                    Ok(TypedExpr {
+                        expr: exp,
+                        r#type: common_t,
+                    })
+                }
+            }
         }
         ast::Expr::Conditional {
             condition,
@@ -603,7 +784,7 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<()> {
                 Some(SymbolEntry {
                     r#type:
                         ast::Type {
-                            base: ast::BaseType::Fun { param_types, .. },
+                            base: ast::BaseType::Fun { param_types, ret_t },
                             ..
                         },
                     ..
@@ -615,12 +796,21 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<()> {
                             args.len()
                         );
                     }
+                    let ret_t = *ret_t.clone();
                     // Will need to be uprooted once more sophisticated types
                     // are added in order to verify arg types match expected
                     for arg in args.iter() {
-                        typecheck_expr(arg, symbols)?;
+                        typecheck_expr(arg, symbols).context(format!(
+                            "Failed to typecheck function parameter: {arg:#?}."
+                        ))?;
                     }
-                    Ok(())
+                    Ok(TypedExpr {
+                        expr: ast::Expr::FunCall {
+                            name: Rc::clone(name),
+                            args: args.to_owned(),
+                        },
+                        r#type: ret_t,
+                    })
                 }
                 Some(SymbolEntry { r#type: t, .. }) => {
                     bail!("Expected function type, but found type {t}.")
@@ -628,7 +818,19 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<()> {
                 _ => bail!("Could not find symbol with name {name}."),
             }
         }
-        _ => Ok(()),
+        expr @ ast::Expr::Cast { target, .. } => Ok(TypedExpr {
+            expr: expr.clone(),
+            r#type: target.clone(),
+        }),
+        expr @ ast::Expr::Constant(constant) => Ok(TypedExpr {
+            expr: expr.clone(),
+            r#type: ast::Type {
+                base: ast::BaseType::from(constant),
+                ptr: None,
+                storage: None,
+                is_const: true,
+            },
+        }),
     }
 }
 
@@ -647,7 +849,12 @@ fn typecheck_fun_decl(decl: &ast::FunDecl, symbols: &mut SymbolTable) -> Result<
     // Treat parameters as declarations without values
     if let Some(ref block) = decl.block {
         for item in block.items() {
-            typecheck_block_item(item, symbols)?;
+            typecheck_block_item(item, symbols, Some(decl.name.clone()))
+                .map(|_| ())
+                .context(format!(
+                    "Failed to typecheck function declaration for \"{}\"",
+                    decl.name
+                ))?;
         }
     }
     symbols.pop_scope()
@@ -658,15 +865,16 @@ fn typecheck_global_var_decl(decl: &ast::VarDecl, symbols: &mut SymbolTable) -> 
         symbols.scope() == Scope::Global,
         "Global vars must be declared in global scope"
     );
-    symbols.declare_var(decl)?;
-    Ok(())
+    symbols.declare_var(decl).map(|_| ()).context(format!(
+        "Failed to typecheck global variable declaration: {decl:#?}"
+    ))
 }
 
 fn typecheck_var_decl(decl: &ast::VarDecl, symbols: &mut SymbolTable) -> Result<()> {
     symbols.declare_var(decl)?;
-    if let Some(init) = &decl.init {
-        typecheck_expr(init, symbols)
-    } else {
-        Ok(())
-    }
+    decl.init.as_ref().map_or(Ok(()), |init| {
+        typecheck_expr(init, symbols).map(|_| ()).context(format!(
+            "Failed to typecheck variable initialization: {init:#?}"
+        ))
+    })
 }

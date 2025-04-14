@@ -524,7 +524,8 @@ fn typecheck_stmt(
                     ..
                 }) = symbols.get(&function)
                 {
-                    if found.base != expected.base {
+                    // TODO: Fix this once we add pointers
+                    if !found.base.can_assign_to(&expected.base) {
                         bail!("Found return type: \"{found}\" in function \"{function}\" but expected return type: \"{expected}\"");
                     } else {
                         Ok(())

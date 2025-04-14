@@ -254,7 +254,7 @@ impl AstNode for VarDecl {
                 },
                 tokens,
             )),
-            _ => bail!("Unable to parse valid declaration."),
+            _ => bail!("Unable to parse valid variable declaration."),
         }
     }
 }
@@ -281,7 +281,10 @@ impl AstNode for Declaration {
         } else if let Ok((decl, tokens)) = VarDecl::consume(tokens) {
             Ok((Self::VarDecl(decl), tokens))
         } else {
-            bail!("Unable to parse valid declaration form.")
+            bail!(
+                "Unable to parse valid declaration form from tokens {:#?}",
+                &tokens[..std::cmp::min(tokens.len(), 25)]
+            )
         }
     }
 }

@@ -1,4 +1,4 @@
-use crate::lexer::Token;
+use crate::lexer::{ConstantSuffix, Token};
 
 use anyhow::{bail, Context, Error, Result};
 use std::{num::NonZeroU8, rc::Rc};
@@ -1249,14 +1249,24 @@ impl AstNode for Constant {
     fn consume(tokens: &[Token]) -> Result<(Constant, &[Token])> {
         if let Some(token) = tokens.first() {
             match token {
-                Token::Constant { text, suffix: _ } => {
+                Token::Constant { text, suffix: None } => {
                     if let Ok(int) = text.parse::<i32>() {
                         Ok((Self::Int(int), &tokens[1..]))
                     } else {
-                        bail!("Could not parse token into literal.")
+                        bail!("Could not parse token into constant.")
                     }
                 }
-                _ => bail!("Could not parse token into literal."),
+                Token::Constant {
+                    text,
+                    suffix: Some(ConstantSuffix::Long),
+                } => {
+                    if let Ok(long) = text.parse::<i64>() {
+                        Ok((Self::Long(long), &tokens[1..]))
+                    } else {
+                        bail!("Could not parse token into constant.")
+                    }
+                }
+                _ => bail!("Could not parse token into constant."),
             }
         } else {
             bail!("No remaining tokens.")

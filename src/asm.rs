@@ -32,7 +32,8 @@ pub mod x64 {
         for entry in program.top_level.into_iter() {
             match entry {
                 codegen::TopLevel::Fun(f) => gen_function(w, f)?,
-                codegen::TopLevel::Static(v) => gen_static(w, v)?,
+                // codegen::TopLevel::Static(v) => gen_static(w, v)?,
+                codegen::TopLevel::Static(_) => unimplemented!(),
             }
         }
 
@@ -40,28 +41,28 @@ pub mod x64 {
         Ok(())
     }
 
-    fn gen_static(w: &mut impl Write, var: codegen::StaticVariable) -> Result<()> {
-        if var.global {
-            w.write_fmt(format_args!("\t.globl {}\n", var.identifier))?;
-        }
-        let init_value = var.init.unwrap_or(0);
-        if init_value == 0 {
-            w.write_fmt(format_args!("\t.bss\n"))?;
-        } else {
-            w.write_fmt(format_args!("\t.data\n"))?;
-        }
-        // TODO: Unhardcode 4 here - take symbol info into this pass and calculate alignment
-        w.write_fmt(format_args!("\t.align 4\n"))?;
-        w.write_fmt(format_args!("{}:\n", var.identifier))?;
-        if init_value == 0 {
-            w.write_fmt(format_args!("\t.zero {}\n", 4))?;
-        } else {
-            w.write_fmt(format_args!("\t.long {}\n", init_value))?;
-        }
-        w.write_char('\n')?;
-
-        Ok(())
-    }
+    // fn gen_static(w: &mut impl Write, var: codegen::StaticVariable) -> Result<()> {
+    //     if var.global {
+    //         w.write_fmt(format_args!("\t.globl {}\n", var.identifier))?;
+    //     }
+    //     let init_value = var.init.unwrap_or(Vec::new());
+    //     if init_value == 0 {
+    //         w.write_fmt(format_args!("\t.bss\n"))?;
+    //     } else {
+    //         w.write_fmt(format_args!("\t.data\n"))?;
+    //     }
+    //     // TODO: Unhardcode 4 here - take symbol info into this pass and calculate alignment
+    //     w.write_fmt(format_args!("\t.align 4\n"))?;
+    //     w.write_fmt(format_args!("{}:\n", var.identifier))?;
+    //     if init_value == 0 {
+    //         w.write_fmt(format_args!("\t.zero {}\n", 4))?;
+    //     } else {
+    //         w.write_fmt(format_args!("\t.long {}\n", init_value))?;
+    //     }
+    //     w.write_char('\n')?;
+    //
+    //     Ok(())
+    // }
 
     fn gen_function(w: &mut impl Write, function: codegen::Function) -> Result<()> {
         if function.global {

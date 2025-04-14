@@ -16,7 +16,7 @@ pub enum TopLevel {
 
 impl StaticVariable {
     fn from_symbol_with_name(name: Rc<String>, symbol: &sema::tc::SymbolEntry) -> Option<Self> {
-        match symbol.attribute {
+        match &symbol.attribute {
             sema::tc::Attribute::Fun { .. } => None,
             sema::tc::Attribute::Static {
                 initial_value,
@@ -24,13 +24,13 @@ impl StaticVariable {
             } => match initial_value {
                 sema::tc::InitialValue::Initial(i) => Some(StaticVariable {
                     identifier: name,
-                    external_linkage,
-                    init: Some(i),
+                    external_linkage: *external_linkage,
+                    init: Some(Rc::clone(i)),
                 }),
                 sema::tc::InitialValue::Tentative => Some(StaticVariable {
                     identifier: name,
-                    external_linkage,
-                    init: Some(0),
+                    external_linkage: *external_linkage,
+                    init: Some(vec![0; symbol.r#type.base.nbytes()].into()),
                 }),
                 sema::tc::InitialValue::None => None,
             },
@@ -43,7 +43,7 @@ impl StaticVariable {
 pub struct StaticVariable {
     pub identifier: Rc<String>,
     pub external_linkage: bool,
-    pub init: Option<i32>,
+    pub init: Option<Rc<[u8]>>,
 }
 
 impl From<sema::ValidAst> for Program {

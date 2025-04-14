@@ -41,7 +41,7 @@ pub enum TopLevel {
 pub struct StaticVariable {
     pub identifier: Rc<String>,
     pub global: bool,
-    pub init: Option<i32>,
+    pub init: Option<Rc<[u8]>>,
 }
 
 impl From<tacky::StaticVariable> for StaticVariable {

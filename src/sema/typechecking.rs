@@ -12,7 +12,7 @@ pub struct SymbolEntry {
     pub attribute: Attribute,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub enum Attribute {
     Fun {
         external_linkage: bool,
@@ -43,7 +43,7 @@ impl Attribute {
                     _ => unreachable!("Earlier passes of the compiler should have reduced \"auto\" and \"register\" storage classes to be None")
                 },
                 Scope::Local(..) => match var.typ.storage {
-                    Some(ast::StorageClass::Static) => InitialValue::Initial(0), // Local Statics with no initilizer get defaulted to zero
+                    Some(ast::StorageClass::Static) => InitialValue::Initial(vec![0; var.typ.base.nbytes()].into()), // Local Statics with no initilizer get defaulted to zero
                     Some(ast::StorageClass::Extern) | None => InitialValue::None,
                     _ => unreachable!("Earlier passes of the compiler should have reduced \"auto\" and \"register\" storage classes to be None")
                 },
@@ -93,9 +93,9 @@ impl Attribute {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum InitialValue {
-    Initial(i32),
+    Initial(Rc<[u8]>),
     Tentative,
     None,
 }
@@ -121,11 +121,14 @@ impl PartialOrd for InitialValue {
 }
 
 impl InitialValue {
+    // TODO: Make this not dependent on host computer byte ordering
     fn from_expr(expr: &ast::Expr) -> Result<Self> {
         let val = const_eval::eval(expr.clone()).context("Failed to const eval expression")?;
         match val {
-            ast::Constant::Int(i) => Ok(InitialValue::Initial(i)),
-            ast::Constant::Long(..) => todo!(),
+            ast::Constant::Int(val) => Ok(InitialValue::Initial(val.to_ne_bytes().to_vec().into())),
+            ast::Constant::Long(val) => {
+                Ok(InitialValue::Initial(val.to_ne_bytes().to_vec().into()))
+            }
         }
     }
 
@@ -151,7 +154,7 @@ impl InitialValue {
                 _ => unreachable!("Earlier passes of the compiler should have reduced \"auto\" and \"register\" storage classes to be None")
             },
             (Scope::Local(..), None) => match var.typ.storage {
-                Some(ast::StorageClass::Static) => Ok(Some(InitialValue::Initial(0))), // Local Statics with no initilizer get defaulted to zero
+                Some(ast::StorageClass::Static) => Ok(Some(InitialValue::Initial(vec![0; var.typ.base.nbytes()].into()))), // Local Statics with no initilizer get defaulted to zero
                 Some(ast::StorageClass::Extern) | None => Ok(Some(InitialValue::None)),
                 _ => unreachable!("Earlier passes of the compiler should have reduced \"auto\" and \"register\" storage classes to be None")
             },
@@ -306,7 +309,7 @@ impl SymbolTable {
             }
             Attribute::Local => {}
         };
-        Ok(*old_attrib)
+        Ok(old_attrib.clone())
     }
 
     fn declare_in_scope(&mut self, decl: &ast::Declaration, scope: Scope) -> Result<()> {
@@ -361,7 +364,7 @@ impl SymbolTable {
                                 initial_value: new_val,
                                 ..
                             },
-                        ) = (attribute, new_attribute)
+                        ) = (attribute.clone(), new_attribute)
                         {
                             // If it takes precedence
                             if new_val > old_val {

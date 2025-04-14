@@ -872,6 +872,18 @@ pub enum BaseType {
 }
 
 impl BaseType {
+    pub fn nbytes(&self) -> usize {
+        match self {
+            BaseType::Int { nbytes, .. } => *nbytes,
+            BaseType::Float(nbytes) => *nbytes,
+            BaseType::Double(nbytes) => *nbytes,
+            BaseType::Char => 1,
+            BaseType::Fun { .. } => unreachable!(),
+            BaseType::Struct => unreachable!(),
+            BaseType::Void => unreachable!(),
+        }
+    }
+
     // Shorthand initializations
     pub fn bool() -> Self {
         Self::default()

@@ -891,7 +891,15 @@ impl BaseType {
         }
     }
 
-    fn lift(lhs: Self, rhs: Self) -> Result<(Self, Self)> {
+    pub fn can_assign_to(&self, other: &Self) -> bool {
+        match (self.rank(), other.rank()) {
+            (Some(_), Some(_)) => true,
+            (Some(_), None) | (None, Some(_)) => false,
+            (None, None) => self == other,
+        }
+    }
+
+    pub fn lift(lhs: Self, rhs: Self) -> Result<(Self, Self)> {
         let left = lhs.default_promote();
         let right = rhs
             .promote(&left)

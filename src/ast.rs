@@ -892,36 +892,45 @@ impl TypePtr {
     const BITVEC_LENGTH: usize = (u8::MAX / 8) as usize;
 
     #[allow(dead_code)]
-    fn get(arr: &[u8], depth: NonZeroU8) -> bool {
-        let byte_index: usize = ((depth.get() - 1) / 8).into();
-        let bit_index = Into::<usize>::into(depth.get() - 1) - (byte_index * 8);
-        let mask = 1 << bit_index;
-        arr[byte_index] & mask > 0
+    fn get(arr: &[u8], depth: NonZeroU8, max_depth: NonZeroU8) -> Result<bool> {
+        if depth.gt(&max_depth) {
+            bail!("Requested depth exceeds maximum pointer depth.")
+        } else {
+            let byte_index: usize = ((depth.get() - 1) / 8).into();
+            let bit_index = Into::<usize>::into(depth.get() - 1) - (byte_index * 8);
+            let mask = 1 << bit_index;
+            Ok(arr[byte_index] & mask > 0)
+        }
     }
 
     #[allow(dead_code)]
-    fn get_const(&self, depth: NonZeroU8) -> bool {
-        Self::get(&self.is_const, depth)
+    fn get_const(&self, depth: NonZeroU8) -> Result<bool> {
+        Self::get(&self.is_const, depth, self.depth)
     }
 
     #[allow(dead_code)]
-    fn get_restrict(&self, depth: NonZeroU8) -> bool {
-        Self::get(&self.is_restrict, depth)
+    fn get_restrict(&self, depth: NonZeroU8) -> Result<bool> {
+        Self::get(&self.is_restrict, depth, self.depth)
     }
 
-    fn set(arr: &mut [u8], depth: NonZeroU8) {
-        let byte_index: usize = ((depth.get() - 1) / 8).into();
-        let bit_index = Into::<usize>::into(depth.get() - 1) - (byte_index * 8);
-        let mask = 1 << bit_index;
-        arr[byte_index] |= mask;
+    fn set(arr: &mut [u8], depth: NonZeroU8, max_depth: NonZeroU8) -> Result<()> {
+        if depth.gt(&max_depth) {
+            bail!("Requested depth exceeds maximum pointer depth.")
+        } else {
+            let byte_index: usize = ((depth.get() - 1) / 8).into();
+            let bit_index = Into::<usize>::into(depth.get() - 1) - (byte_index * 8);
+            let mask = 1 << bit_index;
+            arr[byte_index] |= mask;
+            Ok(())
+        }
     }
 
-    fn set_const(&mut self, depth: NonZeroU8) {
-        Self::set(&mut self.is_const, depth)
+    fn set_const(&mut self, depth: NonZeroU8) -> Result<()> {
+        Self::set(&mut self.is_const, depth, self.depth)
     }
 
-    fn set_restrict(&mut self, depth: NonZeroU8) {
-        Self::set(&mut self.is_restrict, depth)
+    fn set_restrict(&mut self, depth: NonZeroU8) -> Result<()> {
+        Self::set(&mut self.is_restrict, depth, self.depth)
     }
 }
 

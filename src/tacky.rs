@@ -868,6 +868,7 @@ impl Expr {
                     val: dst,
                 }
             }
+            ast::Expr::Cast { .. } => todo!(),
         }
     }
 }

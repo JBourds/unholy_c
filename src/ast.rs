@@ -1,6 +1,6 @@
 use crate::lexer::{ConstantSuffix, Token};
 
-use anyhow::{bail, Context, Error, Result};
+use anyhow::{bail, ensure, Context, Error, Result};
 use std::{num::NonZeroU8, rc::Rc};
 
 pub fn parse(tokens: &[Token]) -> Result<Program> {
@@ -113,6 +113,10 @@ impl FunDecl {
                 let mut remaining = tokens;
                 while keep_going {
                     let (typ, tokens) = Type::consume(remaining)?;
+                    ensure!(
+                        typ.storage.is_none(),
+                        "Cannot have storage specifier in parameter type."
+                    );
                     let (name, tokens) = parse_ident(tokens)
                         .map(|(name, tokens)| (Some(name), tokens))
                         .unwrap_or((None, tokens));
@@ -636,10 +640,10 @@ pub enum Expr {
         lvalue: Box<Expr>,
         rvalue: Box<Expr>,
     },
-    // Cast {
-    //     target: Type,
-    //     exp: Box<Expr>,
-    // },
+    Cast {
+        target: Type,
+        exp: Box<Expr>,
+    },
     Constant(Constant),
     Unary {
         op: UnaryOp,
@@ -806,15 +810,37 @@ impl Factor {
                     let (expr, tokens) = Self::check_for_postfix(Expr::Var(Rc::clone(s)), tokens);
                     Self::check_for_call(expr, tokens)
                 }
+                // Could be parentheses for a type cast or expression precedence
                 [Token::LParen, tokens @ ..] => {
-                    let (expr, tokens) = Expr::parse(tokens, 0)
-                        .context("Parsing grammer rule: \"(\" <exp> \")\" failed")?;
-                    match tokens {
-                        [Token::RParen, tokens @ ..] => {
-                            let (expr, tokens) = Self::check_for_postfix(expr, tokens);
-                            Self::check_for_call(expr, tokens)
+                    if let Ok((typ, tokens)) = Type::consume(tokens) {
+                        ensure!(
+                            matches!(tokens.first(), Some(Token::RParen)),
+                            "Expected closing parentheses in type cast."
+                        );
+                        ensure!(
+                            typ.storage.is_none(),
+                            "Cannot have storage specifier in type cast."
+                        );
+                        let tokens = &tokens[1..];
+                        let (expr, tokens) = Expr::parse(tokens, 0)
+                            .context("Parsing grammer rule: \"(\" <exp> \")\" failed")?;
+                        Self::check_for_call(
+                            Expr::Cast {
+                                target: typ,
+                                exp: Box::new(expr),
+                            },
+                            tokens,
+                        )
+                    } else {
+                        let (expr, tokens) = Expr::parse(tokens, 0)
+                            .context("Parsing grammer rule: \"(\" <exp> \")\" failed")?;
+                        match tokens {
+                            [Token::RParen, tokens @ ..] => {
+                                let (expr, tokens) = Self::check_for_postfix(expr, tokens);
+                                Self::check_for_call(expr, tokens)
+                            }
+                            _ => bail!("Could not find matching right parenthesis"),
                         }
-                        _ => bail!("Could not find matching right parenthesis"),
                     }
                 }
                 _ => bail!("Could not match valid grammar rule."),

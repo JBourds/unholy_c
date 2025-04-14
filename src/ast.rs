@@ -666,6 +666,10 @@ pub enum Expr {
 }
 
 impl Expr {
+    pub fn is_lvalue(&self) -> bool {
+        matches!(self, Self::Var(_))
+    }
+
     pub fn parse<'a>(tokens: &'a [Token], min_precedence: u32) -> Result<(Expr, &'a [Token])> {
         let (mut left, mut tokens) = Factor::parse(tokens)?;
         loop {
@@ -822,7 +826,7 @@ impl Factor {
                             "Cannot have storage specifier in type cast."
                         );
                         let tokens = &tokens[1..];
-                        let (expr, tokens) = Expr::parse(tokens, 0)
+                        let (expr, tokens) = Factor::parse(tokens)
                             .context("Parsing grammer rule: \"(\" <exp> \")\" failed")?;
                         Self::check_for_call(
                             Expr::Cast {

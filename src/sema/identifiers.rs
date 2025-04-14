@@ -417,6 +417,9 @@ fn resolve_expr(expr: ast::Expr, ident_map: &HashMap<Rc<String>, IdentEntry>) ->
                 args: valid_args,
             })
         }
-        ast::Expr::Cast { exp, .. } => resolve_expr(*exp, ident_map),
+        ast::Expr::Cast { exp, target } => Ok(ast::Expr::Cast {
+            target,
+            exp: Box::new(resolve_expr(*exp, ident_map)?),
+        }),
     }
 }

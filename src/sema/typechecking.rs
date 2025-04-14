@@ -429,7 +429,6 @@ impl SymbolTable {
         let decl = ast::Declaration::VarDecl(decl.clone());
         match storage_class {
             Some(ast::StorageClass::Extern) => self.declare_in_scope(&decl, Scope::Global)?,
-            // If we declare a static in
             Some(ast::StorageClass::Static)
                 if self.get_global(&key).is_none() && self.scope() != Scope::Global =>
             {

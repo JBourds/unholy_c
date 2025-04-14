@@ -870,14 +870,11 @@ pub enum BaseType {
 impl BaseType {
     // Shorthand initializations
     pub fn bool() -> Self {
-        Self::int()
+        Self::default()
     }
 
-    pub fn int() -> Self {
-        Self::Int {
-            nbytes: std::mem::size_of::<i32>(),
-            signed: None,
-        }
+    pub fn int(nbytes: usize, signed: Option<bool>) -> Self {
+        Self::Int { nbytes, signed }
     }
 
     // Promotion rules
@@ -909,7 +906,7 @@ impl BaseType {
         match self {
             // Integer types get promoted to a basic signed int by default
             Self::Int { .. } | Self::Char => {
-                let int = Self::int();
+                let int = Self::default();
                 let int_rank = int.rank().expect("Integer does not have a rank?");
                 if self.rank().expect("Integer does not have a rank?") >= int_rank {
                     self
@@ -938,9 +935,18 @@ impl BaseType {
     }
 }
 
+impl From<&Constant> for BaseType {
+    fn from(value: &Constant) -> Self {
+        match value {
+            Constant::Int(_) => Self::int(4, None),
+            Constant::Long(_) => Self::int(8, None),
+        }
+    }
+}
+
 impl Default for BaseType {
     fn default() -> Self {
-        Self::int()
+        Self::int(4, None)
     }
 }
 
@@ -1056,7 +1062,7 @@ impl Type {
 
     pub fn int() -> Self {
         Self {
-            base: BaseType::int(),
+            base: BaseType::default(),
             ptr: None,
             storage: None,
             is_const: true,

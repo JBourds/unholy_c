@@ -696,6 +696,8 @@ impl From<tacky::Instruction> for Vec<Instruction<Initial>> {
             tacky::Instruction::Return(None) => {
                 vec![new_instr(InstructionType::Ret)]
             }
+            tacky::Instruction::SignExtend { src, dst } => todo!(),
+            tacky::Instruction::Truncate { src, dst } => todo!(),
             tacky::Instruction::Return(Some(val)) => vec![
                 new_instr(InstructionType::Mov {
                     src: Operand::from(val),

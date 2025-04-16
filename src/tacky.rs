@@ -173,6 +173,14 @@ impl Function {
 #[derive(Debug, PartialEq)]
 pub enum Instruction {
     Return(Option<Val>),
+    SignExtend {
+        src: Val,
+        dst: Val,
+    },
+    Truncate {
+        src: Val,
+        dst: Val,
+    },
     Unary {
         op: UnaryOp,
         src: Val,

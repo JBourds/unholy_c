@@ -114,7 +114,7 @@ impl Function {
         let mut temp_var_counter = 0;
         let mut make_temp_var =
             Function::make_temp_var(Rc::new(name.to_string()), &mut temp_var_counter);
-        let mut instructions = Instruction::parse_block_with(block, &mut make_temp_var);
+        let mut instructions = Instruction::parse_block_with(block, symbols, &mut make_temp_var);
 
         // Temporary fix suggested by the book for the case where a function
         // is supposed to return something but does not.
@@ -210,10 +210,13 @@ pub enum Instruction {
 impl Instruction {
     fn parse_decl_with(
         decl: ast::Declaration,
+        symbols: &mut sema::tc::SymbolTable,
         make_temp_var: &mut impl FnMut() -> String,
     ) -> Vec<Self> {
         match decl {
-            ast::Declaration::VarDecl(decl) => Self::parse_var_decl_with(decl, make_temp_var),
+            ast::Declaration::VarDecl(decl) => {
+                Self::parse_var_decl_with(decl, symbols, make_temp_var)
+            }
             ast::Declaration::FunDecl(decl) => Self::parse_fun_decl_with(decl, make_temp_var),
         }
     }
@@ -228,13 +231,14 @@ impl Instruction {
 
     fn parse_var_decl_with(
         decl: ast::VarDecl,
+        symbols: &mut sema::tc::SymbolTable,
         make_temp_var: &mut impl FnMut() -> String,
     ) -> Vec<Self> {
         if let Some(init) = decl.init {
             let Expr {
                 mut instructions,
                 val: src,
-            } = Expr::parse_with(init, make_temp_var);
+            } = Expr::parse_with(init, symbols, make_temp_var);
             let dst = Val::Var(Rc::clone(&decl.name));
             instructions.push(Instruction::Copy {
                 src,
@@ -245,7 +249,11 @@ impl Instruction {
             vec![]
         }
     }
-    fn parse_stmt_with(stmt: ast::Stmt, make_temp_var: &mut impl FnMut() -> String) -> Vec<Self> {
+    fn parse_stmt_with(
+        stmt: ast::Stmt,
+        symbols: &mut sema::tc::SymbolTable,
+        make_temp_var: &mut impl FnMut() -> String,
+    ) -> Vec<Self> {
         let mut block_instructions = vec![];
         match stmt {
             ast::Stmt::Null => {}
@@ -253,7 +261,7 @@ impl Instruction {
                 let Expr {
                     mut instructions,
                     val,
-                } = Expr::parse_with(expr, make_temp_var);
+                } = Expr::parse_with(expr, symbols, make_temp_var);
                 instructions.push(Instruction::Return(Some(val)));
                 block_instructions.extend(instructions);
             }
@@ -261,18 +269,18 @@ impl Instruction {
                 block_instructions.push(Instruction::Return(None));
             }
             ast::Stmt::Expr(expr) => {
-                let Expr { instructions, .. } = Expr::parse_with(expr, make_temp_var);
+                let Expr { instructions, .. } = Expr::parse_with(expr, symbols, make_temp_var);
                 block_instructions.extend(instructions);
             }
             ast::Stmt::Compound(block) => {
-                block_instructions.extend(Self::parse_block_with(block, make_temp_var));
+                block_instructions.extend(Self::parse_block_with(block, symbols, make_temp_var));
             }
             ast::Stmt::Goto(label) => {
                 block_instructions.push(Instruction::Jump(label));
             }
             ast::Stmt::Label { name, stmt } => {
                 block_instructions.push(Instruction::Label(name));
-                block_instructions.extend(Self::parse_stmt_with(*stmt, make_temp_var));
+                block_instructions.extend(Self::parse_stmt_with(*stmt, symbols, make_temp_var));
             }
             ast::Stmt::Break(label) => {
                 let label = Rc::new(format!("{}.break", label.unwrap()));
@@ -295,7 +303,8 @@ impl Instruction {
                 block_instructions.push(Instruction::Label(Rc::clone(&label_continue)));
                 // <instructions for condition>
                 // v = <result of condition>
-                let Expr { instructions, val } = Expr::parse_with(condition, make_temp_var);
+                let Expr { instructions, val } =
+                    Expr::parse_with(condition, symbols, make_temp_var);
                 block_instructions.extend(instructions);
                 // JumpIfZero(v, break_label)
                 block_instructions.push(Self::JumpIfZero {
@@ -303,7 +312,11 @@ impl Instruction {
                     target: Rc::clone(&label_break),
                 });
                 // <instructions for body>
-                block_instructions.extend(Instruction::parse_stmt_with(*body, make_temp_var));
+                block_instructions.extend(Instruction::parse_stmt_with(
+                    *body,
+                    symbols,
+                    make_temp_var,
+                ));
                 // Jump(continue_label)
                 block_instructions.push(Instruction::Jump(label_continue));
                 // Label(break_label)
@@ -322,12 +335,17 @@ impl Instruction {
                 // Label(start)
                 block_instructions.push(Instruction::Label(Rc::clone(&label_start)));
                 // <instructions for body>
-                block_instructions.extend(Instruction::parse_stmt_with(*body, make_temp_var));
+                block_instructions.extend(Instruction::parse_stmt_with(
+                    *body,
+                    symbols,
+                    make_temp_var,
+                ));
                 // Label(continue_label)
                 block_instructions.push(Instruction::Label(label_continue));
                 // <instructions for condition>
                 // v = <result of condition>
-                let Expr { instructions, val } = Expr::parse_with(condition, make_temp_var);
+                let Expr { instructions, val } =
+                    Expr::parse_with(condition, symbols, make_temp_var);
                 block_instructions.extend(instructions);
                 // JumpIfNotZero(v, start)
                 block_instructions.push(Instruction::JumpIfNotZero {
@@ -352,11 +370,15 @@ impl Instruction {
                 // <instructions for init>
                 match init {
                     ast::ForInit::Decl(decl) => {
-                        block_instructions
-                            .extend(Instruction::parse_var_decl_with(decl, make_temp_var));
+                        block_instructions.extend(Instruction::parse_var_decl_with(
+                            decl,
+                            symbols,
+                            make_temp_var,
+                        ));
                     }
                     ast::ForInit::Expr(Some(expr)) => {
-                        let Expr { instructions, .. } = Expr::parse_with(expr, make_temp_var);
+                        let Expr { instructions, .. } =
+                            Expr::parse_with(expr, symbols, make_temp_var);
                         block_instructions.extend(instructions);
                     }
                     ast::ForInit::Expr(None) => {}
@@ -369,7 +391,7 @@ impl Instruction {
                     let Expr {
                         instructions: instructions_condition,
                         val: val_condition,
-                    } = Expr::parse_with(cond, make_temp_var);
+                    } = Expr::parse_with(cond, symbols, make_temp_var);
                     block_instructions.extend(instructions_condition);
                     // JumpIfZero(v, break_label)
                     block_instructions.push(Instruction::JumpIfZero {
@@ -378,7 +400,11 @@ impl Instruction {
                     });
                 }
                 // <instructions for body>
-                block_instructions.extend(Instruction::parse_stmt_with(*body, make_temp_var));
+                block_instructions.extend(Instruction::parse_stmt_with(
+                    *body,
+                    symbols,
+                    make_temp_var,
+                ));
                 // Label(continue_label)
                 block_instructions.push(Instruction::Label(label_continue));
                 // <instructions for post>
@@ -386,7 +412,7 @@ impl Instruction {
                     let Expr {
                         instructions: instructions_post,
                         ..
-                    } = Expr::parse_with(post, make_temp_var);
+                    } = Expr::parse_with(post, symbols, make_temp_var);
                     block_instructions.extend(instructions_post);
                 }
                 // Jump(Start)
@@ -412,7 +438,7 @@ impl Instruction {
                 let Expr {
                     mut instructions,
                     val,
-                } = Expr::parse_with(condition, make_temp_var);
+                } = Expr::parse_with(condition, symbols, make_temp_var);
 
                 instructions.push(Self::JumpIfZero {
                     condition: val,
@@ -424,6 +450,7 @@ impl Instruction {
 
                 instructions.extend(Instruction::parse_block_with(
                     ast::Block(vec![ast::BlockItem::Stmt(*then)]),
+                    symbols,
                     make_temp_var,
                 ));
 
@@ -432,6 +459,7 @@ impl Instruction {
                     instructions.push(Instruction::Label(Rc::clone(&else_label)));
                     instructions.extend(Instruction::parse_block_with(
                         ast::Block(vec![ast::BlockItem::Stmt(*r#else)]),
+                        symbols,
                         make_temp_var,
                     ));
                 }
@@ -446,12 +474,12 @@ impl Instruction {
             } => {
                 let label = label.expect("Case must have label");
                 block_instructions.push(Instruction::Label(Rc::clone(&label)));
-                block_instructions.extend(Self::parse_stmt_with(*stmt, make_temp_var));
+                block_instructions.extend(Self::parse_stmt_with(*stmt, symbols, make_temp_var));
             }
             ast::Stmt::Default { label, stmt } => {
                 let label = label.expect("Default must have label");
                 block_instructions.push(Instruction::Label(Rc::clone(&label)));
-                block_instructions.extend(Self::parse_stmt_with(*stmt, make_temp_var));
+                block_instructions.extend(Self::parse_stmt_with(*stmt, symbols, make_temp_var));
             }
             ast::Stmt::Switch {
                 condition,
@@ -472,12 +500,13 @@ impl Instruction {
                 // 3. Perform a linear comparison for each case and jump if the
                 //  value matches.
                 if cases.is_empty() {
-                    let Expr { instructions, .. } = Expr::parse_with(condition, make_temp_var);
+                    let Expr { instructions, .. } =
+                        Expr::parse_with(condition, symbols, make_temp_var);
                     block_instructions.extend(instructions);
                     block_instructions.push(Instruction::Jump(
                         default.unwrap_or(Rc::clone(&break_label)),
                     ));
-                    block_instructions.extend(Self::parse_stmt_with(*body, make_temp_var));
+                    block_instructions.extend(Self::parse_stmt_with(*body, symbols, make_temp_var));
                 } else if let ast::Expr::Constant(cond) = condition {
                     let jump_label = cases
                         .iter()
@@ -486,7 +515,7 @@ impl Instruction {
                     let has_jump_label = jump_label.is_some();
                     let jump_label = jump_label.unwrap_or(break_label.clone());
                     block_instructions.push(Instruction::Jump(jump_label.clone()));
-                    block_instructions.extend(Self::parse_stmt_with(*body, make_temp_var));
+                    block_instructions.extend(Self::parse_stmt_with(*body, symbols, make_temp_var));
                     if !has_jump_label {
                         block_instructions.push(Instruction::Label(jump_label));
                     }
@@ -494,13 +523,13 @@ impl Instruction {
                     let Expr {
                         instructions,
                         val: switch_val,
-                    } = Expr::parse_with(condition, make_temp_var);
+                    } = Expr::parse_with(condition, symbols, make_temp_var);
                     block_instructions.extend(instructions);
                     for (case, label) in cases.iter() {
                         let Expr {
                             instructions,
                             val: case_val,
-                        } = Expr::parse_with(ast::Expr::Constant(*case), make_temp_var);
+                        } = Expr::parse_with(ast::Expr::Constant(*case), symbols, make_temp_var);
                         block_instructions.extend(instructions);
                         let dst = Val::Var(Rc::new(make_temp_var()));
                         block_instructions.push(Self::Binary {
@@ -517,7 +546,7 @@ impl Instruction {
                     block_instructions.push(Instruction::Jump(
                         default.unwrap_or(Rc::clone(&break_label)),
                     ));
-                    block_instructions.extend(Self::parse_stmt_with(*body, make_temp_var));
+                    block_instructions.extend(Self::parse_stmt_with(*body, symbols, make_temp_var));
                 }
                 // Break label always goes after all instructions
                 block_instructions.push(Instruction::Label(break_label));
@@ -525,7 +554,11 @@ impl Instruction {
         }
         block_instructions
     }
-    fn parse_block_with(node: ast::Block, make_temp_var: &mut impl FnMut() -> String) -> Vec<Self> {
+    fn parse_block_with(
+        node: ast::Block,
+        symbols: &mut sema::tc::SymbolTable,
+        make_temp_var: &mut impl FnMut() -> String,
+    ) -> Vec<Self> {
         let mut block_instructions = vec![];
         for item in node.into_items().into_iter() {
             match item {
@@ -541,10 +574,10 @@ impl Instruction {
                     ..
                 })) => {}
                 ast::BlockItem::Decl(decl) => {
-                    block_instructions.extend(Self::parse_decl_with(decl, make_temp_var));
+                    block_instructions.extend(Self::parse_decl_with(decl, symbols, make_temp_var));
                 }
                 ast::BlockItem::Stmt(stmt) => {
-                    block_instructions.extend(Self::parse_stmt_with(stmt, make_temp_var));
+                    block_instructions.extend(Self::parse_stmt_with(stmt, symbols, make_temp_var));
                 }
             }
         }
@@ -559,7 +592,11 @@ pub struct Expr {
 }
 
 impl Expr {
-    fn parse_with(node: ast::Expr, make_temp_var: &mut impl FnMut() -> String) -> Expr {
+    fn parse_with(
+        node: ast::Expr,
+        symbols: &mut sema::tc::SymbolTable,
+        make_temp_var: &mut impl FnMut() -> String,
+    ) -> Expr {
         match node {
             ast::Expr::Constant(v) => Self {
                 instructions: vec![],
@@ -569,7 +606,7 @@ impl Expr {
                 let Self {
                     mut instructions,
                     val,
-                } = Expr::parse_with(*expr, make_temp_var);
+                } = Expr::parse_with(*expr, symbols, make_temp_var);
                 let dst = match op {
                     ast::UnaryOp::PreInc => {
                         instructions.push(Instruction::Binary {
@@ -640,7 +677,7 @@ impl Expr {
                     let Self {
                         mut instructions,
                         val: left_val,
-                    } = Self::parse_with(*left, make_temp_var);
+                    } = Self::parse_with(*left, symbols, make_temp_var);
 
                     let label = {
                         let mut label = make_temp_var();
@@ -673,7 +710,7 @@ impl Expr {
                     let Self {
                         instructions: right_instructions,
                         val: right_val,
-                    } = Self::parse_with(*right, make_temp_var);
+                    } = Self::parse_with(*right, symbols, make_temp_var);
                     instructions.extend(right_instructions);
 
                     let dst = Val::Var(make_temp_var().into());
@@ -728,7 +765,7 @@ impl Expr {
                         let Self {
                             mut instructions,
                             val: src,
-                        } = Self::parse_with(binary, make_temp_var);
+                        } = Self::parse_with(binary, symbols, make_temp_var);
 
                         instructions.push(Instruction::Copy {
                             src,
@@ -745,11 +782,11 @@ impl Expr {
                     let Self {
                         mut instructions,
                         val: left_val,
-                    } = Self::parse_with(*left, make_temp_var);
+                    } = Self::parse_with(*left, symbols, make_temp_var);
                     let Self {
                         instructions: right_instructions,
                         val: right_val,
-                    } = Self::parse_with(*right, make_temp_var);
+                    } = Self::parse_with(*right, symbols, make_temp_var);
                     instructions.extend(right_instructions);
 
                     let dst = Val::Var(make_temp_var().into());
@@ -775,7 +812,7 @@ impl Expr {
                     let Self {
                         mut instructions,
                         val: src,
-                    } = Self::parse_with(*rvalue, make_temp_var);
+                    } = Self::parse_with(*rvalue, symbols, make_temp_var);
                     let dst = Val::Var(Rc::clone(name));
                     instructions.push(Instruction::Copy {
                         src,
@@ -807,7 +844,7 @@ impl Expr {
                 let Expr {
                     mut instructions,
                     val,
-                } = Expr::parse_with(*condition, make_temp_var);
+                } = Expr::parse_with(*condition, symbols, make_temp_var);
 
                 instructions.push(Instruction::JumpIfZero {
                     condition: val,
@@ -817,7 +854,7 @@ impl Expr {
                 let Expr {
                     instructions: e1_instructions,
                     val: e1_val,
-                } = Expr::parse_with(*then, make_temp_var);
+                } = Expr::parse_with(*then, symbols, make_temp_var);
 
                 instructions.extend(e1_instructions);
                 instructions.push(Instruction::Copy {
@@ -831,7 +868,7 @@ impl Expr {
                 let Expr {
                     instructions: e2_instructions,
                     val: e2_val,
-                } = Expr::parse_with(*r#else, make_temp_var);
+                } = Expr::parse_with(*r#else, symbols, make_temp_var);
 
                 instructions.extend(e2_instructions);
 
@@ -852,7 +889,8 @@ impl Expr {
                 let (mut instructions, args) =
                     args.into_iter()
                         .fold((vec![], vec![]), |(mut instrs, mut args), arg| {
-                            let Expr { instructions, val } = Expr::parse_with(arg, make_temp_var);
+                            let Expr { instructions, val } =
+                                Expr::parse_with(arg, symbols, make_temp_var);
                             instrs.extend(instructions);
                             args.push(val);
                             (instrs, args)
@@ -980,12 +1018,13 @@ mod tests {
 
     #[test]
     fn test_return_literal() {
+        let mut symbols = sema::tc::SymbolTable::default();
         let ast = ast::Block(vec![ast::BlockItem::Stmt(ast::Stmt::Return(Some(
             ast::Expr::Constant(ast::Constant::Int(2)),
         )))]);
         let mut counter = 0;
         let mut make_temp_var = Function::make_temp_var(Rc::new("test".to_string()), &mut counter);
-        let actual = Instruction::parse_block_with(ast, &mut make_temp_var);
+        let actual = Instruction::parse_block_with(ast, &mut symbols, &mut make_temp_var);
         let expected = vec![Instruction::Return(Some(Val::Constant(
             ast::Constant::Int(2),
         )))];
@@ -994,6 +1033,7 @@ mod tests {
 
     #[test]
     fn test_return_unary() {
+        let mut symbols = sema::tc::SymbolTable::default();
         let ast = ast::Block(vec![ast::BlockItem::Stmt(ast::Stmt::Return(Some(
             ast::Expr::Unary {
                 op: ast::UnaryOp::Complement,
@@ -1002,7 +1042,7 @@ mod tests {
         )))]);
         let mut counter = 0;
         let mut make_temp_var = Function::make_temp_var(Rc::new("test".to_string()), &mut counter);
-        let actual = Instruction::parse_block_with(ast, &mut make_temp_var);
+        let actual = Instruction::parse_block_with(ast, &mut symbols, &mut make_temp_var);
         let expected = vec![
             Instruction::Unary {
                 op: UnaryOp::Complement,
@@ -1015,6 +1055,7 @@ mod tests {
     }
     #[test]
     fn test_return_nested_unary() {
+        let mut symbols = sema::tc::SymbolTable::default();
         let ast = ast::Block(vec![ast::BlockItem::Stmt(ast::Stmt::Return(Some(
             ast::Expr::Unary {
                 op: ast::UnaryOp::Negate,
@@ -1029,7 +1070,7 @@ mod tests {
         )))]);
         let mut counter = 0;
         let mut make_temp_var = Function::make_temp_var(Rc::new("test".to_string()), &mut counter);
-        let actual = Instruction::parse_block_with(ast, &mut make_temp_var);
+        let actual = Instruction::parse_block_with(ast, &mut symbols, &mut make_temp_var);
         let expected = vec![
             Instruction::Unary {
                 op: UnaryOp::Negate,
@@ -1053,6 +1094,7 @@ mod tests {
 
     #[test]
     fn test_binary_expr() {
+        let mut symbols = sema::tc::SymbolTable::default();
         let ast_binary_expr = ast::Expr::Binary {
             op: ast::BinaryOp::Subtract,
             left: Box::new(ast::Expr::Binary {
@@ -1072,7 +1114,7 @@ mod tests {
         };
         let mut counter = 0;
         let mut make_temp_var = Function::make_temp_var(Rc::new("test".to_string()), &mut counter);
-        let tacky_expr = Expr::parse_with(ast_binary_expr, &mut make_temp_var);
+        let tacky_expr = Expr::parse_with(ast_binary_expr, &mut symbols, &mut make_temp_var);
         let expected = Expr {
             instructions: vec![
                 Instruction::Binary {

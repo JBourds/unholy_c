@@ -162,7 +162,7 @@ impl InitialValue {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct SymbolTable {
     pub global: HashMap<Rc<String>, SymbolEntry>,
     scopes: Vec<HashMap<Rc<String>, SymbolEntry>>,

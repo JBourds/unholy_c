@@ -48,15 +48,19 @@ pub struct StaticVariable {
 
 impl From<sema::ValidAst> for Program {
     fn from(ast: sema::ValidAst) -> Self {
+        let sema::ValidAst {
+            program,
+            mut symbols,
+        } = ast;
         let mut valid_functions = vec![];
-        for decl in ast.program.declarations.into_iter() {
+        for decl in program.declarations.into_iter() {
             match decl {
                 // Only declarations with bodies will be returned here.
                 // We need to do some fixup so that if the definition for a
                 // function was not marked static but the first declaration was
                 // that the function gets defined as static.
                 ast::Declaration::FunDecl(f) => {
-                    if let Some(f) = Function::from_symbol(f, &ast.symbols) {
+                    if let Some(f) = Function::from_symbol(f, &mut symbols) {
                         valid_functions.push(f);
                     }
                 }
@@ -64,7 +68,7 @@ impl From<sema::ValidAst> for Program {
             };
         }
         let mut statics = vec![];
-        for (name, symbol) in ast.symbols.global.iter() {
+        for (name, symbol) in symbols.global.iter() {
             if let Some(r#static) = StaticVariable::from_symbol_with_name(Rc::clone(name), symbol) {
                 statics.push(r#static);
             }
@@ -74,10 +78,7 @@ impl From<sema::ValidAst> for Program {
             .map(TopLevel::Fun)
             .chain(statics.into_iter().map(TopLevel::Static))
             .collect::<Vec<TopLevel>>();
-        Self {
-            top_level,
-            symbols: ast.symbols,
-        }
+        Self { top_level, symbols }
     }
 }
 
@@ -99,8 +100,8 @@ impl Function {
     }
 }
 
-impl From<ast::FunDecl> for Option<Function> {
-    fn from(decl: ast::FunDecl) -> Self {
+impl Function {
+    fn from_symbol(decl: ast::FunDecl, symbols: &mut sema::tc::SymbolTable) -> Option<Self> {
         let ast::FunDecl {
             name,
             signature,
@@ -117,56 +118,49 @@ impl From<ast::FunDecl> for Option<Function> {
 
         // Temporary fix suggested by the book for the case where a function
         // is supposed to return something but does not.
-        instructions.push(Instruction::Return(Some(Val::Constant(0))));
+        instructions.push(Instruction::Return(Some(Val::Constant(
+            ast::Constant::Int(0),
+        ))));
+
+        let name = Rc::new(name.to_string());
 
         let params = signature
             .into_iter()
             .map(|x| x.1)
             .collect::<Vec<Option<Rc<String>>>>();
 
+        // Check symbol table to get external linkage since the function
+        // declaration could be static but the definition can elide it.
+        // ```
+        // static int foo();
+        // int foo() {
+        //      ...
+        // }
+        // ```
+
+        let external_linkage = {
+            if let Some(sema::tc::SymbolEntry {
+                r#type:
+                    ast::Type {
+                        base: ast::BaseType::Fun { .. },
+                        ..
+                    },
+                attribute: sema::tc::Attribute::Fun { external_linkage },
+                ..
+            }) = symbols.get(&name)
+            {
+                *external_linkage
+            } else {
+                unreachable!()
+            }
+        };
+
         Some(Function {
-            name: Rc::new(name.to_string()),
+            name,
             params,
-            external_linkage: decl.storage_class != Some(ast::StorageClass::Static),
+            external_linkage,
             instructions,
         })
-    }
-}
-
-impl Function {
-    fn from_symbol(decl: ast::FunDecl, symbols: &sema::tc::SymbolTable) -> Option<Self> {
-        if let Some(f @ Function { .. }) = Option::<Self>::from(decl) {
-            // Check symbol table to get external linkage since the function
-            // declaration could be static but the definition can elide it.
-            // ```
-            // static int foo();
-            // int foo() {
-            //      ...
-            // }
-            // ```
-            let external_linkage = {
-                if let Some(sema::tc::SymbolEntry {
-                    r#type:
-                        ast::Type {
-                            base: ast::BaseType::Fun { .. },
-                            ..
-                        },
-                    attribute: sema::tc::Attribute::Fun { external_linkage },
-                    ..
-                }) = symbols.get(&f.name)
-                {
-                    external_linkage
-                } else {
-                    unreachable!()
-                }
-            };
-            Some(Function {
-                external_linkage: *external_linkage,
-                ..f
-            })
-        } else {
-            None
-        }
     }
 }
 
@@ -228,9 +222,7 @@ impl Instruction {
         decl: ast::FunDecl,
         _make_temp_var: &mut impl FnMut() -> String,
     ) -> Vec<Self> {
-        if Option::<Function>::from(decl).is_some() {
-            unreachable!("Function declerations inside statements should be caught in sema");
-        }
+        assert!(decl.block.is_none());
         vec![]
     }
 

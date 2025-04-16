@@ -575,7 +575,7 @@ impl Expr {
                         instructions.push(Instruction::Binary {
                             op: BinaryOp::Add,
                             src1: val.clone(),
-                            src2: Val::Constant(1),
+                            src2: Val::Constant(ast::Constant::Int(1)),
                             dst: val.clone(),
                         });
                         val.clone()
@@ -589,7 +589,7 @@ impl Expr {
                         instructions.push(Instruction::Binary {
                             op: BinaryOp::Add,
                             src1: val.clone(),
-                            src2: Val::Constant(1),
+                            src2: Val::Constant(ast::Constant::Int(1)),
                             dst: val.clone(),
                         });
                         dst
@@ -598,7 +598,7 @@ impl Expr {
                         instructions.push(Instruction::Binary {
                             op: BinaryOp::Subtract,
                             src1: val.clone(),
-                            src2: Val::Constant(1),
+                            src2: Val::Constant(ast::Constant::Int(1)),
                             dst: val.clone(),
                         });
                         val.clone()
@@ -612,7 +612,7 @@ impl Expr {
                         instructions.push(Instruction::Binary {
                             op: BinaryOp::Subtract,
                             src1: val.clone(),
-                            src2: Val::Constant(1),
+                            src2: Val::Constant(ast::Constant::Int(1)),
                             dst: val.clone(),
                         });
                         dst
@@ -695,7 +695,7 @@ impl Expr {
 
                     // result = 1
                     instructions.push(Instruction::Copy {
-                        src: Val::Constant(result_nojmp),
+                        src: Val::Constant(ast::Constant::Int(result_nojmp)),
                         dst: dst.clone(),
                     });
 
@@ -707,7 +707,7 @@ impl Expr {
 
                     // result = 0
                     instructions.push(Instruction::Copy {
-                        src: Val::Constant(result_jmp),
+                        src: Val::Constant(ast::Constant::Int(result_jmp)),
                         dst: dst.clone(),
                     });
 
@@ -868,23 +868,21 @@ impl Expr {
                     val: dst,
                 }
             }
-            ast::Expr::Cast { .. } => todo!(),
+            ast::Expr::Cast { target, exp: expr } => {
+                todo!()
+            }
         }
     }
 }
 
-// TODO: Other types
 #[derive(Clone, Debug, PartialEq)]
 pub enum Val {
-    Constant(i32),
+    Constant(ast::Constant),
     Var(Rc<String>),
 }
 impl From<ast::Constant> for Val {
     fn from(node: ast::Constant) -> Self {
-        match node {
-            ast::Constant::Int(i) => Self::Constant(i),
-            ast::Constant::Long(..) => todo!(),
-        }
+        Self::Constant(node)
     }
 }
 
@@ -988,7 +986,9 @@ mod tests {
         let mut counter = 0;
         let mut make_temp_var = Function::make_temp_var(Rc::new("test".to_string()), &mut counter);
         let actual = Instruction::parse_block_with(ast, &mut make_temp_var);
-        let expected = vec![Instruction::Return(Some(Val::Constant(2)))];
+        let expected = vec![Instruction::Return(Some(Val::Constant(
+            ast::Constant::Int(2),
+        )))];
         assert_eq!(actual, expected);
     }
 
@@ -1006,7 +1006,7 @@ mod tests {
         let expected = vec![
             Instruction::Unary {
                 op: UnaryOp::Complement,
-                src: Val::Constant(2),
+                src: Val::Constant(ast::Constant::Int(2)),
                 dst: Val::Var("test.0".to_string().into()),
             },
             Instruction::Return(Some(Val::Var("test.0".to_string().into()))),
@@ -1033,7 +1033,7 @@ mod tests {
         let expected = vec![
             Instruction::Unary {
                 op: UnaryOp::Negate,
-                src: Val::Constant(2),
+                src: Val::Constant(ast::Constant::Int(2)),
                 dst: Val::Var("test.0".to_string().into()),
             },
             Instruction::Unary {
@@ -1077,19 +1077,19 @@ mod tests {
             instructions: vec![
                 Instruction::Binary {
                     op: BinaryOp::Multiply,
-                    src1: Val::Constant(1),
-                    src2: Val::Constant(2),
+                    src1: Val::Constant(ast::Constant::Int(1)),
+                    src2: Val::Constant(ast::Constant::Int(2)),
                     dst: Val::Var(Rc::new("test.0".to_string())),
                 },
                 Instruction::Binary {
                     op: BinaryOp::Add,
-                    src1: Val::Constant(4),
-                    src2: Val::Constant(5),
+                    src1: Val::Constant(ast::Constant::Int(4)),
+                    src2: Val::Constant(ast::Constant::Int(5)),
                     dst: Val::Var(Rc::new("test.1".to_string())),
                 },
                 Instruction::Binary {
                     op: BinaryOp::Multiply,
-                    src1: Val::Constant(3),
+                    src1: Val::Constant(ast::Constant::Int(3)),
                     src2: Val::Var(Rc::new("test.1".to_string())),
                     dst: Val::Var(Rc::new("test.2".to_string())),
                 },

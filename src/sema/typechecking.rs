@@ -91,6 +91,16 @@ impl Attribute {
             )),
         }
     }
+
+    pub fn has_external_linkage(&self) -> bool {
+        match self {
+            Self::Fun { external_linkage } => *external_linkage,
+            Self::Static {
+                external_linkage, ..
+            } => *external_linkage,
+            Self::Local => false,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

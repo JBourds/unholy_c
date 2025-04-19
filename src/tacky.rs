@@ -149,6 +149,16 @@ impl Function {
             format!("{name}.{n}")
         }
     }
+
+    fn make_tacky_temp_var(
+        r#type: ast::Type,
+        symbols: &mut SymbolTable,
+        make_temp_var: &mut impl FnMut() -> String,
+    ) -> Val {
+        let name = Rc::new(make_temp_var());
+        symbols.new_entry(Rc::clone(&name), r#type);
+        Val::Var(name)
+    }
 }
 
 impl Function {
@@ -289,7 +299,15 @@ impl Instruction {
                 mut instructions,
                 val: src,
             } = Expr::parse_with(init, symbols, make_temp_var);
-            let dst = Val::Var(Rc::clone(&decl.name));
+            let dst = Function::make_tacky_temp_var(
+                symbols
+                    .get(&decl.name)
+                    .expect("Every VarDecl is alrady in the table")
+                    .r#type
+                    .clone(),
+                symbols,
+                make_temp_var,
+            );
             instructions.push(Instruction::Copy {
                 src,
                 dst: dst.clone(),
@@ -581,7 +599,11 @@ impl Instruction {
                             val: case_val,
                         } = Expr::parse_with(ast::Expr::Constant(*case), symbols, make_temp_var);
                         block_instructions.extend(instructions);
-                        let dst = Val::Var(Rc::new(make_temp_var()));
+                        let dst = Function::make_tacky_temp_var(
+                            ast::Type::bool(),
+                            symbols,
+                            make_temp_var,
+                        );
                         block_instructions.push(Self::Binary {
                             op: BinaryOp::Equal,
                             src1: switch_val.clone(),
@@ -668,7 +690,11 @@ impl Expr {
                         val.clone()
                     }
                     ast::UnaryOp::PostInc => {
-                        let dst = Val::Var(make_temp_var().into());
+                        let dst = Function::make_tacky_temp_var(
+                            val.get_type(symbols),
+                            symbols,
+                            make_temp_var,
+                        );
                         instructions.push(Instruction::Copy {
                             src: val.clone(),
                             dst: dst.clone(),
@@ -691,7 +717,11 @@ impl Expr {
                         val.clone()
                     }
                     ast::UnaryOp::PostDec => {
-                        let dst = Val::Var(make_temp_var().into());
+                        let dst = Function::make_tacky_temp_var(
+                            val.get_type(symbols),
+                            symbols,
+                            make_temp_var,
+                        );
                         instructions.push(Instruction::Copy {
                             src: val.clone(),
                             dst: dst.clone(),
@@ -706,7 +736,13 @@ impl Expr {
                     }
                     // Other operations have tacky unary op equivalents
                     _ => {
-                        let dst = Val::Var(make_temp_var().into());
+                        // FIXME: This may not be the correct type.
+                        // Does type promotion happen explicitly in ast/sema?
+                        let dst = Function::make_tacky_temp_var(
+                            val.get_type(symbols),
+                            symbols,
+                            make_temp_var,
+                        );
                         instructions.push(Instruction::Unary {
                             op: UnaryOp::from(op),
                             src: val,
@@ -763,7 +799,8 @@ impl Expr {
                     } = Self::parse_with(*right, symbols, make_temp_var);
                     instructions.extend(right_instructions);
 
-                    let dst = Val::Var(make_temp_var().into());
+                    let dst =
+                        Function::make_tacky_temp_var(ast::Type::bool(), symbols, make_temp_var);
                     let end = {
                         // FIXME: Support label use case
                         let mut end = make_temp_var();
@@ -839,7 +876,12 @@ impl Expr {
                     } = Self::parse_with(*right, symbols, make_temp_var);
                     instructions.extend(right_instructions);
 
-                    let dst = Val::Var(make_temp_var().into());
+                    // FIXME: Same as above, not exactly sure where the type casting happens
+                    let dst = Function::make_tacky_temp_var(
+                        left_val.get_type(symbols),
+                        symbols,
+                        make_temp_var,
+                    );
 
                     instructions.push(Instruction::Binary {
                         op: op.into(),

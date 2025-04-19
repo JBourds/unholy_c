@@ -30,7 +30,7 @@ impl SymbolTable {
             key,
             SymbolEntry {
                 r#type,
-                external_linkage: false,
+                attribute: sema::tc::Attribute::Local,
             },
         );
 
@@ -43,8 +43,8 @@ impl SymbolTable {
 
 #[derive(Debug)]
 pub struct SymbolEntry {
-    r#type: ast::Type,
-    external_linkage: bool,
+    pub r#type: ast::Type,
+    pub attribute: sema::tc::Attribute,
 }
 
 impl From<sema::tc::SymbolTable> for SymbolTable {
@@ -58,7 +58,7 @@ impl From<sema::tc::SymbolTable> for SymbolTable {
                         k,
                         SymbolEntry {
                             r#type: v.r#type,
-                            external_linkage: v.attribute.has_external_linkage(),
+                            attribute: v.attribute,
                         },
                     )
                 })
@@ -206,10 +206,10 @@ impl Function {
                         base: ast::BaseType::Fun { .. },
                         ..
                     },
-                external_linkage,
+                attribute,
             }) = symbols.get(&name)
             {
-                *external_linkage
+                attribute.has_external_linkage()
             } else {
                 unreachable!()
             }

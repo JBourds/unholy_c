@@ -1,4 +1,4 @@
-use crate::{sema, tacky};
+use crate::{ast, sema, tacky};
 use std::collections::HashMap;
 use std::fmt;
 use std::marker::PhantomData;
@@ -87,7 +87,7 @@ pub struct Function {
 }
 
 impl Function {
-    fn from_with_storage(node: tacky::Function, symbols: &sema::tc::SymbolTable) -> Self {
+    fn from_with_storage(node: tacky::Function, symbols: &tacky::SymbolTable) -> Self {
         let tacky::Function {
             name,
             mut params,
@@ -522,7 +522,7 @@ impl Instruction<Initial> {
 impl Instruction<WithStorage> {
     fn new(
         instruction: Instruction<Initial>,
-        symbols: &sema::tc::SymbolTable,
+        symbols: &tacky::SymbolTable,
         mappings: &mut HashMap<Rc<String>, Operand>,
         stack_bound: &mut isize,
     ) -> (Self, bool) {
@@ -708,11 +708,11 @@ impl From<tacky::Instruction> for Vec<Instruction<Initial>> {
             tacky::Instruction::Unary { op, src, dst } => match op {
                 tacky::UnaryOp::Not => vec![
                     new_instr(InstructionType::Cmp {
-                        src: Operand::Imm(0),
+                        src: Operand::Imm(ast::Constant::Int(0)),
                         dst: src.into(),
                     }),
                     new_instr(InstructionType::Mov {
-                        src: Operand::Imm(0),
+                        src: Operand::Imm(ast::Constant::Int(0)),
                         dst: dst.clone().into(),
                     }),
                     new_instr(InstructionType::SetCC {
@@ -846,7 +846,7 @@ impl From<tacky::Instruction> for Vec<Instruction<Initial>> {
                         dst: src1.into(),
                     }),
                     new_instr(InstructionType::Mov {
-                        src: Operand::Imm(0),
+                        src: Operand::Imm(ast::Constant::Int(0)),
                         dst: dst.clone().into(),
                     }),
                     new_instr(InstructionType::SetCC {
@@ -866,7 +866,7 @@ impl From<tacky::Instruction> for Vec<Instruction<Initial>> {
             },
             tacky::Instruction::JumpIfZero { condition, target } => vec![
                 new_instr(InstructionType::Cmp {
-                    src: Operand::Imm(0),
+                    src: Operand::Imm(ast::Constant::Int(0)),
                     dst: condition.into(),
                 }),
                 new_instr(InstructionType::JmpCC {
@@ -876,7 +876,7 @@ impl From<tacky::Instruction> for Vec<Instruction<Initial>> {
             ],
             tacky::Instruction::JumpIfNotZero { condition, target } => vec![
                 new_instr(InstructionType::Cmp {
-                    src: Operand::Imm(0),
+                    src: Operand::Imm(ast::Constant::Int(0)),
                     dst: condition.into(),
                 }),
                 new_instr(InstructionType::JmpCC {
@@ -963,7 +963,7 @@ impl From<tacky::Instruction> for Vec<Instruction<Initial>> {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Operand {
-    Imm(i32),
+    Imm(ast::Constant),
     Reg(Reg),
     Pseudo { name: Rc<String>, size: usize },
     StackOffset { offset: isize, size: usize },

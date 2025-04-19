@@ -1,17 +1,70 @@
 use crate::ast;
 use crate::sema;
+use std::collections::HashMap;
 use std::rc::Rc;
 
 #[derive(Debug)]
 pub struct Program {
     pub top_level: Vec<TopLevel>,
-    pub symbols: sema::tc::SymbolTable,
+    pub symbols: SymbolTable,
 }
 
 #[derive(Debug, PartialEq)]
 pub enum TopLevel {
     Fun(Function),
     Static(StaticVariable),
+}
+
+#[derive(Debug, Default)]
+pub struct SymbolTable {
+    pub table: HashMap<Rc<String>, SymbolEntry>,
+}
+
+impl SymbolTable {
+    pub fn get(&self, key: &Rc<String>) -> Option<&SymbolEntry> {
+        self.table.get(key)
+    }
+
+    pub fn new_entry(&mut self, key: Rc<String>, r#type: ast::Type) {
+        let old_key = self.table.insert(
+            key,
+            SymbolEntry {
+                r#type,
+                external_linkage: false,
+            },
+        );
+
+        assert!(
+            old_key.is_none(),
+            "Every new entry into SymbolTable should have a unique name!"
+        );
+    }
+}
+
+#[derive(Debug)]
+pub struct SymbolEntry {
+    r#type: ast::Type,
+    external_linkage: bool,
+}
+
+impl From<sema::tc::SymbolTable> for SymbolTable {
+    fn from(value: sema::tc::SymbolTable) -> Self {
+        Self {
+            table: value
+                .global
+                .into_iter()
+                .map(|(k, v)| {
+                    (
+                        k,
+                        SymbolEntry {
+                            r#type: v.r#type,
+                            external_linkage: v.attribute.has_external_linkage(),
+                        },
+                    )
+                })
+                .collect(),
+        }
+    }
 }
 
 impl StaticVariable {
@@ -48,10 +101,14 @@ pub struct StaticVariable {
 
 impl From<sema::ValidAst> for Program {
     fn from(ast: sema::ValidAst) -> Self {
-        let sema::ValidAst {
-            program,
-            mut symbols,
-        } = ast;
+        let sema::ValidAst { program, symbols } = ast;
+        let mut statics = vec![];
+        for (name, symbol) in symbols.global.iter() {
+            if let Some(r#static) = StaticVariable::from_symbol_with_name(Rc::clone(name), symbol) {
+                statics.push(r#static);
+            }
+        }
+        let mut symbols = SymbolTable::from(symbols);
         let mut valid_functions = vec![];
         for decl in program.declarations.into_iter() {
             match decl {
@@ -66,12 +123,6 @@ impl From<sema::ValidAst> for Program {
                 }
                 ast::Declaration::VarDecl(_) => {}
             };
-        }
-        let mut statics = vec![];
-        for (name, symbol) in symbols.global.iter() {
-            if let Some(r#static) = StaticVariable::from_symbol_with_name(Rc::clone(name), symbol) {
-                statics.push(r#static);
-            }
         }
         let top_level = valid_functions
             .into_iter()
@@ -101,7 +152,7 @@ impl Function {
 }
 
 impl Function {
-    fn from_symbol(decl: ast::FunDecl, symbols: &mut sema::tc::SymbolTable) -> Option<Self> {
+    fn from_symbol(decl: ast::FunDecl, symbols: &mut SymbolTable) -> Option<Self> {
         let ast::FunDecl {
             name,
             signature,
@@ -139,14 +190,13 @@ impl Function {
         // ```
 
         let external_linkage = {
-            if let Some(sema::tc::SymbolEntry {
+            if let Some(SymbolEntry {
                 r#type:
                     ast::Type {
                         base: ast::BaseType::Fun { .. },
                         ..
                     },
-                attribute: sema::tc::Attribute::Fun { external_linkage },
-                ..
+                external_linkage,
             }) = symbols.get(&name)
             {
                 *external_linkage
@@ -210,7 +260,7 @@ pub enum Instruction {
 impl Instruction {
     fn parse_decl_with(
         decl: ast::Declaration,
-        symbols: &mut sema::tc::SymbolTable,
+        symbols: &mut SymbolTable,
         make_temp_var: &mut impl FnMut() -> String,
     ) -> Vec<Self> {
         match decl {
@@ -231,7 +281,7 @@ impl Instruction {
 
     fn parse_var_decl_with(
         decl: ast::VarDecl,
-        symbols: &mut sema::tc::SymbolTable,
+        symbols: &mut SymbolTable,
         make_temp_var: &mut impl FnMut() -> String,
     ) -> Vec<Self> {
         if let Some(init) = decl.init {
@@ -251,7 +301,7 @@ impl Instruction {
     }
     fn parse_stmt_with(
         stmt: ast::Stmt,
-        symbols: &mut sema::tc::SymbolTable,
+        symbols: &mut SymbolTable,
         make_temp_var: &mut impl FnMut() -> String,
     ) -> Vec<Self> {
         let mut block_instructions = vec![];
@@ -556,7 +606,7 @@ impl Instruction {
     }
     fn parse_block_with(
         node: ast::Block,
-        symbols: &mut sema::tc::SymbolTable,
+        symbols: &mut SymbolTable,
         make_temp_var: &mut impl FnMut() -> String,
     ) -> Vec<Self> {
         let mut block_instructions = vec![];
@@ -594,7 +644,7 @@ pub struct Expr {
 impl Expr {
     fn parse_with(
         node: ast::Expr,
-        symbols: &mut sema::tc::SymbolTable,
+        symbols: &mut SymbolTable,
         make_temp_var: &mut impl FnMut() -> String,
     ) -> Expr {
         match node {
@@ -907,7 +957,38 @@ impl Expr {
                 }
             }
             ast::Expr::Cast { target, exp: expr } => {
-                todo!()
+                let Expr {
+                    mut instructions,
+                    val,
+                } = Expr::parse_with(*expr, symbols, make_temp_var);
+
+                // I do this cause get_type currently clones on vars
+                let val_type = val.get_type(symbols);
+                if target == val_type {
+                    return Self { instructions, val };
+                }
+                let name = Rc::new(make_temp_var());
+                let dst = Val::Var(Rc::clone(&name));
+
+                symbols.new_entry(Rc::clone(&name), target.clone());
+
+                // FIXME: This needs to use PartialEq/Eq
+                if target.base.nbytes() > val_type.base.nbytes() {
+                    instructions.push(Instruction::SignExtend {
+                        src: val,
+                        dst: dst.clone(),
+                    });
+                } else {
+                    instructions.push(Instruction::Truncate {
+                        src: val,
+                        dst: dst.clone(),
+                    });
+                }
+
+                Self {
+                    instructions,
+                    val: dst,
+                }
             }
         }
     }
@@ -918,6 +999,21 @@ pub enum Val {
     Constant(ast::Constant),
     Var(Rc<String>),
 }
+
+impl Val {
+    fn get_type(&self, symbols: &SymbolTable) -> ast::Type {
+        match self {
+            Self::Constant(c) => c.get_type(),
+            Self::Var(name) => {
+                let Some(entry) = symbols.get(&name) else {
+                    unreachable!("Variable name not found in symbol table");
+                };
+                entry.r#type.clone()
+            }
+        }
+    }
+}
+
 impl From<ast::Constant> for Val {
     fn from(node: ast::Constant) -> Self {
         Self::Constant(node)
@@ -1018,7 +1114,7 @@ mod tests {
 
     #[test]
     fn test_return_literal() {
-        let mut symbols = sema::tc::SymbolTable::default();
+        let mut symbols = SymbolTable::default();
         let ast = ast::Block(vec![ast::BlockItem::Stmt(ast::Stmt::Return(Some(
             ast::Expr::Constant(ast::Constant::Int(2)),
         )))]);
@@ -1033,7 +1129,7 @@ mod tests {
 
     #[test]
     fn test_return_unary() {
-        let mut symbols = sema::tc::SymbolTable::default();
+        let mut symbols = SymbolTable::default();
         let ast = ast::Block(vec![ast::BlockItem::Stmt(ast::Stmt::Return(Some(
             ast::Expr::Unary {
                 op: ast::UnaryOp::Complement,
@@ -1055,7 +1151,7 @@ mod tests {
     }
     #[test]
     fn test_return_nested_unary() {
-        let mut symbols = sema::tc::SymbolTable::default();
+        let mut symbols = SymbolTable::default();
         let ast = ast::Block(vec![ast::BlockItem::Stmt(ast::Stmt::Return(Some(
             ast::Expr::Unary {
                 op: ast::UnaryOp::Negate,
@@ -1094,7 +1190,7 @@ mod tests {
 
     #[test]
     fn test_binary_expr() {
-        let mut symbols = sema::tc::SymbolTable::default();
+        let mut symbols = SymbolTable::default();
         let ast_binary_expr = ast::Expr::Binary {
             op: ast::BinaryOp::Subtract,
             left: Box::new(ast::Expr::Binary {

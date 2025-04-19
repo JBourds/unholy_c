@@ -1379,6 +1379,29 @@ impl Constant {
     pub fn is_int(&self) -> bool {
         true
     }
+
+    pub fn get_type(&self) -> Type {
+        match self {
+            Self::Int(..) => Type {
+                base: BaseType::Int {
+                    nbytes: 4,
+                    signed: None,
+                },
+                ptr: None,
+                storage: None,
+                is_const: true,
+            },
+            Self::Long(..) => Type {
+                base: BaseType::Int {
+                    nbytes: 8,
+                    signed: None,
+                },
+                ptr: None,
+                storage: None,
+                is_const: true,
+            },
+        }
+    }
 }
 
 impl std::fmt::Display for Constant {

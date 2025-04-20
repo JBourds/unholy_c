@@ -1204,9 +1204,9 @@ mod tests {
             Instruction::Unary {
                 op: UnaryOp::Complement,
                 src: Val::Constant(ast::Constant::Int(2)),
-                dst: Val::Var("test.0".to_string().into()),
+                dst: Val::Var("tacky.test.0".to_string().into()),
             },
-            Instruction::Return(Some(Val::Var("test.0".to_string().into()))),
+            Instruction::Return(Some(Val::Var("tacky.test.0".to_string().into()))),
         ];
         assert_eq!(actual, expected);
     }
@@ -1232,19 +1232,19 @@ mod tests {
             Instruction::Unary {
                 op: UnaryOp::Negate,
                 src: Val::Constant(ast::Constant::Int(2)),
-                dst: Val::Var("test.0".to_string().into()),
+                dst: Val::Var("tacky.test.0".to_string().into()),
             },
             Instruction::Unary {
                 op: UnaryOp::Complement,
-                src: Val::Var("test.0".to_string().into()),
-                dst: Val::Var("test.1".to_string().into()),
+                src: Val::Var("tacky.test.0".to_string().into()),
+                dst: Val::Var("tacky.test.1".to_string().into()),
             },
             Instruction::Unary {
                 op: UnaryOp::Negate,
-                src: Val::Var("test.1".to_string().into()),
-                dst: Val::Var("test.2".to_string().into()),
+                src: Val::Var("tacky.test.1".to_string().into()),
+                dst: Val::Var("tacky.test.2".to_string().into()),
             },
-            Instruction::Return(Some(Val::Var("test.2".to_string().into()))),
+            Instruction::Return(Some(Val::Var("tacky.test.2".to_string().into()))),
         ];
         assert_eq!(actual, expected);
     }
@@ -1278,28 +1278,28 @@ mod tests {
                     op: BinaryOp::Multiply,
                     src1: Val::Constant(ast::Constant::Int(1)),
                     src2: Val::Constant(ast::Constant::Int(2)),
-                    dst: Val::Var(Rc::new("test.0".to_string())),
+                    dst: Val::Var(Rc::new("tacky.test.0".to_string())),
                 },
                 Instruction::Binary {
                     op: BinaryOp::Add,
                     src1: Val::Constant(ast::Constant::Int(4)),
                     src2: Val::Constant(ast::Constant::Int(5)),
-                    dst: Val::Var(Rc::new("test.1".to_string())),
+                    dst: Val::Var(Rc::new("tacky.test.1".to_string())),
                 },
                 Instruction::Binary {
                     op: BinaryOp::Multiply,
                     src1: Val::Constant(ast::Constant::Int(3)),
-                    src2: Val::Var(Rc::new("test.1".to_string())),
-                    dst: Val::Var(Rc::new("test.2".to_string())),
+                    src2: Val::Var(Rc::new("tacky.test.1".to_string())),
+                    dst: Val::Var(Rc::new("tacky.test.2".to_string())),
                 },
                 Instruction::Binary {
                     op: BinaryOp::Subtract,
-                    src1: Val::Var(Rc::new("test.0".to_string())),
-                    src2: Val::Var(Rc::new("test.2".to_string())),
-                    dst: Val::Var(Rc::new("test.3".to_string())),
+                    src1: Val::Var(Rc::new("tacky.test.0".to_string())),
+                    src2: Val::Var(Rc::new("tacky.test.2".to_string())),
+                    dst: Val::Var(Rc::new("tacky.test.3".to_string())),
                 },
             ],
-            val: Val::Var(Rc::new("test.3".to_string())),
+            val: Val::Var(Rc::new("tacky.test.3".to_string())),
         };
         assert_eq!(expected, tacky_expr);
     }

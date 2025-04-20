@@ -1066,7 +1066,7 @@ impl Val {
         match self {
             Self::Constant(c) => c.get_type(),
             Self::Var(name) => {
-                let Some(entry) = symbols.get(&name) else {
+                let Some(entry) = symbols.get(name) else {
                     unreachable!("Variable name '{name}' not found in symbol table");
                 };
                 entry.r#type.clone()

@@ -27,7 +27,7 @@ impl SymbolTable {
 
     pub fn new_entry(&mut self, key: Rc<String>, r#type: ast::Type) {
         let old_key = self.table.insert(
-            key,
+            Rc::clone(&key),
             SymbolEntry {
                 r#type,
                 attribute: sema::tc::Attribute::Local,
@@ -36,12 +36,12 @@ impl SymbolTable {
 
         assert!(
             old_key.is_none(),
-            "Every new entry into SymbolTable should have a unique name!"
+            "Every new entry into SymbolTable should have a unique name!, but {key} did not!"
         );
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct SymbolEntry {
     pub r#type: ast::Type,
     pub attribute: sema::tc::Attribute,
@@ -172,6 +172,16 @@ impl Function {
         else {
             return None;
         };
+
+        // Insert function parameter types for type inference
+        // FIXME: Make sure that parameter names are unique!!!!
+        signature.iter().for_each(|(r#type, name)| {
+            if let Some(name) = name {
+                let name = Rc::clone(name);
+                symbols.new_entry(name, r#type.clone());
+            }
+        });
+
         let mut temp_var_counter = 0;
         let mut make_temp_var =
             Function::make_temp_var(Rc::new(name.to_string()), &mut temp_var_counter);
@@ -299,15 +309,8 @@ impl Instruction {
                 mut instructions,
                 val: src,
             } = Expr::parse_with(init, symbols, make_temp_var);
-            let dst = Function::make_tacky_temp_var(
-                symbols
-                    .get(&decl.name)
-                    .expect("Every VarDecl is alrady in the table")
-                    .r#type
-                    .clone(),
-                symbols,
-                make_temp_var,
-            );
+            symbols.new_entry(Rc::clone(&decl.name), decl.typ.clone());
+            let dst = Function::make_tacky_temp_var(decl.typ.clone(), symbols, make_temp_var);
             instructions.push(Instruction::Copy {
                 src,
                 dst: dst.clone(),
@@ -977,7 +980,22 @@ impl Expr {
                 }
             }
             ast::Expr::FunCall { name, args } => {
-                let label = Rc::new(make_temp_var());
+                let SymbolEntry {
+                    r#type:
+                        ast::Type {
+                            base: ast::BaseType::Fun { ret_t, .. },
+                            ..
+                        },
+                    ..
+                } = symbols
+                    .get(&name)
+                    .expect("Function '{name}' should already be in symbol table, but it was not!")
+                else {
+                    unreachable!(
+                        "Function name '{name}' resulted in non-function type in symbol table"
+                    );
+                };
+                let dst = Function::make_tacky_temp_var(*ret_t.clone(), symbols, make_temp_var);
                 let (mut instructions, args) =
                     args.into_iter()
                         .fold((vec![], vec![]), |(mut instrs, mut args), arg| {
@@ -987,7 +1005,6 @@ impl Expr {
                             args.push(val);
                             (instrs, args)
                         });
-                let dst = Val::Var(label);
                 instructions.push(Instruction::FunCall {
                     name,
                     args,
@@ -1048,7 +1065,7 @@ impl Val {
             Self::Constant(c) => c.get_type(),
             Self::Var(name) => {
                 let Some(entry) = symbols.get(&name) else {
-                    unreachable!("Variable name not found in symbol table");
+                    unreachable!("Variable name '{name}' not found in symbol table");
                 };
                 entry.r#type.clone()
             }

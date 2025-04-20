@@ -146,7 +146,7 @@ impl Function {
         move || {
             let n = *counter;
             *counter += 1;
-            format!("{name}.{n}")
+            format!("tacky.{name}.{n}")
         }
     }
 

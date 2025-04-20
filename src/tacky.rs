@@ -304,12 +304,14 @@ impl Instruction {
         symbols: &mut SymbolTable,
         make_temp_var: &mut impl FnMut() -> String,
     ) -> Vec<Self> {
+        if decl.typ.storage != Some(ast::StorageClass::Extern) {
+            symbols.new_entry(Rc::clone(&decl.name), decl.typ.clone());
+        }
         if let Some(init) = decl.init {
             let Expr {
                 mut instructions,
                 val: src,
             } = Expr::parse_with(init, symbols, make_temp_var);
-            symbols.new_entry(Rc::clone(&decl.name), decl.typ.clone());
             let dst = Function::make_tacky_temp_var(decl.typ.clone(), symbols, make_temp_var);
             instructions.push(Instruction::Copy {
                 src,

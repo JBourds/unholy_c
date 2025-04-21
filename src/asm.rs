@@ -119,12 +119,6 @@ pub mod x64 {
             codegen::InstructionType::Unary { op, dst } => {
                 w.write_fmt(format_args!("\t{op} {}{dst}\n", get_specifier(None, &dst)))?
             }
-            codegen::InstructionType::AllocStack(size) => {
-                w.write_fmt(format_args!("\tsub rsp, {size}\n"))?;
-            }
-            codegen::InstructionType::DeAllocStack(size) => {
-                w.write_fmt(format_args!("\tadd rsp, {size}\n"))?;
-            }
             codegen::InstructionType::Binary {
                 op,
                 src,

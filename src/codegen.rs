@@ -118,7 +118,7 @@ impl Function {
                     section: RegSection::Qword,
                 }),
             }),
-            Instruction::<Initial>::new(InstructionType::AllocStack(0)),
+            Instruction::<Initial>::new(InstructionType::allocate_stack(0)),
         ];
 
         let mut mappings = HashMap::new();
@@ -180,8 +180,7 @@ impl Function {
             0 => 0,
             remainder => 16 - remainder,
         };
-        fixed_instructions[2].op = InstructionType::AllocStack(stack_bound as usize);
-
+        fixed_instructions[2].op = InstructionType::allocate_stack(stack_bound);
         for i in requires_fixup {
             let instr = match fixed_instructions[i].op.clone() {
                 InstructionType::Mov { src, dst } => {
@@ -499,13 +498,35 @@ pub enum InstructionType {
         dst: Operand,
     },
     Label(Rc<String>),
-    AllocStack(usize),
-    DeAllocStack(usize),
     Push(Operand),
     // Invariant: Can only pop to a register or stack offset
     Pop(Operand),
     Call(Rc<String>),
     Ret,
+}
+
+impl InstructionType {
+    pub fn allocate_stack(bytes: isize) -> Self {
+        Self::Binary {
+            op: BinaryOp::Subtract,
+            src: Operand::Imm(ast::Constant::Long(bytes.try_into().expect("i64 == isize"))),
+            dst: Operand::Reg(Reg::X86 {
+                reg: X86Reg::Sp,
+                section: RegSection::Qword,
+            }),
+        }
+    }
+
+    pub fn deallocate_stack(bytes: isize) -> Self {
+        Self::Binary {
+            op: BinaryOp::Add,
+            src: Operand::Imm(ast::Constant::Long(bytes.try_into().expect("i64 == isize"))),
+            dst: Operand::Reg(Reg::X86 {
+                reg: X86Reg::Sp,
+                section: RegSection::Qword,
+            }),
+        }
+    }
 }
 
 #[derive(Debug, PartialEq)]
@@ -915,7 +936,7 @@ impl From<tacky::Instruction> for Vec<Instruction<Initial>> {
                 let mut v = vec![];
 
                 if stack_padding != 0 {
-                    v.push(new_instr(InstructionType::AllocStack(stack_padding)));
+                    v.push(new_instr(InstructionType::allocate_stack(stack_padding)));
                 }
                 for (dst_reg, src_arg) in std::iter::zip(SYSTEM_V_REGS.iter(), reg_args.into_iter())
                 {
@@ -951,9 +972,11 @@ impl From<tacky::Instruction> for Vec<Instruction<Initial>> {
                 }
                 v.push(new_instr(InstructionType::Call(name)));
 
-                let bytes_to_remove = 8 * num_stack_args + stack_padding;
+                let bytes_to_remove = 8 * num_stack_args + stack_padding as usize;
                 if bytes_to_remove != 0 {
-                    v.push(new_instr(InstructionType::DeAllocStack(bytes_to_remove)));
+                    v.push(new_instr(InstructionType::deallocate_stack(
+                        bytes_to_remove as isize,
+                    )));
                 }
                 v.push(new_instr(InstructionType::Mov {
                     src: eax,

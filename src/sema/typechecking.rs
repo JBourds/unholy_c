@@ -844,6 +844,7 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
             expr: expr.clone(),
             r#type: ast::Type {
                 base: ast::BaseType::from(constant),
+                alignment: ast::BaseType::from(constant).default_alignment(),
                 ptr: None,
                 storage: None,
                 is_const: true,

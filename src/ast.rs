@@ -1,7 +1,10 @@
 use crate::lexer::{ConstantSuffix, Token};
 
 use anyhow::{bail, ensure, Context, Error, Result};
-use std::{num::NonZeroU8, rc::Rc};
+use std::{
+    num::{NonZeroU8, NonZeroUsize},
+    rc::Rc,
+};
 
 pub fn parse(tokens: &[Token]) -> Result<Program> {
     let (prog, _) = Program::consume(tokens)?;
@@ -87,6 +90,7 @@ impl From<&FunDecl> for Type {
             param_types,
         };
         Self {
+            alignment: base.default_alignment(),
             base,
             ptr: None,
             storage: decl.storage_class,
@@ -915,6 +919,18 @@ impl BaseType {
         }
     }
 
+    pub fn default_alignment(&self) -> NonZeroUsize {
+        match self {
+            Self::Int { nbytes, .. } => NonZeroUsize::new(*nbytes).unwrap(),
+            Self::Float(nbytes) => NonZeroUsize::new(*nbytes).unwrap(),
+            Self::Double(nbytes) => NonZeroUsize::new(*nbytes).unwrap(),
+            Self::Char => NonZeroUsize::new(1).unwrap(),
+            Self::Fun { .. } => NonZeroUsize::new(8).unwrap(), // This is for when we have function pointers
+            Self::Struct => todo!(),
+            Self::Void => todo!(),
+        }
+    }
+
     pub fn lift(lhs: Self, rhs: Self) -> Result<(Self, Self)> {
         let left = lhs.default_promote();
         let right = rhs
@@ -1074,6 +1090,7 @@ impl Default for TypePtr {
 #[derive(Debug, PartialEq, Clone)]
 pub struct Type {
     pub base: BaseType,
+    pub alignment: NonZeroUsize,
     pub ptr: Option<TypePtr>,
     pub storage: Option<StorageClass>,
     pub is_const: bool,
@@ -1087,6 +1104,17 @@ impl Type {
     pub fn int() -> Self {
         Self {
             base: BaseType::default(),
+            alignment: NonZeroUsize::new(4).unwrap(),
+            ptr: None,
+            storage: None,
+            is_const: true,
+        }
+    }
+
+    pub fn long() -> Self {
+        Self {
+            base: BaseType::int(8, None),
+            alignment: NonZeroUsize::new(8).unwrap(),
             ptr: None,
             storage: None,
             is_const: true,
@@ -1286,6 +1314,7 @@ impl AstNode for Type {
         if let Some(base) = base {
             Ok((
                 Self {
+                    alignment: base.default_alignment(),
                     base,
                     ptr,
                     storage,
@@ -1382,24 +1411,8 @@ impl Constant {
 
     pub fn get_type(&self) -> Type {
         match self {
-            Self::Int(..) => Type {
-                base: BaseType::Int {
-                    nbytes: 4,
-                    signed: None,
-                },
-                ptr: None,
-                storage: None,
-                is_const: true,
-            },
-            Self::Long(..) => Type {
-                base: BaseType::Int {
-                    nbytes: 8,
-                    signed: None,
-                },
-                ptr: None,
-                storage: None,
-                is_const: true,
-            },
+            Self::Int(..) => Type::int(),
+            Self::Long(..) => Type::long(),
         }
     }
 }

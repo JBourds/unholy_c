@@ -159,7 +159,7 @@ impl Function {
         }
 
         for instr in fun_instructions.into_iter() {
-            instructions.extend(Vec::<Instruction<Initial>>::from(instr));
+            instructions.extend(Instruction::<Initial>::from_tacky(instr, symbols));
         }
 
         // Get stack offsets for each pseudoregister as we fix them up
@@ -712,8 +712,8 @@ impl From<Instruction<WithStorage>> for Vec<Instruction<Final>> {
     }
 }
 
-impl From<tacky::Instruction> for Vec<Instruction<Initial>> {
-    fn from(instruction: tacky::Instruction) -> Vec<Instruction<Initial>> {
+impl Instruction<Initial> {
+    fn from_tacky(instruction: tacky::Instruction, symbols: &tacky::SymbolTable) -> Vec<Self> {
         let new_instr = |op| Instruction::<Initial> {
             op,
             phantom: PhantomData::<Initial>,
@@ -734,7 +734,7 @@ impl From<tacky::Instruction> for Vec<Instruction<Initial>> {
             tacky::Instruction::Truncate { src, dst } => todo!(),
             tacky::Instruction::Return(Some(val)) => vec![
                 new_instr(InstructionType::Mov {
-                    src: Operand::from(val),
+                    src: Operand::from_tacky(val, symbols),
                     dst: eax,
                 }),
                 new_instr(InstructionType::Ret),
@@ -743,18 +743,18 @@ impl From<tacky::Instruction> for Vec<Instruction<Initial>> {
                 tacky::UnaryOp::Not => vec![
                     new_instr(InstructionType::Cmp {
                         src: Operand::Imm(ast::Constant::Int(0)),
-                        dst: src.into(),
+                        dst: Operand::from_tacky(src, symbols),
                     }),
                     new_instr(InstructionType::Mov {
                         src: Operand::Imm(ast::Constant::Int(0)),
-                        dst: dst.clone().into(),
+                        dst: Operand::from_tacky(dst.clone(), symbols),
                     }),
                     new_instr(InstructionType::SetCC {
                         cond_code: CondCode::E,
                         dst: {
                             // FIXME: Since SetCC takes a byte value we must manually
                             // fixup the stack location size
-                            let dst: Operand = dst.into();
+                            let dst: Operand = Operand::from_tacky(dst, symbols);
                             match dst {
                                 Operand::Pseudo { name, .. } => Operand::Pseudo { name, size: 1 },
                                 _ => dst,
@@ -764,12 +764,12 @@ impl From<tacky::Instruction> for Vec<Instruction<Initial>> {
                 ],
                 _ => vec![
                     new_instr(InstructionType::Mov {
-                        src: src.into(),
-                        dst: dst.clone().into(),
+                        src: Operand::from_tacky(src, symbols),
+                        dst: Operand::from_tacky(dst.clone(), symbols),
                     }),
                     new_instr(InstructionType::Unary {
                         op: op.into(),
-                        dst: dst.into(),
+                        dst: Operand::from_tacky(dst, symbols),
                     }),
                 ],
             },
@@ -786,60 +786,60 @@ impl From<tacky::Instruction> for Vec<Instruction<Initial>> {
                 | tacky::BinaryOp::Xor => {
                     vec![
                         new_instr(InstructionType::Mov {
-                            src: src1.into(),
-                            dst: dst.clone().into(),
+                            src: Operand::from_tacky(src1, symbols),
+                            dst: Operand::from_tacky(dst.clone(), symbols),
                         }),
                         new_instr(InstructionType::Binary {
                             op: op.into(),
-                            src: src2.into(),
-                            dst: dst.into(),
+                            src: Operand::from_tacky(src2, symbols),
+                            dst: Operand::from_tacky(dst, symbols),
                         }),
                     ]
                 }
                 tacky::BinaryOp::Multiply => {
                     vec![
                         new_instr(InstructionType::Mov {
-                            src: src2.into(),
+                            src: Operand::from_tacky(src2, symbols),
                             dst: r11.clone(),
                         }),
                         new_instr(InstructionType::Binary {
                             op: BinaryOp::Multiply,
-                            src: src1.into(),
+                            src: Operand::from_tacky(src1, symbols),
                             dst: r11.clone(),
                         }),
                         new_instr(InstructionType::Mov {
                             src: r11,
-                            dst: dst.into(),
+                            dst: Operand::from_tacky(dst, symbols),
                         }),
                     ]
                 }
                 tacky::BinaryOp::Divide => {
                     vec![
                         new_instr(InstructionType::Mov {
-                            src: src1.into(),
+                            src: Operand::from_tacky(src1, symbols),
                             dst: eax.clone(),
                         }),
                         new_instr(InstructionType::Cdq),
-                        new_instr(InstructionType::Idiv(src2.into())),
+                        new_instr(InstructionType::Idiv(Operand::from_tacky(src2, symbols))),
                         new_instr(InstructionType::Mov {
                             src: eax,
-                            dst: dst.into(),
+                            dst: Operand::from_tacky(dst, symbols),
                         }),
                     ]
                 }
                 tacky::BinaryOp::Remainder => vec![
                     new_instr(InstructionType::Mov {
-                        src: src1.into(),
+                        src: Operand::from_tacky(src1, symbols),
                         dst: eax,
                     }),
                     new_instr(InstructionType::Cdq),
-                    new_instr(InstructionType::Idiv(src2.into())),
+                    new_instr(InstructionType::Idiv(Operand::from_tacky(src2, symbols))),
                     new_instr(InstructionType::Mov {
                         src: Operand::Reg(Reg::X86 {
                             reg: X86Reg::Dx,
                             section: RegSection::Dword,
                         }),
-                        dst: dst.into(),
+                        dst: Operand::from_tacky(dst, symbols),
                     }),
                 ],
                 op @ tacky::BinaryOp::LShift | op @ tacky::BinaryOp::RShift => {
@@ -852,20 +852,20 @@ impl From<tacky::Instruction> for Vec<Instruction<Initial>> {
                                 section: RegSection::LowByte,
                             });
                             v.push(new_instr(InstructionType::Mov {
-                                src: src2.into(),
+                                src: Operand::from_tacky(src2, symbols),
                                 dst: cl_reg.clone(),
                             }));
                             cl_reg
                         }
                     };
                     v.push(new_instr(InstructionType::Mov {
-                        src: src1.into(),
-                        dst: dst.clone().into(),
+                        src: Operand::from_tacky(src1, symbols),
+                        dst: Operand::from_tacky(dst.clone(), symbols),
                     }));
                     v.push(new_instr(InstructionType::Binary {
                         op: op.into(),
                         src,
-                        dst: dst.into(),
+                        dst: Operand::from_tacky(dst, symbols),
                     }));
                     v
                 }
@@ -876,19 +876,19 @@ impl From<tacky::Instruction> for Vec<Instruction<Initial>> {
                 | tacky::BinaryOp::GreaterThan
                 | tacky::BinaryOp::GreaterOrEqual => vec![
                     new_instr(InstructionType::Cmp {
-                        src: src2.into(),
-                        dst: src1.into(),
+                        src: Operand::from_tacky(src2, symbols),
+                        dst: Operand::from_tacky(src1, symbols),
                     }),
                     new_instr(InstructionType::Mov {
                         src: Operand::Imm(ast::Constant::Int(0)),
-                        dst: dst.clone().into(),
+                        dst: Operand::from_tacky(dst.clone(), symbols),
                     }),
                     new_instr(InstructionType::SetCC {
                         cond_code: op.into(),
                         dst: {
                             // FIXME: Since SetCC takes a byte value we must manually
                             // fixup the stack location size
-                            let dst: Operand = dst.into();
+                            let dst: Operand = Operand::from_tacky(dst, symbols);
                             match dst {
                                 Operand::Pseudo { name, .. } => Operand::Pseudo { name, size: 1 },
                                 _ => dst,
@@ -901,7 +901,7 @@ impl From<tacky::Instruction> for Vec<Instruction<Initial>> {
             tacky::Instruction::JumpIfZero { condition, target } => vec![
                 new_instr(InstructionType::Cmp {
                     src: Operand::Imm(ast::Constant::Int(0)),
-                    dst: condition.into(),
+                    dst: Operand::from_tacky(condition, symbols),
                 }),
                 new_instr(InstructionType::JmpCC {
                     cond_code: CondCode::E,
@@ -911,7 +911,7 @@ impl From<tacky::Instruction> for Vec<Instruction<Initial>> {
             tacky::Instruction::JumpIfNotZero { condition, target } => vec![
                 new_instr(InstructionType::Cmp {
                     src: Operand::Imm(ast::Constant::Int(0)),
-                    dst: condition.into(),
+                    dst: Operand::from_tacky(condition, symbols),
                 }),
                 new_instr(InstructionType::JmpCC {
                     cond_code: CondCode::NE,
@@ -922,8 +922,8 @@ impl From<tacky::Instruction> for Vec<Instruction<Initial>> {
                 vec![new_instr(InstructionType::Jmp(label))]
             }
             tacky::Instruction::Copy { src, dst } => vec![new_instr(InstructionType::Mov {
-                src: src.into(),
-                dst: dst.into(),
+                src: Operand::from_tacky(src, symbols),
+                dst: Operand::from_tacky(dst, symbols),
             })],
             tacky::Instruction::Label(label) => {
                 vec![new_instr(InstructionType::Label(label))]
@@ -950,13 +950,13 @@ impl From<tacky::Instruction> for Vec<Instruction<Initial>> {
                 for (dst_reg, src_arg) in std::iter::zip(SYSTEM_V_REGS.iter(), reg_args.into_iter())
                 {
                     v.push(new_instr(InstructionType::Mov {
-                        src: src_arg.into(),
+                        src: Operand::from_tacky(src_arg, symbols),
                         dst: dst_reg.clone(),
                     }));
                 }
 
                 for arg in stack_args.into_iter().rev() {
-                    match arg.into() {
+                    match Operand::from_tacky(arg, symbols) {
                         Operand::Imm(i) => {
                             v.push(new_instr(InstructionType::Push(Operand::Imm(i))))
                         }
@@ -989,7 +989,7 @@ impl From<tacky::Instruction> for Vec<Instruction<Initial>> {
                 }
                 v.push(new_instr(InstructionType::Mov {
                     src: eax,
-                    dst: dst.into(),
+                    dst: Operand::from_tacky(dst, symbols),
                 }));
                 v
             }
@@ -1017,14 +1017,19 @@ impl Operand {
             Self::Data { size, .. } => *size,
         }
     }
-}
 
-// FIXME: Unhardcode size of 4
-impl From<tacky::Val> for Operand {
-    fn from(val: tacky::Val) -> Self {
+    fn from_tacky(val: tacky::Val, symbols: &tacky::SymbolTable) -> Self {
         match val {
             tacky::Val::Constant(i) => Self::Imm(i),
-            tacky::Val::Var(r) => Self::Pseudo { name: r, size: 4 },
+            tacky::Val::Var(r) => {
+                let symbol = symbols
+                    .get(&r)
+                    .expect("every tacky val is already in the symbol table");
+                Self::Pseudo {
+                    name: r,
+                    size: symbol.r#type.size_of(),
+                }
+            }
         }
     }
 }

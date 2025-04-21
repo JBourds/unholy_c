@@ -1120,6 +1120,13 @@ impl Type {
             is_const: true,
         }
     }
+
+    pub fn size_of(&self) -> usize {
+        match self.ptr {
+            Some(..) => 8, // FIXME: maybe this shouldn't be a magic constant
+            None => self.base.nbytes(),
+        }
+    }
 }
 
 impl AstNode for Type {

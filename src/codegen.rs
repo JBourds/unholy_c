@@ -127,11 +127,14 @@ impl Function {
         for (src_reg, dst_arg) in
             std::iter::zip(SYSTEM_V_REGS.into_iter(), reg_args.into_iter().flatten())
         {
+            let param_symbol = symbols
+                .get(&dst_arg)
+                .expect("function param should already be in symbol table");
             instructions.push(Instruction::<Initial>::new(InstructionType::Mov {
                 src: src_reg,
                 dst: Operand::Pseudo {
                     name: dst_arg,
-                    size: 4,
+                    size: param_symbol.r#type.size_of(),
                 },
             }));
         }
@@ -140,12 +143,18 @@ impl Function {
         let mut stack_bound = 8;
         for arg in stack_args.into_iter().flatten() {
             stack_bound += 8;
+            let arg_symbol = symbols
+                .get(&arg)
+                .expect("function param should already be in symbol table");
             instructions.push(Instruction::<Initial>::new(InstructionType::Mov {
                 src: Operand::StackOffset {
                     offset: stack_bound,
-                    size: 4,
+                    size: arg_symbol.r#type.size_of(),
                 },
-                dst: Operand::Pseudo { name: arg, size: 4 },
+                dst: Operand::Pseudo {
+                    name: arg,
+                    size: arg_symbol.r#type.size_of(),
+                },
             }));
         }
 

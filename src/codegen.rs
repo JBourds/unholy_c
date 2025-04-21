@@ -470,6 +470,10 @@ pub enum InstructionType {
         src: Operand,
         dst: Operand,
     },
+    Movsx {
+        src: Operand,
+        dst: Operand,
+    },
     Unary {
         op: UnaryOp,
         dst: Operand,

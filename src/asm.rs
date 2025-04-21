@@ -110,6 +110,7 @@ pub mod x64 {
                     get_specifier(Some(&src), &dst)
                 ))?;
             }
+            codegen::InstructionType::Movsx { src, dst } => todo!(),
             codegen::InstructionType::Ret => {
                 w.write_str("\tmov rsp, rbp\n")?;
                 w.write_str("\tpop rbp\n")?;

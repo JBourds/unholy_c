@@ -1,3 +1,5 @@
+use anyhow::{anyhow, bail, Result};
+
 use crate::{ast, sema, tacky};
 use std::collections::HashMap;
 use std::fmt;
@@ -307,6 +309,17 @@ impl RegSection {
             RegSection::Word => 2,
             RegSection::Dword => 4,
             RegSection::Qword => 8,
+        }
+    }
+
+    pub fn from_size(size: usize) -> Result<Self> {
+        match size {
+            _ if Self::LowByte.size() == size => Ok(Self::LowByte),
+            _ if Self::HighByte.size() == size => Ok(Self::HighByte),
+            _ if Self::Word.size() == size => Ok(Self::Word),
+            _ if Self::Dword.size() == size => Ok(Self::Dword),
+            _ if Self::Qword.size() == size => Ok(Self::Qword),
+            _ => bail!("Could not convert size {size} to register"),
         }
     }
 }
@@ -732,13 +745,20 @@ impl Instruction<Initial> {
             }
             tacky::Instruction::SignExtend { src, dst } => todo!(),
             tacky::Instruction::Truncate { src, dst } => todo!(),
-            tacky::Instruction::Return(Some(val)) => vec![
-                new_instr(InstructionType::Mov {
-                    src: Operand::from_tacky(val, symbols),
-                    dst: eax,
-                }),
-                new_instr(InstructionType::Ret),
-            ],
+            tacky::Instruction::Return(Some(val)) => {
+                let src = Operand::from_tacky(val, symbols);
+                vec![
+                    new_instr(InstructionType::Mov {
+                        src: src.clone(),
+                        dst: Operand::Reg(Reg::X86 {
+                            reg: X86Reg::Ax,
+                            section: RegSection::from_size(src.size())
+                                .expect("NOT IMPLEMENTED YET :("),
+                        }),
+                    }),
+                    new_instr(InstructionType::Ret),
+                ]
+            }
             tacky::Instruction::Unary { op, src, dst } => match op {
                 tacky::UnaryOp::Not => vec![
                     new_instr(InstructionType::Cmp {

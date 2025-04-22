@@ -1,4 +1,4 @@
-use anyhow::{anyhow, bail, Result};
+use anyhow::{bail, Result};
 
 use crate::{ast, sema, tacky};
 use std::collections::HashMap;
@@ -6,31 +6,31 @@ use std::fmt;
 use std::marker::PhantomData;
 use std::rc::Rc;
 
-const SYSTEM_V_REGS: [Operand; 6] = [
-    Operand::Reg(Reg::X86 {
+const SYSTEM_V_REGS: [Reg; 6] = [
+    Reg::X86 {
         reg: X86Reg::Di,
         section: RegSection::Dword,
-    }),
-    Operand::Reg(Reg::X86 {
+    },
+    Reg::X86 {
         reg: X86Reg::Si,
         section: RegSection::Dword,
-    }),
-    Operand::Reg(Reg::X86 {
+    },
+    Reg::X86 {
         reg: X86Reg::Dx,
         section: RegSection::Dword,
-    }),
-    Operand::Reg(Reg::X86 {
+    },
+    Reg::X86 {
         reg: X86Reg::Cx,
         section: RegSection::Dword,
-    }),
-    Operand::Reg(Reg::X64 {
+    },
+    Reg::X64 {
         reg: X64Reg::R8,
         section: RegSection::Dword,
-    }),
-    Operand::Reg(Reg::X64 {
+    },
+    Reg::X64 {
         reg: X64Reg::R9,
         section: RegSection::Dword,
-    }),
+    },
 ];
 
 #[derive(Debug, PartialEq)]
@@ -133,7 +133,9 @@ impl Function {
                 .get(&dst_arg)
                 .expect("function param should already be in symbol table");
             instructions.push(Instruction::<Initial>::new(InstructionType::Mov {
-                src: src_reg,
+                src: Operand::Reg(src_reg.as_section(
+                    RegSection::from_size(param_symbol.r#type.size_of()).expect("FIXME"),
+                )),
                 dst: Operand::Pseudo {
                     name: dst_arg,
                     size: param_symbol.r#type.size_of(),
@@ -731,20 +733,23 @@ impl Instruction<Initial> {
             op,
             phantom: PhantomData::<Initial>,
         };
-        let eax = Operand::Reg(Reg::X86 {
-            reg: X86Reg::Ax,
-            section: RegSection::Dword,
-        });
-        let r11 = Operand::Reg(Reg::X64 {
-            reg: X64Reg::R11,
-            section: RegSection::Dword,
-        });
         match instruction {
             tacky::Instruction::Return(None) => {
                 vec![new_instr(InstructionType::Ret)]
             }
-            tacky::Instruction::SignExtend { src, dst } => todo!(),
-            tacky::Instruction::Truncate { src, dst } => todo!(),
+            tacky::Instruction::SignExtend { src, dst } => {
+                vec![new_instr(InstructionType::Movsx {
+                    src: Operand::from_tacky(src, symbols),
+                    dst: Operand::from_tacky(dst, symbols),
+                })]
+            }
+            tacky::Instruction::Truncate { src, dst } => {
+                // dst should have a smaller type here
+                vec![new_instr(InstructionType::Mov {
+                    src: Operand::from_tacky(src, symbols),
+                    dst: Operand::from_tacky(dst, symbols),
+                })]
+            }
             tacky::Instruction::Return(Some(val)) => {
                 let src = Operand::from_tacky(val, symbols);
                 vec![
@@ -774,6 +779,7 @@ impl Instruction<Initial> {
                         dst: {
                             // FIXME: Since SetCC takes a byte value we must manually
                             // fixup the stack location size
+                            // FIXME: This maybe should also edit the symbol table
                             let dst: Operand = Operand::from_tacky(dst, symbols);
                             match dst {
                                 Operand::Pseudo { name, .. } => Operand::Pseudo { name, size: 1 },
@@ -817,6 +823,11 @@ impl Instruction<Initial> {
                     ]
                 }
                 tacky::BinaryOp::Multiply => {
+                    let src1 = Operand::from_tacky(src1, symbols);
+                    let r11 = Operand::Reg(Reg::X64 {
+                        reg: X64Reg::R11,
+                        section: RegSection::from_size(src1.size()).expect("FIXME"),
+                    });
                     vec![
                         new_instr(InstructionType::Mov {
                             src: Operand::from_tacky(src2, symbols),
@@ -824,7 +835,7 @@ impl Instruction<Initial> {
                         }),
                         new_instr(InstructionType::Binary {
                             op: BinaryOp::Multiply,
-                            src: Operand::from_tacky(src1, symbols),
+                            src: src1,
                             dst: r11.clone(),
                         }),
                         new_instr(InstructionType::Mov {
@@ -834,34 +845,48 @@ impl Instruction<Initial> {
                     ]
                 }
                 tacky::BinaryOp::Divide => {
+                    let src1 = Operand::from_tacky(src1, symbols);
+                    let ax = Operand::Reg(Reg::X86 {
+                        reg: X86Reg::Ax,
+                        section: RegSection::from_size(src1.size())
+                            .expect("NOT IMPLEMENTED YET :("),
+                    });
                     vec![
                         new_instr(InstructionType::Mov {
-                            src: Operand::from_tacky(src1, symbols),
-                            dst: eax.clone(),
+                            src: src1,
+                            dst: ax.clone(),
                         }),
                         new_instr(InstructionType::Cdq),
                         new_instr(InstructionType::Idiv(Operand::from_tacky(src2, symbols))),
                         new_instr(InstructionType::Mov {
-                            src: eax,
+                            src: ax,
                             dst: Operand::from_tacky(dst, symbols),
                         }),
                     ]
                 }
-                tacky::BinaryOp::Remainder => vec![
-                    new_instr(InstructionType::Mov {
-                        src: Operand::from_tacky(src1, symbols),
-                        dst: eax,
-                    }),
-                    new_instr(InstructionType::Cdq),
-                    new_instr(InstructionType::Idiv(Operand::from_tacky(src2, symbols))),
-                    new_instr(InstructionType::Mov {
-                        src: Operand::Reg(Reg::X86 {
-                            reg: X86Reg::Dx,
-                            section: RegSection::Dword,
+                tacky::BinaryOp::Remainder => {
+                    let src1 = Operand::from_tacky(src1, symbols);
+                    let ax = Operand::Reg(Reg::X86 {
+                        reg: X86Reg::Ax,
+                        section: RegSection::from_size(src1.size())
+                            .expect("NOT IMPLEMENTED YET :("),
+                    });
+                    let dx = Operand::Reg(Reg::X86 {
+                        reg: X86Reg::Dx,
+                        section: RegSection::from_size(src1.size())
+                            .expect("NOT IMPLEMENTED YET :("),
+                    });
+
+                    vec![
+                        new_instr(InstructionType::Mov { src: src1, dst: ax }),
+                        new_instr(InstructionType::Cdq),
+                        new_instr(InstructionType::Idiv(Operand::from_tacky(src2, symbols))),
+                        new_instr(InstructionType::Mov {
+                            src: dx,
+                            dst: Operand::from_tacky(dst, symbols),
                         }),
-                        dst: Operand::from_tacky(dst, symbols),
-                    }),
-                ],
+                    ]
+                }
                 op @ tacky::BinaryOp::LShift | op @ tacky::BinaryOp::RShift => {
                     let mut v = vec![];
                     let src = match src2 {
@@ -969,9 +994,15 @@ impl Instruction<Initial> {
                 }
                 for (dst_reg, src_arg) in std::iter::zip(SYSTEM_V_REGS.iter(), reg_args.into_iter())
                 {
+                    let src_arg = Operand::from_tacky(src_arg, symbols);
+                    let size = src_arg.size();
                     v.push(new_instr(InstructionType::Mov {
-                        src: Operand::from_tacky(src_arg, symbols),
-                        dst: dst_reg.clone(),
+                        src: src_arg,
+                        dst: Operand::Reg(
+                            dst_reg
+                                .clone()
+                                .as_section(RegSection::from_size(size).expect("FIXME")),
+                        ),
                     }));
                 }
 
@@ -989,13 +1020,25 @@ impl Instruction<Initial> {
                         src @ Operand::StackOffset { .. }
                         | src @ Operand::Pseudo { .. }
                         | src @ Operand::Data { .. } => {
-                            v.extend([
-                                new_instr(InstructionType::Mov {
-                                    src,
-                                    dst: eax.clone(),
-                                }),
-                                new_instr(InstructionType::Push(eax.clone())),
-                            ]);
+                            let size = src.size();
+                            // FIXME: This should really stop being hardcoded
+                            if size == 8 {
+                                v.push(new_instr(InstructionType::Push(src)));
+                            } else {
+                                let ax = Operand::Reg(Reg::X86 {
+                                    reg: X86Reg::Ax,
+                                    section: RegSection::from_size(src.size())
+                                        .expect("NOT IMPLEMENTED YET :("),
+                                });
+
+                                v.extend([
+                                    new_instr(InstructionType::Mov {
+                                        src,
+                                        dst: ax.clone(),
+                                    }),
+                                    new_instr(InstructionType::Push(ax)),
+                                ]);
+                            }
                         }
                     }
                 }
@@ -1007,10 +1050,12 @@ impl Instruction<Initial> {
                         bytes_to_remove as isize,
                     )));
                 }
-                v.push(new_instr(InstructionType::Mov {
-                    src: eax,
-                    dst: Operand::from_tacky(dst, symbols),
-                }));
+                let dst = Operand::from_tacky(dst, symbols);
+                let ax = Operand::Reg(Reg::X86 {
+                    reg: X86Reg::Ax,
+                    section: RegSection::from_size(dst.size()).expect("NOT IMPLEMENTED YET :("),
+                });
+                v.push(new_instr(InstructionType::Mov { src: ax, dst }));
                 v
             }
         }

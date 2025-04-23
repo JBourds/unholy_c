@@ -169,20 +169,15 @@ impl Function {
         // Get stack offsets for each pseudoregister as we fix them up
         // Start moving down for arguments & temp vars used here
         let mut stack_bound = 0;
-        let mut requires_fixup = vec![];
         let mut fixed_instructions: Vec<Instruction<WithStorage>> = instructions
             .drain(..)
-            .enumerate()
-            .map(|(i, instr)| {
-                let (instr, needs_fixing) = Instruction::<WithStorage>::new(
+            .map(|instr| {
+                let instr = Instruction::<WithStorage>::new(
                     instr,
                     symbols,
                     &mut mappings,
                     &mut stack_bound,
                 );
-                if needs_fixing {
-                    requires_fixup.push(i);
-                }
                 instr
             })
             .collect();
@@ -194,21 +189,6 @@ impl Function {
             remainder => 16 - remainder,
         };
         fixed_instructions[2].op = InstructionType::allocate_stack(stack_bound);
-        for i in requires_fixup {
-            let instr = match fixed_instructions[i].op.clone() {
-                InstructionType::Mov { src, dst } => {
-                    let src = match src {
-                        // Don't fixup stack args (+ offset)
-                        Operand::StackOffset { offset, size } if offset < 0 => Operand::StackOffset { offset: offset - stack_bound, size },
-                        op @ Operand::StackOffset { .. } => op,
-                        _ => unreachable!("This applies to args passed on the stack only")
-                    };
-                    InstructionType::Mov { src , dst }
-                },
-                _ => unreachable!("We should only be fixing up mov instructions which are used to allocate this current functions args"),
-            };
-            fixed_instructions[i].op = instr;
-        }
 
         let final_instructions: Vec<Instruction<Final>> = fixed_instructions
             .drain(..)
@@ -530,7 +510,7 @@ pub enum InstructionType {
 }
 
 impl InstructionType {
-    pub fn allocate_stack(bytes: isize) -> Self {
+    pub fn allocate_stack(bytes: usize) -> Self {
         Self::Binary {
             op: BinaryOp::Subtract,
             src: Operand::Imm(ast::Constant::Long(bytes.try_into().expect("i64 == isize"))),
@@ -541,7 +521,7 @@ impl InstructionType {
         }
     }
 
-    pub fn deallocate_stack(bytes: isize) -> Self {
+    pub fn deallocate_stack(bytes: usize) -> Self {
         Self::Binary {
             op: BinaryOp::Add,
             src: Operand::Imm(ast::Constant::Long(bytes.try_into().expect("i64 == isize"))),
@@ -573,13 +553,18 @@ impl Instruction<WithStorage> {
         instruction: Instruction<Initial>,
         symbols: &tacky::SymbolTable,
         mappings: &mut HashMap<Rc<String>, Operand>,
-        stack_bound: &mut isize,
-    ) -> (Self, bool) {
-        let mut needs_fixing = false;
+        stack_bound: &mut usize,
+    ) -> Self {
+        let align_up = |addr: usize, align: usize| -> usize {
+            let remainder = addr % align;
+            if remainder == 0 {
+                addr // addr already aligned
+            } else {
+                addr - remainder + align
+            }
+        };
         let mut convert_operand_offset = |op| match op {
             Operand::Pseudo { ref name, size } => {
-                // TODO: Add calculations for type size in earlier passes and
-                // remove hardcoded "4" here
                 match symbols.get(name) {
                     // 1. Check for static storage
                     Some(entry)
@@ -587,61 +572,55 @@ impl Instruction<WithStorage> {
                     {
                         Operand::Data {
                             name: Rc::clone(name),
-                            size: 4,
+                            size: entry.r#type.size_of(),
                         }
                     }
                     // 2. If it is not static, put it on the stack
                     _ => mappings
                         .entry(Rc::clone(name))
                         .or_insert_with(|| {
-                            *stack_bound += size as isize;
+                            *stack_bound = align_up(*stack_bound, size);
+                            *stack_bound += size;
                             Operand::StackOffset {
-                                offset: -*stack_bound,
+                                offset: -(*stack_bound as isize),
                                 size,
                             }
                         })
                         .clone(),
                 }
             }
-            op @ Operand::StackOffset { .. } => {
-                needs_fixing = true;
-                op
-            }
             _ => op,
         };
 
-        (
-            Self {
-                op: match instruction.op {
-                    InstructionType::Mov { src, dst } => InstructionType::Mov {
-                        src: convert_operand_offset(src),
-                        dst: convert_operand_offset(dst),
-                    },
-                    InstructionType::Unary { op, dst } => InstructionType::Unary {
-                        op,
-                        dst: convert_operand_offset(dst),
-                    },
-                    InstructionType::Binary { op, src, dst } => InstructionType::Binary {
-                        op,
-                        src: convert_operand_offset(src),
-                        dst: convert_operand_offset(dst),
-                    },
-                    InstructionType::Idiv(op) => InstructionType::Idiv(convert_operand_offset(op)),
-                    InstructionType::Cmp { src, dst } => InstructionType::Cmp {
-                        src: convert_operand_offset(src),
-                        dst: convert_operand_offset(dst),
-                    },
-                    InstructionType::SetCC { cond_code, dst } => InstructionType::SetCC {
-                        cond_code,
-                        dst: convert_operand_offset(dst),
-                    },
-                    InstructionType::Push(op) => InstructionType::Push(convert_operand_offset(op)),
-                    instr => instr,
+        Self {
+            op: match instruction.op {
+                InstructionType::Mov { src, dst } => InstructionType::Mov {
+                    src: convert_operand_offset(src),
+                    dst: convert_operand_offset(dst),
                 },
-                phantom: PhantomData::<WithStorage>,
+                InstructionType::Unary { op, dst } => InstructionType::Unary {
+                    op,
+                    dst: convert_operand_offset(dst),
+                },
+                InstructionType::Binary { op, src, dst } => InstructionType::Binary {
+                    op,
+                    src: convert_operand_offset(src),
+                    dst: convert_operand_offset(dst),
+                },
+                InstructionType::Idiv(op) => InstructionType::Idiv(convert_operand_offset(op)),
+                InstructionType::Cmp { src, dst } => InstructionType::Cmp {
+                    src: convert_operand_offset(src),
+                    dst: convert_operand_offset(dst),
+                },
+                InstructionType::SetCC { cond_code, dst } => InstructionType::SetCC {
+                    cond_code,
+                    dst: convert_operand_offset(dst),
+                },
+                InstructionType::Push(op) => InstructionType::Push(convert_operand_offset(op)),
+                instr => instr,
             },
-            needs_fixing,
-        )
+            phantom: PhantomData::<WithStorage>,
+        }
     }
 }
 
@@ -1047,7 +1026,7 @@ impl Instruction<Initial> {
                 let bytes_to_remove = 8 * num_stack_args + stack_padding as usize;
                 if bytes_to_remove != 0 {
                     v.push(new_instr(InstructionType::deallocate_stack(
-                        bytes_to_remove as isize,
+                        bytes_to_remove,
                     )));
                 }
                 let dst = Operand::from_tacky(dst, symbols);

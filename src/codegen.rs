@@ -598,6 +598,10 @@ impl Instruction<WithStorage> {
                     src: convert_operand_offset(src),
                     dst: convert_operand_offset(dst),
                 },
+                InstructionType::Movsx { src, dst } => InstructionType::Movsx {
+                    src: convert_operand_offset(src),
+                    dst: convert_operand_offset(dst),
+                },
                 InstructionType::Unary { op, dst } => InstructionType::Unary {
                     op,
                     dst: convert_operand_offset(dst),

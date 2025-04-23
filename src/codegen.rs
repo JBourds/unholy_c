@@ -636,35 +636,74 @@ impl From<Instruction<WithStorage>> for Vec<Instruction<Final>> {
             phantom: PhantomData::<Final>,
         };
 
-        let r10 = Operand::Reg(Reg::X64 {
-            reg: X64Reg::R10,
-            section: RegSection::Dword,
-        });
-        let r11 = Operand::Reg(Reg::X64 {
-            reg: X64Reg::R11,
-            section: RegSection::Dword,
-        });
         match instr.op {
             InstructionType::Mov {
                 src: src @ Operand::StackOffset { .. } | src @ Operand::Data { .. },
                 dst: dst @ Operand::StackOffset { .. } | dst @ Operand::Data { .. },
             } => {
+                let r10 = Operand::Reg(Reg::X64 {
+                    reg: X64Reg::R10,
+                    section: RegSection::from_size(dst.size()).expect("FIXME"),
+                });
                 vec![
                     new_instr(InstructionType::Mov {
                         src,
                         dst: r10.clone(),
                     }),
-                    new_instr(InstructionType::Mov {
-                        src: r10.clone(),
-                        dst,
-                    }),
+                    new_instr(InstructionType::Mov { src: r10, dst }),
                 ]
+            }
+            InstructionType::Movsx { src, dst } => {
+                let (src, src_instrs) = match src {
+                    src @ Operand::Imm(..) => {
+                        let r10 = Operand::Reg(Reg::X64 {
+                            reg: X64Reg::R10,
+                            section: RegSection::from_size(src.size()).expect("FIXME"),
+                        });
+
+                        let instrs = vec![new_instr(InstructionType::Mov {
+                            src,
+                            dst: r10.clone(),
+                        })];
+                        (r10, instrs)
+                    }
+                    src => (src, vec![]),
+                };
+
+                let (dst, dst_instrs) = match dst {
+                    dst @ Operand::StackOffset { .. } | dst @ Operand::Data { .. } => {
+                        let r11 = Operand::Reg(Reg::X64 {
+                            reg: X64Reg::R11,
+                            section: RegSection::from_size(dst.size()).expect("FIXME"),
+                        });
+
+                        let instrs = vec![new_instr(InstructionType::Mov {
+                            src: r11.clone(),
+                            dst,
+                        })];
+                        (r11, instrs)
+                    }
+                    dst => (dst, vec![]),
+                };
+
+                let mut instrs = vec![];
+                instrs.extend(src_instrs);
+
+                instrs.push(new_instr(InstructionType::Movsx { src, dst }));
+
+                instrs.extend(dst_instrs);
+
+                instrs
             }
             InstructionType::Binary {
                 op,
                 src: src @ Operand::StackOffset { .. } | src @ Operand::Data { .. },
                 dst: dst @ Operand::StackOffset { .. } | dst @ Operand::Data { .. },
             } => {
+                let r10 = Operand::Reg(Reg::X64 {
+                    reg: X64Reg::R10,
+                    section: RegSection::from_size(dst.size()).expect("FIXME"),
+                });
                 vec![
                     new_instr(InstructionType::Mov {
                         src,
@@ -673,17 +712,27 @@ impl From<Instruction<WithStorage>> for Vec<Instruction<Final>> {
                     new_instr(InstructionType::Binary { op, src: r10, dst }),
                 ]
             }
-            InstructionType::Idiv(src @ Operand::Imm(_)) => vec![
-                new_instr(InstructionType::Mov {
-                    src,
-                    dst: r10.clone(),
-                }),
-                new_instr(InstructionType::Idiv(r10)),
-            ],
+            InstructionType::Idiv(src @ Operand::Imm(_)) => {
+                let r10 = Operand::Reg(Reg::X64 {
+                    reg: X64Reg::R10,
+                    section: RegSection::from_size(src.size()).expect("FIXME"),
+                });
+                vec![
+                    new_instr(InstructionType::Mov {
+                        src,
+                        dst: r10.clone(),
+                    }),
+                    new_instr(InstructionType::Idiv(r10)),
+                ]
+            }
             InstructionType::Cmp {
                 src: src @ Operand::StackOffset { .. } | src @ Operand::Data { .. },
                 dst: dst @ Operand::StackOffset { .. } | dst @ Operand::Data { .. },
             } => {
+                let r11 = Operand::Reg(Reg::X64 {
+                    reg: X64Reg::R11,
+                    section: RegSection::from_size(dst.size()).expect("FIXME"),
+                });
                 vec![
                     new_instr(InstructionType::Mov {
                         src,
@@ -696,6 +745,10 @@ impl From<Instruction<WithStorage>> for Vec<Instruction<Final>> {
                 src,
                 dst: imm @ Operand::Imm(_),
             } => {
+                let r10 = Operand::Reg(Reg::X64 {
+                    reg: X64Reg::R10,
+                    section: RegSection::from_size(imm.size()).expect("FIXME"),
+                });
                 vec![
                     new_instr(InstructionType::Mov {
                         src: imm,

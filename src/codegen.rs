@@ -61,9 +61,10 @@ impl From<tacky::StaticVariable> for StaticVariable {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug)]
 pub struct Program {
     pub top_level: Vec<TopLevel>,
+    pub symbols: tacky::SymbolTable,
 }
 
 impl From<tacky::Program> for Program {
@@ -77,7 +78,10 @@ impl From<tacky::Program> for Program {
                 tacky::TopLevel::Static(s) => top_level.push(TopLevel::Static(s.into())),
             }
         }
-        Program { top_level }
+        Program {
+            top_level,
+            symbols: prog.symbols,
+        }
     }
 }
 

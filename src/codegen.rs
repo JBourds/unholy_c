@@ -1266,11 +1266,10 @@ pub enum Operand {
     Data { name: Rc<String>, size: usize },
 }
 
-// TODO: Unhardcode immediate size- gets pushed as 8 bytes
 impl Operand {
     pub fn size(&self) -> usize {
         match self {
-            Self::Imm(_) => 8,
+            Self::Imm(c) => c.get_type().size_of(),
             Self::Reg(r) => r.size(),
             Self::Pseudo { size, .. } => *size,
             Self::StackOffset { size, .. } => *size,

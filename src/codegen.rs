@@ -628,15 +628,15 @@ impl Instruction<WithStorage> {
     }
 }
 
-// Final stage of rewriting to follow semantics of assembly instructions
-impl From<Instruction<WithStorage>> for Vec<Instruction<Final>> {
-    fn from(instr: Instruction<WithStorage>) -> Vec<Instruction<Final>> {
-        let new_instr = |op| Instruction::<Final> {
+impl Instruction<WithStorage> {
+    fn from_op(op: InstructionType) -> Self {
+        Self {
             op,
-            phantom: PhantomData::<Final>,
-        };
-
-        match instr.op {
+            phantom: PhantomData::<WithStorage>,
+        }
+    }
+    fn fixup_stack_vars(self) -> Vec<Self> {
+        match self.op {
             InstructionType::Mov {
                 src: src @ Operand::StackOffset { .. } | src @ Operand::Data { .. },
                 dst: dst @ Operand::StackOffset { .. } | dst @ Operand::Data { .. },
@@ -646,11 +646,11 @@ impl From<Instruction<WithStorage>> for Vec<Instruction<Final>> {
                     section: RegSection::from_size(dst.size()).expect("FIXME"),
                 });
                 vec![
-                    new_instr(InstructionType::Mov {
+                    Self::from_op(InstructionType::Mov {
                         src,
                         dst: r10.clone(),
                     }),
-                    new_instr(InstructionType::Mov { src: r10, dst }),
+                    Self::from_op(InstructionType::Mov { src: r10, dst }),
                 ]
             }
             InstructionType::Movsx { src, dst } => {
@@ -661,7 +661,7 @@ impl From<Instruction<WithStorage>> for Vec<Instruction<Final>> {
                             section: RegSection::from_size(src.size()).expect("FIXME"),
                         });
 
-                        let instrs = vec![new_instr(InstructionType::Mov {
+                        let instrs = vec![Self::from_op(InstructionType::Mov {
                             src,
                             dst: r10.clone(),
                         })];
@@ -677,7 +677,7 @@ impl From<Instruction<WithStorage>> for Vec<Instruction<Final>> {
                             section: RegSection::from_size(dst.size()).expect("FIXME"),
                         });
 
-                        let instrs = vec![new_instr(InstructionType::Mov {
+                        let instrs = vec![Self::from_op(InstructionType::Mov {
                             src: r11.clone(),
                             dst,
                         })];
@@ -689,7 +689,7 @@ impl From<Instruction<WithStorage>> for Vec<Instruction<Final>> {
                 let mut instrs = vec![];
                 instrs.extend(src_instrs);
 
-                instrs.push(new_instr(InstructionType::Movsx { src, dst }));
+                instrs.push(Self::from_op(InstructionType::Movsx { src, dst }));
 
                 instrs.extend(dst_instrs);
 
@@ -705,11 +705,11 @@ impl From<Instruction<WithStorage>> for Vec<Instruction<Final>> {
                     section: RegSection::from_size(dst.size()).expect("FIXME"),
                 });
                 vec![
-                    new_instr(InstructionType::Mov {
+                    Self::from_op(InstructionType::Mov {
                         src,
                         dst: r10.clone(),
                     }),
-                    new_instr(InstructionType::Binary { op, src: r10, dst }),
+                    Self::from_op(InstructionType::Binary { op, src: r10, dst }),
                 ]
             }
             InstructionType::Idiv(src @ Operand::Imm(_)) => {
@@ -718,11 +718,11 @@ impl From<Instruction<WithStorage>> for Vec<Instruction<Final>> {
                     section: RegSection::from_size(src.size()).expect("FIXME"),
                 });
                 vec![
-                    new_instr(InstructionType::Mov {
+                    Self::from_op(InstructionType::Mov {
                         src,
                         dst: r10.clone(),
                     }),
-                    new_instr(InstructionType::Idiv(r10)),
+                    Self::from_op(InstructionType::Idiv(r10)),
                 ]
             }
             InstructionType::Cmp {
@@ -734,11 +734,11 @@ impl From<Instruction<WithStorage>> for Vec<Instruction<Final>> {
                     section: RegSection::from_size(dst.size()).expect("FIXME"),
                 });
                 vec![
-                    new_instr(InstructionType::Mov {
+                    Self::from_op(InstructionType::Mov {
                         src,
                         dst: r11.clone(),
                     }),
-                    new_instr(InstructionType::Cmp { src: r11, dst }),
+                    Self::from_op(InstructionType::Cmp { src: r11, dst }),
                 ]
             }
             InstructionType::Cmp {
@@ -750,16 +750,175 @@ impl From<Instruction<WithStorage>> for Vec<Instruction<Final>> {
                     section: RegSection::from_size(imm.size()).expect("FIXME"),
                 });
                 vec![
-                    new_instr(InstructionType::Mov {
+                    Self::from_op(InstructionType::Mov {
                         src: imm,
                         dst: r10.clone(),
                     }),
-                    new_instr(InstructionType::Cmp { src, dst: r10 }),
+                    Self::from_op(InstructionType::Cmp { src, dst: r10 }),
                 ]
             }
 
-            instr => vec![new_instr(instr)],
+            instr => vec![Self::from_op(instr)],
         }
+    }
+
+    fn fixup_immediates(self) -> Vec<Self> {
+        match self.op {
+            InstructionType::Binary {
+                op: BinaryOp::Add,
+                src: src @ Operand::Imm(..),
+                dst,
+            } if src.size() > 4 => {
+                assert!(
+                    !matches!(dst, Operand::Imm(..)),
+                    "The destination of an immediate in addition should have already been resolved"
+                );
+                let r10 = Operand::Reg(Reg::X64 {
+                    reg: X64Reg::R10,
+                    section: RegSection::from_size(src.size()).expect("FIXME"),
+                });
+                vec![
+                    Self::from_op(InstructionType::Mov {
+                        src,
+                        dst: r10.clone(),
+                    }),
+                    Self::from_op(InstructionType::Binary {
+                        op: BinaryOp::Add,
+                        src: r10,
+                        dst,
+                    }),
+                ]
+            }
+            InstructionType::Binary {
+                op: BinaryOp::Subtract,
+                src: src @ Operand::Imm(..),
+                dst,
+            } if src.size() > 4 => {
+                assert!(
+                    !matches!(dst, Operand::Imm(..)),
+                    "The destination of an immediate in addition should have already been resolved"
+                );
+                let r10 = Operand::Reg(Reg::X64 {
+                    reg: X64Reg::R10,
+                    section: RegSection::from_size(src.size()).expect("FIXME"),
+                });
+                vec![
+                    Self::from_op(InstructionType::Mov {
+                        src,
+                        dst: r10.clone(),
+                    }),
+                    Self::from_op(InstructionType::Binary {
+                        op: BinaryOp::Add,
+                        src: r10,
+                        dst,
+                    }),
+                ]
+            }
+            InstructionType::Binary {
+                op: BinaryOp::Multiply,
+                src: src @ Operand::Imm(..),
+                dst,
+            } if src.size() > 4 => {
+                assert!(
+                    !matches!(dst, Operand::Imm(..)),
+                    "The destination of an immediate in addition should have already been resolved"
+                );
+                let r10 = Operand::Reg(Reg::X64 {
+                    reg: X64Reg::R10,
+                    section: RegSection::from_size(src.size()).expect("FIXME"),
+                });
+                vec![
+                    Self::from_op(InstructionType::Mov {
+                        src,
+                        dst: r10.clone(),
+                    }),
+                    Self::from_op(InstructionType::Binary {
+                        op: BinaryOp::Add,
+                        src: r10,
+                        dst,
+                    }),
+                ]
+            }
+            InstructionType::Cmp {
+                src: src @ Operand::Imm(..),
+                dst,
+            } if src.size() > 4 => {
+                assert!(
+                    !matches!(dst, Operand::Imm(..)),
+                    "The destination of an immediate in addition should have already been resolved"
+                );
+                let r10 = Operand::Reg(Reg::X64 {
+                    reg: X64Reg::R10,
+                    section: RegSection::from_size(src.size()).expect("FIXME"),
+                });
+                vec![
+                    Self::from_op(InstructionType::Mov {
+                        src,
+                        dst: r10.clone(),
+                    }),
+                    Self::from_op(InstructionType::Cmp { src: r10, dst }),
+                ]
+            }
+
+            InstructionType::Push(imm @ Operand::Imm(..)) if imm.size() > 4 => {
+                let r10 = Operand::Reg(Reg::X64 {
+                    reg: X64Reg::R10,
+                    section: RegSection::from_size(imm.size()).expect("FIXME"),
+                });
+                vec![
+                    Self::from_op(InstructionType::Mov {
+                        src: imm,
+                        dst: r10.clone(),
+                    }),
+                    Self::from_op(InstructionType::Push(r10)),
+                ]
+            }
+            InstructionType::Mov {
+                src: imm @ Operand::Imm(..),
+                dst: dst @ Operand::Pseudo { .. } | dst @ Operand::Data { .. },
+            } if imm.size() > 4 => {
+                let r10 = Operand::Reg(Reg::X64 {
+                    reg: X64Reg::R10,
+                    section: RegSection::from_size(imm.size()).expect("FIXME"),
+                });
+                vec![
+                    Self::from_op(InstructionType::Mov {
+                        src: imm,
+                        dst: r10.clone(),
+                    }),
+                    Self::from_op(InstructionType::Mov { src: r10, dst }),
+                ]
+            }
+            InstructionType::Mov {
+                src: imm @ Operand::Imm(..),
+                dst,
+            } if dst.size() < imm.size() => {
+                let Operand::Imm(c) = imm else { unreachable!() };
+                // FIXME: Constant should probably provide some way to truncate here
+                let imm = match c {
+                    ast::Constant::Long(i) => Operand::Imm(ast::Constant::Int(i as i32)),
+                    _ => unreachable!(),
+                };
+                vec![Self::from_op(InstructionType::Mov { src: imm, dst })]
+            }
+            op => vec![Self::from_op(op)],
+        }
+    }
+}
+
+// Final stage of rewriting to follow semantics of assembly instructions
+impl From<Instruction<WithStorage>> for Vec<Instruction<Final>> {
+    fn from(instr: Instruction<WithStorage>) -> Vec<Instruction<Final>> {
+        instr
+            .fixup_stack_vars()
+            .into_iter()
+            .map(Instruction::<WithStorage>::fixup_immediates)
+            .flatten()
+            .map(|instr| Instruction::<Final> {
+                op: instr.op,
+                phantom: PhantomData::<Final>,
+            })
+            .collect::<Vec<Instruction<Final>>>()
     }
 }
 

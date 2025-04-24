@@ -10,7 +10,10 @@ pub trait AsmGen<W> {
 
 pub mod x64 {
     use super::AsmGen;
-    use crate::codegen::{self, Operand};
+    use crate::{
+        codegen::{self, Operand},
+        tacky,
+    };
     use anyhow::{bail, Result};
     use std::fmt::Write;
 
@@ -32,8 +35,7 @@ pub mod x64 {
         for entry in program.top_level.into_iter() {
             match entry {
                 codegen::TopLevel::Fun(f) => gen_function(w, f)?,
-                // codegen::TopLevel::Static(v) => gen_static(w, v)?,
-                codegen::TopLevel::Static(_) => unimplemented!(),
+                codegen::TopLevel::Static(v) => gen_static(w, v, &program.symbols)?,
             }
         }
 
@@ -41,28 +43,44 @@ pub mod x64 {
         Ok(())
     }
 
-    // fn gen_static(w: &mut impl Write, var: codegen::StaticVariable) -> Result<()> {
-    //     if var.global {
-    //         w.write_fmt(format_args!("\t.globl {}\n", var.identifier))?;
-    //     }
-    //     let init_value = var.init.unwrap_or(Vec::new());
-    //     if init_value == 0 {
-    //         w.write_fmt(format_args!("\t.bss\n"))?;
-    //     } else {
-    //         w.write_fmt(format_args!("\t.data\n"))?;
-    //     }
-    //     // TODO: Unhardcode 4 here - take symbol info into this pass and calculate alignment
-    //     w.write_fmt(format_args!("\t.align 4\n"))?;
-    //     w.write_fmt(format_args!("{}:\n", var.identifier))?;
-    //     if init_value == 0 {
-    //         w.write_fmt(format_args!("\t.zero {}\n", 4))?;
-    //     } else {
-    //         w.write_fmt(format_args!("\t.long {}\n", init_value))?;
-    //     }
-    //     w.write_char('\n')?;
-    //
-    //     Ok(())
-    // }
+    fn gen_static(
+        w: &mut impl Write,
+        var: codegen::StaticVariable,
+        symbols: &tacky::SymbolTable,
+    ) -> Result<()> {
+        let symbol = symbols.get(&var.identifier).unwrap();
+        if var.global {
+            w.write_fmt(format_args!("\t.globl {}\n", var.identifier))?;
+        }
+        let init_value = var.init.expect("all statics have some init after tacky?");
+        let in_bss = init_value.iter().all(|x| *x == 0);
+        if in_bss {
+            w.write_fmt(format_args!("\t.bss\n"))?;
+        } else {
+            w.write_fmt(format_args!("\t.data\n"))?;
+        }
+        w.write_fmt(format_args!("\t.align {}\n", symbol.r#type.alignment))?;
+        w.write_fmt(format_args!("{}:\n", var.identifier))?;
+        if in_bss {
+            w.write_fmt(format_args!("\t.zero {}\n", symbol.r#type.size_of()))?;
+        } else {
+            // FIXME: This is not how this should be done
+            match symbol.r#type.size_of() {
+                8 => w.write_fmt(format_args!(
+                    "\t.quad {}\n",
+                    i64::from_le_bytes(init_value[0..8].try_into().unwrap())
+                ))?,
+                4 => w.write_fmt(format_args!(
+                    "\t.long {}\n",
+                    i32::from_le_bytes(init_value[0..4].try_into().unwrap())
+                ))?,
+                _ => unreachable!(),
+            }
+        }
+        w.write_char('\n')?;
+
+        Ok(())
+    }
 
     fn gen_function(w: &mut impl Write, function: codegen::Function) -> Result<()> {
         if function.global {
@@ -110,7 +128,12 @@ pub mod x64 {
                     get_specifier(Some(&src), &dst)
                 ))?;
             }
-            codegen::InstructionType::Movsx { src, dst } => todo!(),
+            codegen::InstructionType::Movsx { src, dst } => {
+                w.write_fmt(format_args!(
+                    "\tmovslq {}{dst}, {src}\n",
+                    get_specifier(Some(&src), &dst)
+                ))?;
+            }
             codegen::InstructionType::Ret => {
                 w.write_str("\tmov rsp, rbp\n")?;
                 w.write_str("\tpop rbp\n")?;

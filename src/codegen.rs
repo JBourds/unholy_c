@@ -879,7 +879,7 @@ impl Instruction<WithStorage> {
             }
             InstructionType::Mov {
                 src: imm @ Operand::Imm(..),
-                dst: dst @ Operand::Pseudo { .. } | dst @ Operand::Data { .. },
+                dst: dst @ Operand::StackOffset { .. } | dst @ Operand::Data { .. },
             } if imm.size() > 4 => {
                 let r10 = Operand::Reg(Reg::X64 {
                     reg: X64Reg::R10,

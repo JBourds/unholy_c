@@ -812,7 +812,7 @@ impl Instruction<WithStorage> {
                         dst: r10.clone(),
                     }),
                     Self::from_op(InstructionType::Binary {
-                        op: BinaryOp::Add,
+                        op: BinaryOp::Subtract,
                         src: r10,
                         dst,
                     }),

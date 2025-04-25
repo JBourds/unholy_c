@@ -312,7 +312,7 @@ impl Instruction {
                 mut instructions,
                 val: src,
             } = Expr::parse_with(init, symbols, make_temp_var);
-            let dst = Function::make_tacky_temp_var(decl.typ.clone(), symbols, make_temp_var);
+            let dst = Val::Var(Rc::clone(&decl.name));
             instructions.push(Instruction::Copy {
                 src,
                 dst: dst.clone(),

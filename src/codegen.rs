@@ -495,7 +495,7 @@ pub enum InstructionType {
         dst: Operand,
     },
     Idiv(Operand),
-    Cdq,
+    Cdq(RegSection),
     Jmp(Rc<String>),
     JmpCC {
         cond_code: CondCode,
@@ -1045,17 +1045,18 @@ impl Instruction<Initial> {
                 }
                 tacky::BinaryOp::Divide => {
                     let src1 = Operand::from_tacky(src1, symbols);
+                    let section =
+                        RegSection::from_size(src1.size()).expect("NOT IMPLEMENTED YET :(");
                     let ax = Operand::Reg(Reg::X86 {
                         reg: X86Reg::Ax,
-                        section: RegSection::from_size(src1.size())
-                            .expect("NOT IMPLEMENTED YET :("),
+                        section,
                     });
                     vec![
                         new_instr(InstructionType::Mov {
                             src: src1,
                             dst: ax.clone(),
                         }),
-                        new_instr(InstructionType::Cdq),
+                        new_instr(InstructionType::Cdq(section)),
                         new_instr(InstructionType::Idiv(Operand::from_tacky(src2, symbols))),
                         new_instr(InstructionType::Mov {
                             src: ax,
@@ -1065,10 +1066,11 @@ impl Instruction<Initial> {
                 }
                 tacky::BinaryOp::Remainder => {
                     let src1 = Operand::from_tacky(src1, symbols);
+                    let section =
+                        RegSection::from_size(src1.size()).expect("NOT IMPLEMENTED YET :(");
                     let ax = Operand::Reg(Reg::X86 {
                         reg: X86Reg::Ax,
-                        section: RegSection::from_size(src1.size())
-                            .expect("NOT IMPLEMENTED YET :("),
+                        section,
                     });
                     let dx = Operand::Reg(Reg::X86 {
                         reg: X86Reg::Dx,
@@ -1078,7 +1080,7 @@ impl Instruction<Initial> {
 
                     vec![
                         new_instr(InstructionType::Mov { src: src1, dst: ax }),
-                        new_instr(InstructionType::Cdq),
+                        new_instr(InstructionType::Cdq(section)),
                         new_instr(InstructionType::Idiv(Operand::from_tacky(src2, symbols))),
                         new_instr(InstructionType::Mov {
                             src: dx,

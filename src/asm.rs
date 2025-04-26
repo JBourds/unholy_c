@@ -65,14 +65,15 @@ pub mod x64 {
             w.write_fmt(format_args!("\t.zero {}\n", symbol.r#type.size_of()))?;
         } else {
             // FIXME: This is not how this should be done
-            match symbol.r#type.size_of() {
+            let nbytes = symbol.r#type.size_of();
+            match nbytes {
                 8 => w.write_fmt(format_args!(
                     "\t.quad {}\n",
-                    i64::from_le_bytes(init_value[0..8].try_into().unwrap())
+                    i64::from_le_bytes(init_value[0..nbytes].try_into().unwrap())
                 ))?,
                 4 => w.write_fmt(format_args!(
                     "\t.long {}\n",
-                    i32::from_le_bytes(init_value[0..4].try_into().unwrap())
+                    i32::from_le_bytes(init_value[0..nbytes].try_into().unwrap())
                 ))?,
                 _ => unreachable!(),
             }

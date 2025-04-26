@@ -888,11 +888,6 @@ impl BaseType {
         }
     }
 
-    // Shorthand initializations
-    pub fn bool() -> Self {
-        Self::default()
-    }
-
     pub fn int(nbytes: usize, signed: Option<bool>) -> Self {
         Self::Int { nbytes, signed }
     }
@@ -978,8 +973,14 @@ impl BaseType {
 impl From<&Constant> for BaseType {
     fn from(value: &Constant) -> Self {
         match value {
-            Constant::Int(_) => Self::int(4, None),
-            Constant::Long(_) => Self::int(8, None),
+            Constant::I8(_) => Self::int(core::mem::size_of::<i8>(), None),
+            Constant::I16(_) => Self::int(core::mem::size_of::<i16>(), None),
+            Constant::I32(_) => Self::int(core::mem::size_of::<i32>(), None),
+            Constant::I64(_) => Self::int(core::mem::size_of::<i64>(), None),
+            Constant::U8(_) => Self::int(core::mem::size_of::<u8>(), None),
+            Constant::U16(_) => Self::int(core::mem::size_of::<u16>(), None),
+            Constant::U32(_) => Self::int(core::mem::size_of::<u32>(), None),
+            Constant::U64(_) => Self::int(core::mem::size_of::<u64>(), None),
         }
     }
 }
@@ -1098,23 +1099,13 @@ pub struct Type {
 
 impl Type {
     pub fn bool() -> Self {
-        Self::int()
+        Self::int(4, None)
     }
 
-    pub fn int() -> Self {
+    pub fn int(nbytes: usize, signed: Option<bool>) -> Self {
         Self {
-            base: BaseType::default(),
-            alignment: NonZeroUsize::new(4).unwrap(),
-            ptr: None,
-            storage: None,
-            is_const: true,
-        }
-    }
-
-    pub fn long() -> Self {
-        Self {
-            base: BaseType::int(8, None),
-            alignment: NonZeroUsize::new(8).unwrap(),
+            base: BaseType::int(nbytes, signed),
+            alignment: NonZeroUsize::new(nbytes).unwrap(),
             ptr: None,
             storage: None,
             is_const: true,
@@ -1407,8 +1398,14 @@ impl std::fmt::Display for BaseType {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Constant {
-    Int(i32),
-    Long(i64),
+    I8(i8),
+    I16(i16),
+    I32(i32),
+    I64(i64),
+    U8(u8),
+    U16(u16),
+    U32(u32),
+    U64(u64),
 }
 
 impl Constant {
@@ -1416,10 +1413,27 @@ impl Constant {
         true
     }
 
+    pub fn size_bytes(&self) -> usize {
+        match self {
+            Constant::I8(_) => core::mem::size_of::<i8>(),
+            Constant::I16(_) => core::mem::size_of::<i16>(),
+            Constant::I32(_) => core::mem::size_of::<i32>(),
+            Constant::I64(_) => core::mem::size_of::<i64>(),
+            Constant::U8(_) => core::mem::size_of::<u8>(),
+            Constant::U16(_) => core::mem::size_of::<u16>(),
+            Constant::U32(_) => core::mem::size_of::<u32>(),
+            Constant::U64(_) => core::mem::size_of::<u64>(),
+        }
+    }
+
     pub fn get_type(&self) -> Type {
         match self {
-            Self::Int(..) => Type::int(),
-            Self::Long(..) => Type::long(),
+            Self::U8(_) | Self::U16(_) | Self::U32(_) | Self::U64(_) => {
+                Type::int(self.size_bytes(), Some(true))
+            }
+            Self::I8(_) | Self::I16(_) | Self::I32(_) | Self::I64(_) => {
+                Type::int(self.size_bytes(), Some(true))
+            }
         }
     }
 }
@@ -1427,8 +1441,14 @@ impl Constant {
 impl std::fmt::Display for Constant {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Int(v) => write!(f, "{v}"),
-            Self::Long(v) => write!(f, "{v}"),
+            Constant::I8(v) => write!(f, "{v}"),
+            Constant::I16(v) => write!(f, "{v}"),
+            Constant::I32(v) => write!(f, "{v}"),
+            Constant::I64(v) => write!(f, "{v}"),
+            Constant::U8(v) => write!(f, "{v}"),
+            Constant::U16(v) => write!(f, "{v}"),
+            Constant::U32(v) => write!(f, "{v}"),
+            Constant::U64(v) => write!(f, "{v}"),
         }
     }
 }
@@ -1443,9 +1463,9 @@ impl AstNode for Constant {
                     // Try all our parsing rules out until we get one which
                     // has the necessary precision
                     if let Ok(val) = text.parse::<i32>() {
-                        Ok((Self::Int(val), &tokens[1..]))
+                        Ok((Self::I32(val), &tokens[1..]))
                     } else if let Ok(val) = text.parse::<i64>() {
-                        Ok((Self::Long(val), &tokens[1..]))
+                        Ok((Self::I64(val), &tokens[1..]))
                     } else {
                         bail!("Could not parse interger literal into constant.")
                     }
@@ -1455,7 +1475,7 @@ impl AstNode for Constant {
                     suffix: Some(ConstantSuffix::Long),
                 } => {
                     if let Ok(long) = text.parse::<i64>() {
-                        Ok((Self::Long(long), &tokens[1..]))
+                        Ok((Self::I64(long), &tokens[1..]))
                     } else {
                         bail!("Could not parse token into constant.")
                     }

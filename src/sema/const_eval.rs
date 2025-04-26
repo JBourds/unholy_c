@@ -35,27 +35,77 @@ fn eval_constant(expr: ast::Expr) -> Result<Constant> {
                 eval_constant(*r#else)
             }
         }
+        ast::Expr::Cast { target, exp } => {
+            let exp = eval_constant(*exp)
+                .context("Unable to const-evaluate expression inside of cast.")?;
+            let casted = match target.base {
+                ast::BaseType::Int { nbytes, signed } => match (nbytes, signed) {
+                    (2, None | Some(true)) => Constant::I16(exp.cast::<i16>()),
+                    (2, Some(false)) => Constant::U16(exp.cast::<u16>()),
+                    (4, None | Some(true)) => Constant::I32(exp.cast::<i32>()),
+                    (4, Some(false)) => Constant::U32(exp.cast::<u32>()),
+                    (8, None | Some(true)) => Constant::I64(exp.cast::<i64>()),
+                    (8, Some(false)) => Constant::U64(exp.cast::<u64>()),
+                    _ => unreachable!(),
+                },
+                // FIXME: Should not be hardcoded whether chars are signed or not
+                ast::BaseType::Char => unimplemented!(),
+                ast::BaseType::Float(_) => unimplemented!(),
+                ast::BaseType::Double(_) => unimplemented!(),
+                _ => unreachable!(),
+            };
+            Ok(casted)
+        }
         _ => unimplemented!(),
     }
 }
 
 #[derive(Eq, PartialEq, PartialOrd, Ord)]
 enum Constant {
+    I8(i8),
+    I16(i16),
     I32(i32),
     I64(i64),
+    U8(u8),
+    U16(u16),
+    U32(u32),
+    U64(u64),
 }
 
 impl Constant {
-    // FIXME: Can't name these I32/I64 cause that collides with
-    // the enum member names. But INT and LONG kind of go against
-    // the point of using sized integers as the names.
-    pub const INT: Self = Self::I32(0);
-    pub const LONG: Self = Self::I64(0);
+    pub const _I8: Self = Self::I8(0);
+    pub const _I16: Self = Self::I16(0);
+    pub const _I32: Self = Self::I32(0);
+    pub const _I64: Self = Self::I64(0);
+    pub const _U8: Self = Self::U8(0);
+    pub const _U16: Self = Self::U16(0);
+    pub const _U32: Self = Self::U32(0);
+    pub const _U64: Self = Self::U64(0);
 
-    fn rank(&self) -> u8 {
+    pub fn size_bytes(&self) -> usize {
         match self {
-            Self::I32(..) => 1,
-            Self::I64(..) => 2,
+            Constant::I8(_) => core::mem::size_of::<i8>(),
+            Constant::I16(_) => core::mem::size_of::<i16>(),
+            Constant::I32(_) => core::mem::size_of::<i32>(),
+            Constant::I64(_) => core::mem::size_of::<i64>(),
+            Constant::U8(_) => core::mem::size_of::<u8>(),
+            Constant::U16(_) => core::mem::size_of::<u16>(),
+            Constant::U32(_) => core::mem::size_of::<u32>(),
+            Constant::U64(_) => core::mem::size_of::<u64>(),
+        }
+    }
+
+    fn rank(&self) -> usize {
+        match self {
+            Self::I8(..) => 10 * self.size_bytes(),
+            Self::I16(..) => 20 * self.size_bytes(),
+            Self::I32(..) => 30 * self.size_bytes(),
+            Self::I64(..) => 40 * self.size_bytes(),
+            // Unsigned integers are above signed counterparts
+            Self::U8(..) => 11 * self.size_bytes(),
+            Self::U16(..) => 21 * self.size_bytes(),
+            Self::U32(..) => 31 * self.size_bytes(),
+            Self::U64(..) => 41 * self.size_bytes(),
         }
     }
 
@@ -68,10 +118,10 @@ impl Constant {
     }
 
     fn default_promote(self) -> Self {
-        if self.rank() >= Self::INT.rank() {
+        if self.rank() >= Self::_I32.rank() {
             self
         } else {
-            self.promote(&Self::INT)
+            self.promote(&Self::_I32)
         }
     }
 
@@ -81,8 +131,14 @@ impl Constant {
             return self;
         }
         match rank {
-            _ if (rank == Self::INT.rank()) => Self::I32(self.cast::<i32>()),
-            _ if (rank == Self::LONG.rank()) => Self::I64(self.cast::<i64>()),
+            _ if (rank == Self::_I8.rank()) => Self::I8(self.cast::<i8>()),
+            _ if (rank == Self::_I16.rank()) => Self::I16(self.cast::<i16>()),
+            _ if (rank == Self::_I32.rank()) => Self::I32(self.cast::<i32>()),
+            _ if (rank == Self::_I64.rank()) => Self::I64(self.cast::<i64>()),
+            _ if (rank == Self::_U8.rank()) => Self::U8(self.cast::<u8>()),
+            _ if (rank == Self::_U16.rank()) => Self::U16(self.cast::<u16>()),
+            _ if (rank == Self::_U32.rank()) => Self::U32(self.cast::<u32>()),
+            _ if (rank == Self::_U64.rank()) => Self::U64(self.cast::<u64>()),
             _ => unreachable!(),
         }
     }
@@ -90,19 +146,37 @@ impl Constant {
     fn cast<T>(&self) -> T
     where
         T: Copy + 'static,
+        i8: AsPrimitive<T>,
+        i16: AsPrimitive<T>,
         i32: AsPrimitive<T>,
         i64: AsPrimitive<T>,
+        u8: AsPrimitive<T>,
+        u16: AsPrimitive<T>,
+        u32: AsPrimitive<T>,
+        u64: AsPrimitive<T>,
     {
         match self {
+            Self::I8(num) => num.as_(),
+            Self::I16(num) => num.as_(),
             Self::I32(num) => num.as_(),
             Self::I64(num) => num.as_(),
+            Self::U8(num) => num.as_(),
+            Self::U16(num) => num.as_(),
+            Self::U32(num) => num.as_(),
+            Self::U64(num) => num.as_(),
         }
     }
 
     fn truthy(&self) -> bool {
         match *self {
+            Self::I8(n) => n != 0,
+            Self::I16(n) => n != 0,
             Self::I32(n) => n != 0,
             Self::I64(n) => n != 0,
+            Self::U8(n) => n != 0,
+            Self::U16(n) => n != 0,
+            Self::U32(n) => n != 0,
+            Self::U64(n) => n != 0,
         }
     }
 
@@ -184,8 +258,14 @@ impl std::ops::Not for Constant {
         let val = self.default_promote();
 
         match val {
+            Constant::I8(n) => Constant::I8(n.not()),
+            Constant::I16(n) => Constant::I16(n.not()),
             Constant::I32(n) => Constant::I32(n.not()),
             Constant::I64(n) => Constant::I64(n.not()),
+            Constant::U8(n) => Constant::U8(n.not()),
+            Constant::U16(n) => Constant::U16(n.not()),
+            Constant::U32(n) => Constant::U32(n.not()),
+            Constant::U64(n) => Constant::U64(n.not()),
         }
     }
 }
@@ -197,8 +277,14 @@ impl std::ops::Neg for Constant {
         let val = self.default_promote();
 
         match val {
+            Constant::I8(n) => Constant::I8(n.neg()),
+            Constant::I16(n) => Constant::I16(n.neg()),
             Constant::I32(n) => Constant::I32(n.neg()),
             Constant::I64(n) => Constant::I64(n.neg()),
+            Constant::U8(n) => Constant::U8(u8::MAX - n),
+            Constant::U16(n) => Constant::U16(u16::MAX - n),
+            Constant::U32(n) => Constant::U32(u32::MAX - n),
+            Constant::U64(n) => Constant::U64(u64::MAX - n),
         }
     }
 }
@@ -272,8 +358,14 @@ impl std::ops::Shr for Constant {
 impl From<&Constant> for ast::Constant {
     fn from(value: &Constant) -> Self {
         match *value {
-            Constant::I32(num) => ast::Constant::Int(num),
-            Constant::I64(num) => ast::Constant::Long(num),
+            Constant::I8(num) => ast::Constant::I8(num),
+            Constant::I16(num) => ast::Constant::I16(num),
+            Constant::I32(num) => ast::Constant::I32(num),
+            Constant::I64(num) => ast::Constant::I64(num),
+            Constant::U8(num) => ast::Constant::U8(num),
+            Constant::U16(num) => ast::Constant::U16(num),
+            Constant::U32(num) => ast::Constant::U32(num),
+            Constant::U64(num) => ast::Constant::U64(num),
         }
     }
 }
@@ -283,8 +375,14 @@ impl From<&ast::Constant> for Result<Constant> {
     // have string literals
     fn from(value: &ast::Constant) -> Self {
         match *value {
-            ast::Constant::Int(num) => Ok(Constant::I32(num)),
-            ast::Constant::Long(num) => Ok(Constant::I64(num)),
+            ast::Constant::I8(num) => Ok(Constant::I8(num)),
+            ast::Constant::I16(num) => Ok(Constant::I16(num)),
+            ast::Constant::I32(num) => Ok(Constant::I32(num)),
+            ast::Constant::I64(num) => Ok(Constant::I64(num)),
+            ast::Constant::U8(num) => Ok(Constant::U8(num)),
+            ast::Constant::U16(num) => Ok(Constant::U16(num)),
+            ast::Constant::U32(num) => Ok(Constant::U32(num)),
+            ast::Constant::U64(num) => Ok(Constant::U64(num)),
         }
     }
 }

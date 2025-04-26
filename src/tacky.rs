@@ -190,7 +190,7 @@ impl Function {
         // Temporary fix suggested by the book for the case where a function
         // is supposed to return something but does not.
         instructions.push(Instruction::Return(Some(Val::Constant(
-            ast::Constant::Int(0),
+            ast::Constant::I32(0),
         ))));
 
         let name = Rc::new(name.to_string());
@@ -689,7 +689,7 @@ impl Expr {
                         instructions.push(Instruction::Binary {
                             op: BinaryOp::Add,
                             src1: val.clone(),
-                            src2: Val::Constant(ast::Constant::Int(1)),
+                            src2: Val::Constant(ast::Constant::I32(1)),
                             dst: val.clone(),
                         });
                         val.clone()
@@ -707,7 +707,7 @@ impl Expr {
                         instructions.push(Instruction::Binary {
                             op: BinaryOp::Add,
                             src1: val.clone(),
-                            src2: Val::Constant(ast::Constant::Int(1)),
+                            src2: Val::Constant(ast::Constant::I32(1)),
                             dst: val.clone(),
                         });
                         dst
@@ -716,7 +716,7 @@ impl Expr {
                         instructions.push(Instruction::Binary {
                             op: BinaryOp::Subtract,
                             src1: val.clone(),
-                            src2: Val::Constant(ast::Constant::Int(1)),
+                            src2: Val::Constant(ast::Constant::I32(1)),
                             dst: val.clone(),
                         });
                         val.clone()
@@ -734,7 +734,7 @@ impl Expr {
                         instructions.push(Instruction::Binary {
                             op: BinaryOp::Subtract,
                             src1: val.clone(),
-                            src2: Val::Constant(ast::Constant::Int(1)),
+                            src2: Val::Constant(ast::Constant::I32(1)),
                             dst: val.clone(),
                         });
                         dst
@@ -824,7 +824,7 @@ impl Expr {
 
                     // result = 1
                     instructions.push(Instruction::Copy {
-                        src: Val::Constant(ast::Constant::Int(result_nojmp)),
+                        src: Val::Constant(ast::Constant::I32(result_nojmp)),
                         dst: dst.clone(),
                     });
 
@@ -836,7 +836,7 @@ impl Expr {
 
                     // result = 0
                     instructions.push(Instruction::Copy {
-                        src: Val::Constant(ast::Constant::Int(result_jmp)),
+                        src: Val::Constant(ast::Constant::I32(result_jmp)),
                         dst: dst.clone(),
                     });
 
@@ -1176,13 +1176,13 @@ mod tests {
     fn test_return_literal() {
         let mut symbols = SymbolTable::default();
         let ast = ast::Block(vec![ast::BlockItem::Stmt(ast::Stmt::Return(Some(
-            ast::Expr::Constant(ast::Constant::Int(2)),
+            ast::Expr::Constant(ast::Constant::I32(2)),
         )))]);
         let mut counter = 0;
         let mut make_temp_var = Function::make_temp_var(Rc::new("test".to_string()), &mut counter);
         let actual = Instruction::parse_block_with(ast, &mut symbols, &mut make_temp_var);
         let expected = vec![Instruction::Return(Some(Val::Constant(
-            ast::Constant::Int(2),
+            ast::Constant::I32(2),
         )))];
         assert_eq!(actual, expected);
     }
@@ -1193,7 +1193,7 @@ mod tests {
         let ast = ast::Block(vec![ast::BlockItem::Stmt(ast::Stmt::Return(Some(
             ast::Expr::Unary {
                 op: ast::UnaryOp::Complement,
-                expr: Box::new(ast::Expr::Constant(ast::Constant::Int(2))),
+                expr: Box::new(ast::Expr::Constant(ast::Constant::I32(2))),
             },
         )))]);
         let mut counter = 0;
@@ -1202,7 +1202,7 @@ mod tests {
         let expected = vec![
             Instruction::Unary {
                 op: UnaryOp::Complement,
-                src: Val::Constant(ast::Constant::Int(2)),
+                src: Val::Constant(ast::Constant::I32(2)),
                 dst: Val::Var("tacky.test.0".to_string().into()),
             },
             Instruction::Return(Some(Val::Var("tacky.test.0".to_string().into()))),
@@ -1219,7 +1219,7 @@ mod tests {
                     op: ast::UnaryOp::Complement,
                     expr: Box::new(ast::Expr::Unary {
                         op: ast::UnaryOp::Negate,
-                        expr: Box::new(ast::Expr::Constant(ast::Constant::Int(2))),
+                        expr: Box::new(ast::Expr::Constant(ast::Constant::I32(2))),
                     }),
                 }),
             },
@@ -1230,7 +1230,7 @@ mod tests {
         let expected = vec![
             Instruction::Unary {
                 op: UnaryOp::Negate,
-                src: Val::Constant(ast::Constant::Int(2)),
+                src: Val::Constant(ast::Constant::I32(2)),
                 dst: Val::Var("tacky.test.0".to_string().into()),
             },
             Instruction::Unary {
@@ -1255,16 +1255,16 @@ mod tests {
             op: ast::BinaryOp::Subtract,
             left: Box::new(ast::Expr::Binary {
                 op: ast::BinaryOp::Multiply,
-                left: Box::new(ast::Expr::Constant(ast::Constant::Int(1))),
-                right: Box::new(ast::Expr::Constant(ast::Constant::Int(2))),
+                left: Box::new(ast::Expr::Constant(ast::Constant::I32(1))),
+                right: Box::new(ast::Expr::Constant(ast::Constant::I32(2))),
             }),
             right: Box::new(ast::Expr::Binary {
                 op: ast::BinaryOp::Multiply,
-                left: Box::new(ast::Expr::Constant(ast::Constant::Int(3))),
+                left: Box::new(ast::Expr::Constant(ast::Constant::I32(3))),
                 right: Box::new(ast::Expr::Binary {
                     op: ast::BinaryOp::Add,
-                    left: Box::new(ast::Expr::Constant(ast::Constant::Int(4))),
-                    right: Box::new(ast::Expr::Constant(ast::Constant::Int(5))),
+                    left: Box::new(ast::Expr::Constant(ast::Constant::I32(4))),
+                    right: Box::new(ast::Expr::Constant(ast::Constant::I32(5))),
                 }),
             }),
         };
@@ -1275,19 +1275,19 @@ mod tests {
             instructions: vec![
                 Instruction::Binary {
                     op: BinaryOp::Multiply,
-                    src1: Val::Constant(ast::Constant::Int(1)),
-                    src2: Val::Constant(ast::Constant::Int(2)),
+                    src1: Val::Constant(ast::Constant::I32(1)),
+                    src2: Val::Constant(ast::Constant::I32(2)),
                     dst: Val::Var(Rc::new("tacky.test.0".to_string())),
                 },
                 Instruction::Binary {
                     op: BinaryOp::Add,
-                    src1: Val::Constant(ast::Constant::Int(4)),
-                    src2: Val::Constant(ast::Constant::Int(5)),
+                    src1: Val::Constant(ast::Constant::I32(4)),
+                    src2: Val::Constant(ast::Constant::I32(5)),
                     dst: Val::Var(Rc::new("tacky.test.1".to_string())),
                 },
                 Instruction::Binary {
                     op: BinaryOp::Multiply,
-                    src1: Val::Constant(ast::Constant::Int(3)),
+                    src1: Val::Constant(ast::Constant::I32(3)),
                     src2: Val::Var(Rc::new("tacky.test.1".to_string())),
                     dst: Val::Var(Rc::new("tacky.test.2".to_string())),
                 },

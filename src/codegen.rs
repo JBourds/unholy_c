@@ -517,7 +517,7 @@ impl InstructionType {
     pub fn allocate_stack(bytes: usize) -> Self {
         Self::Binary {
             op: BinaryOp::Subtract,
-            src: Operand::Imm(ast::Constant::Long(bytes.try_into().expect("i64 == isize"))),
+            src: Operand::Imm(ast::Constant::I64(bytes.try_into().expect("i64 == isize"))),
             dst: Operand::Reg(Reg::X86 {
                 reg: X86Reg::Sp,
                 section: RegSection::Qword,
@@ -528,7 +528,7 @@ impl InstructionType {
     pub fn deallocate_stack(bytes: usize) -> Self {
         Self::Binary {
             op: BinaryOp::Add,
-            src: Operand::Imm(ast::Constant::Long(bytes.try_into().expect("i64 == isize"))),
+            src: Operand::Imm(ast::Constant::I64(bytes.try_into().expect("i64 == isize"))),
             dst: Operand::Reg(Reg::X86 {
                 reg: X86Reg::Sp,
                 section: RegSection::Qword,
@@ -900,7 +900,7 @@ impl Instruction<WithStorage> {
                 let Operand::Imm(c) = imm else { unreachable!() };
                 // FIXME: Constant should probably provide some way to truncate here
                 let imm = match c {
-                    ast::Constant::Long(i) => Operand::Imm(ast::Constant::Int(i as i32)),
+                    ast::Constant::I64(i) => Operand::Imm(ast::Constant::I32(i as i32)),
                     _ => unreachable!(),
                 };
                 vec![Self::from_op(InstructionType::Mov { src: imm, dst })]
@@ -916,8 +916,7 @@ impl From<Instruction<WithStorage>> for Vec<Instruction<Final>> {
         instr
             .fixup_stack_vars()
             .into_iter()
-            .map(Instruction::<WithStorage>::fixup_immediates)
-            .flatten()
+            .flat_map(Instruction::<WithStorage>::fixup_immediates)
             .map(|instr| Instruction::<Final> {
                 op: instr.op,
                 phantom: PhantomData::<Final>,
@@ -966,11 +965,11 @@ impl Instruction<Initial> {
             tacky::Instruction::Unary { op, src, dst } => match op {
                 tacky::UnaryOp::Not => vec![
                     new_instr(InstructionType::Cmp {
-                        src: Operand::Imm(ast::Constant::Int(0)),
+                        src: Operand::Imm(ast::Constant::I32(0)),
                         dst: Operand::from_tacky(src, symbols),
                     }),
                     new_instr(InstructionType::Mov {
-                        src: Operand::Imm(ast::Constant::Int(0)),
+                        src: Operand::Imm(ast::Constant::I32(0)),
                         dst: Operand::from_tacky(dst.clone(), symbols),
                     }),
                     new_instr(InstructionType::SetCC {
@@ -1126,7 +1125,7 @@ impl Instruction<Initial> {
                         dst: Operand::from_tacky(src1, symbols),
                     }),
                     new_instr(InstructionType::Mov {
-                        src: Operand::Imm(ast::Constant::Int(0)),
+                        src: Operand::Imm(ast::Constant::I32(0)),
                         dst: Operand::from_tacky(dst.clone(), symbols),
                     }),
                     new_instr(InstructionType::SetCC {
@@ -1146,7 +1145,7 @@ impl Instruction<Initial> {
             },
             tacky::Instruction::JumpIfZero { condition, target } => vec![
                 new_instr(InstructionType::Cmp {
-                    src: Operand::Imm(ast::Constant::Int(0)),
+                    src: Operand::Imm(ast::Constant::I32(0)),
                     dst: Operand::from_tacky(condition, symbols),
                 }),
                 new_instr(InstructionType::JmpCC {
@@ -1156,7 +1155,7 @@ impl Instruction<Initial> {
             ],
             tacky::Instruction::JumpIfNotZero { condition, target } => vec![
                 new_instr(InstructionType::Cmp {
-                    src: Operand::Imm(ast::Constant::Int(0)),
+                    src: Operand::Imm(ast::Constant::I32(0)),
                     dst: Operand::from_tacky(condition, symbols),
                 }),
                 new_instr(InstructionType::JmpCC {

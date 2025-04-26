@@ -135,10 +135,11 @@ impl InitialValue {
     fn from_expr(expr: &ast::Expr) -> Result<Self> {
         let val = const_eval::eval(expr.clone()).context("Failed to const eval expression")?;
         match val {
-            ast::Constant::Int(val) => Ok(InitialValue::Initial(val.to_ne_bytes().to_vec().into())),
-            ast::Constant::Long(val) => {
+            ast::Constant::I32(val) => Ok(InitialValue::Initial(val.to_ne_bytes().to_vec().into())),
+            ast::Constant::I64(val) => {
                 Ok(InitialValue::Initial(val.to_ne_bytes().to_vec().into()))
             }
+            _ => unimplemented!()
         }
     }
 

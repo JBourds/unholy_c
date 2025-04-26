@@ -441,7 +441,7 @@ impl Instruction {
                 let label_break = Rc::new(format!("{label}.break"));
 
                 // <instructions for init>
-                match init {
+                match *init {
                     ast::ForInit::Decl(decl) => {
                         block_instructions.extend(Instruction::parse_var_decl_with(
                             decl,

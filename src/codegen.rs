@@ -1,4 +1,4 @@
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 
 use crate::{ast, sema, tacky};
 use std::collections::HashMap;
@@ -176,13 +176,13 @@ impl Function {
         let mut fixed_instructions: Vec<Instruction<WithStorage>> = instructions
             .drain(..)
             .map(|instr| {
-                let instr = Instruction::<WithStorage>::new(
+                
+                Instruction::<WithStorage>::new(
                     instr,
                     symbols,
                     &mut mappings,
                     &mut stack_bound,
-                );
-                instr
+                )
             })
             .collect();
 
@@ -1199,8 +1199,7 @@ impl Instruction<Initial> {
                     v.push(new_instr(InstructionType::Mov {
                         src: src_arg,
                         dst: Operand::Reg(
-                            dst_reg
-                                .clone()
+                            (*dst_reg)
                                 .as_section(RegSection::from_size(size).expect("FIXME")),
                         ),
                     }));
@@ -1244,7 +1243,7 @@ impl Instruction<Initial> {
                 }
                 v.push(new_instr(InstructionType::Call(name)));
 
-                let bytes_to_remove = 8 * num_stack_args + stack_padding as usize;
+                let bytes_to_remove = 8 * num_stack_args + stack_padding;
                 if bytes_to_remove != 0 {
                     v.push(new_instr(InstructionType::deallocate_stack(
                         bytes_to_remove,

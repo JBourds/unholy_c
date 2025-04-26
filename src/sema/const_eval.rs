@@ -1,6 +1,6 @@
 use crate::ast;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use num::cast::AsPrimitive;
 
 pub fn eval(expr: ast::Expr) -> Result<ast::Constant> {

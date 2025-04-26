@@ -389,7 +389,7 @@ pub enum Stmt {
         label: Option<Rc<String>>,
     },
     For {
-        init: ForInit,
+        init: Box<ForInit>,
         condition: Option<Expr>,
         post: Option<Expr>,
         body: Box<Stmt>,
@@ -534,7 +534,7 @@ impl AstNode for Stmt {
 
                 Ok((
                     Self::For {
-                        init,
+                        init: Box::new(init),
                         condition,
                         post,
                         body: Box::new(body),

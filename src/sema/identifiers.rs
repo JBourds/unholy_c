@@ -289,10 +289,12 @@ fn resolve_stmt(
             label,
         } => {
             let mut new_map = make_new_scope(ident_map);
-            let init = match init {
-                ast::ForInit::Decl(decl) => {
-                    ast::ForInit::Decl(resolve_local_var_decl(decl, &mut new_map, make_temporary)?)
-                }
+            let init = match *init {
+                ast::ForInit::Decl(ref decl) => ast::ForInit::Decl(resolve_local_var_decl(
+                    decl.clone(),
+                    &mut new_map,
+                    make_temporary,
+                )?),
                 ast::ForInit::Expr(Some(expr)) => {
                     ast::ForInit::Expr(Some(resolve_expr(expr, &new_map)?))
                 }
@@ -309,7 +311,7 @@ fn resolve_stmt(
                 None
             };
             Ok(ast::Stmt::For {
-                init,
+                init: Box::new(init),
                 condition,
                 post,
                 body: Box::new(resolve_stmt(*body, &new_map, make_temporary)?),

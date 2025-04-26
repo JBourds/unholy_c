@@ -133,10 +133,12 @@ fn resolve_stmt(
             if switch_context.label_map.contains_key(&const_value) {
                 bail!("Duplicate case statement: {const_value}");
             }
-            ensure!(switch_context
-                .label_map
-                .insert(const_value, Rc::clone(&label))
-                .is_none());
+            ensure!(
+                switch_context
+                    .label_map
+                    .insert(const_value, Rc::clone(&label))
+                    .is_none()
+            );
             let stmt = resolve_stmt(*stmt, switch_context, make_label)?;
             Ok(ast::Stmt::Case {
                 value: ast::Expr::Constant(const_value),

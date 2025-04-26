@@ -650,19 +650,19 @@ fn typecheck_stmt(
             body,
             ..
         } => {
-            match init {
-                ast::ForInit::Decl(decl) => {
+            match **init {
+                ast::ForInit::Decl(ref decl) => {
                     if decl.typ.storage.is_some() {
                         bail!(
                             "For-loop counter var '{}' cannot have storage class specifier",
                             decl.name
                         );
                     }
-                    typecheck_var_decl(decl, symbols)
+                    typecheck_var_decl(&decl, symbols)
                         .map(|_| ())
                         .context("Failed to typecheck for loop initializations.")?;
                 }
-                ast::ForInit::Expr(Some(expr)) => {
+                ast::ForInit::Expr(Some(ref expr)) => {
                     typecheck_expr(expr, symbols)
                         .map(|_| ())
                         .context("Failed to typecheck for loop initialization expression.")?;

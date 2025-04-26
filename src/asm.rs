@@ -158,8 +158,12 @@ pub mod x64 {
                 };
                 w.write_fmt(format_args!("\t{op} {specifier}{dst}, {src}\n",))?
             }
-            codegen::InstructionType::Cdq => {
-                w.write_str("\tcdq\n")?;
+            codegen::InstructionType::Cdq(section) => {
+                match section {
+                    codegen::RegSection::Dword => w.write_str("\tcdq\n")?,
+                    codegen::RegSection::Qword => w.write_str("\tcqo\n")?,
+                    _ => unreachable!(),
+                }
             }
             codegen::InstructionType::Idiv(operand) => w.write_fmt(format_args!(
                 "\tidiv {}{operand}\n",

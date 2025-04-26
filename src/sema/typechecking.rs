@@ -658,7 +658,7 @@ fn typecheck_stmt(
                             decl.name
                         );
                     }
-                    typecheck_var_decl(&decl, symbols)
+                    typecheck_var_decl(decl, symbols)
                         .map(|_| ())
                         .context("Failed to typecheck for loop initializations.")?;
                 }

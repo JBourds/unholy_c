@@ -176,13 +176,7 @@ impl Function {
         let mut fixed_instructions: Vec<Instruction<WithStorage>> = instructions
             .drain(..)
             .map(|instr| {
-                
-                Instruction::<WithStorage>::new(
-                    instr,
-                    symbols,
-                    &mut mappings,
-                    &mut stack_bound,
-                )
+                Instruction::<WithStorage>::new(instr, symbols, &mut mappings, &mut stack_bound)
             })
             .collect();
 
@@ -1199,8 +1193,7 @@ impl Instruction<Initial> {
                     v.push(new_instr(InstructionType::Mov {
                         src: src_arg,
                         dst: Operand::Reg(
-                            (*dst_reg)
-                                .as_section(RegSection::from_size(size).expect("FIXME")),
+                            (*dst_reg).as_section(RegSection::from_size(size).expect("FIXME")),
                         ),
                     }));
                 }

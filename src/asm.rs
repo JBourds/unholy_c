@@ -225,7 +225,7 @@ pub mod x64 {
                 }
             }
             codegen::InstructionType::Call(name) => {
-                w.write_fmt(format_args!("\tcall {name}@PLT\n"))?;
+                w.write_fmt(format_args!("\tcall \"{name}\"@PLT\n"))?;
             }
         }
         Ok(())

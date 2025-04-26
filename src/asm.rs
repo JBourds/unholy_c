@@ -3,7 +3,7 @@ use anyhow::Result;
 use std::fmt::Write;
 
 pub trait AsmGen<W> {
-    fn gen(writer: W, program: codegen::Program) -> Result<()>
+    fn r#gen(writer: W, program: codegen::Program) -> Result<()>
     where
         W: Write;
 }
@@ -14,13 +14,13 @@ pub mod x64 {
         codegen::{self, Operand},
         tacky,
     };
-    use anyhow::{bail, Result};
+    use anyhow::{Result, bail};
     use std::fmt::Write;
 
     pub struct Generator;
 
     impl<W> AsmGen<W> for Generator {
-        fn gen(mut writer: W, program: crate::codegen::Program) -> Result<()>
+        fn r#gen(mut writer: W, program: crate::codegen::Program) -> Result<()>
         where
             W: std::fmt::Write,
         {

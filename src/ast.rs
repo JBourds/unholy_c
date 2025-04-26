@@ -1,6 +1,6 @@
 use crate::lexer::{ConstantSuffix, Token};
 
-use anyhow::{bail, ensure, Context, Error, Result};
+use anyhow::{Context, Error, Result, bail, ensure};
 use std::{
     num::{NonZeroU8, NonZeroUsize},
     rc::Rc,
@@ -776,12 +776,14 @@ impl Factor {
                         match tokens {
                             [Token::Comma, tokens @ ..] => {
                                 remaining = tokens;
-                            },
+                            }
                             [Token::RParen, tokens @ ..] => {
                                 keep_going = false;
                                 remaining = tokens;
-                            },
-                            t => bail!("Expected a \",\" or \")\" in function parameter list but found {t:?}")
+                            }
+                            t => bail!(
+                                "Expected a \",\" or \")\" in function parameter list but found {t:?}"
+                            ),
                         }
                     }
                     Ok((

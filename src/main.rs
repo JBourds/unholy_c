@@ -6,7 +6,7 @@ mod sema;
 mod tacky;
 use std::{ffi::OsStr, io::Write, process::Command};
 
-use anyhow::{anyhow, bail, ensure, Context, Result};
+use anyhow::{Context, Result, anyhow, bail, ensure};
 use clap::Parser;
 
 use asm::AsmGen;
@@ -150,7 +150,7 @@ fn generate_code(args: &Args, tacky: tacky::Program) -> Result<Option<codegen::P
 
 fn generate_asm(args: &Args, codegen: codegen::Program) -> Result<Option<String>> {
     let mut asm_text = String::new();
-    asm::x64::Generator::gen(&mut asm_text, codegen)?;
+    asm::x64::Generator::r#gen(&mut asm_text, codegen)?;
     if args.asm {
         println!("Assembly:\n{}", asm_text);
         Ok(None)

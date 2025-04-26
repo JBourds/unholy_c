@@ -143,11 +143,7 @@ pub mod x64 {
             codegen::InstructionType::Unary { op, dst } => {
                 w.write_fmt(format_args!("\t{op} {}{dst}\n", get_specifier(None, &dst)))?
             }
-            codegen::InstructionType::Binary {
-                op,
-                src,
-                dst,
-            } => {
+            codegen::InstructionType::Binary { op, src, dst } => {
                 // Special case- if we are bitshifting then the "cl" register
                 // can be the src2 operand but says nothing about the size of
                 // the data it points to
@@ -187,9 +183,13 @@ pub mod x64 {
             }
             codegen::InstructionType::SetCC { cond_code, dst } => {
                 let dst = match dst {
-                    codegen::Operand::Reg(r) => codegen::Operand::Reg(r.as_section(codegen::RegSection::LowByte)),
-                    codegen::Operand::StackOffset { offset, .. } => codegen::Operand::StackOffset { offset, size: 1 },
-                    _ => dst
+                    codegen::Operand::Reg(r) => {
+                        codegen::Operand::Reg(r.as_section(codegen::RegSection::LowByte))
+                    }
+                    codegen::Operand::StackOffset { offset, .. } => {
+                        codegen::Operand::StackOffset { offset, size: 1 }
+                    }
+                    _ => dst,
                 };
                 w.write_fmt(format_args!(
                     "\tset{cond_code} {}{dst}\n",
@@ -212,19 +212,20 @@ pub mod x64 {
                 };
                 w.write_fmt(format_args!("\tpush {}{op}\n", get_specifier(None, &op)))?;
             }
-            codegen::InstructionType::Pop(op) => {
-                match op {
-                    codegen::Operand::Reg(_) | codegen::Operand::StackOffset { .. } => {
-                        let op = if let codegen::Operand::Reg(r) = op {
-                            codegen::Operand::Reg(r.as_section(codegen::RegSection::Qword))
-                        } else {
-                            op
-                        };
-                        w.write_fmt(format_args!("\tpop {}{op}\n", get_specifier(None, &op)))?;
-                    }
-                    _ => bail!("Cannot push stack to argument {} which is neither a register nor a memory location.", op)
+            codegen::InstructionType::Pop(op) => match op {
+                codegen::Operand::Reg(_) | codegen::Operand::StackOffset { .. } => {
+                    let op = if let codegen::Operand::Reg(r) = op {
+                        codegen::Operand::Reg(r.as_section(codegen::RegSection::Qword))
+                    } else {
+                        op
+                    };
+                    w.write_fmt(format_args!("\tpop {}{op}\n", get_specifier(None, &op)))?;
                 }
-            }
+                _ => bail!(
+                    "Cannot push stack to argument {} which is neither a register nor a memory location.",
+                    op
+                ),
+            },
             codegen::InstructionType::Call(name) => {
                 w.write_fmt(format_args!("\tcall \"{name}\"@PLT\n"))?;
             }

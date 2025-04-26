@@ -25,7 +25,11 @@ pub enum Attribute {
 }
 
 impl Attribute {
-    fn from_var_with_scope(var: &ast::VarDecl, scope: Scope) -> Result<Self> {
+    fn from_var_with_scope(
+        var: &ast::VarDecl,
+        scope: Scope,
+        symbols: &mut SymbolTable,
+    ) -> Result<Self> {
         if matches!(scope, Scope::Local(..)) && var.typ.storage == Some(ast::StorageClass::Extern) {
             ensure!(
                 var.init.is_none(),
@@ -33,19 +37,27 @@ impl Attribute {
                 var.name
             );
         }
-        let initial_value = if let Some(init_val) = InitialValue::from_var_with_scope(var, scope)? {
+        let initial_value = if let Some(init_val) =
+            InitialValue::from_var_with_scope(var, scope, symbols)?
+        {
             init_val
         } else {
             match scope {
                 Scope::Global => match var.typ.storage {
                     Some(ast::StorageClass::Static) | None => InitialValue::Tentative, // Global non-externals with no initilizer are marked as tentative
                     Some(ast::StorageClass::Extern) => InitialValue::None,
-                    _ => unreachable!("Earlier passes of the compiler should have reduced \"auto\" and \"register\" storage classes to be None")
+                    _ => unreachable!(
+                        "Earlier passes of the compiler should have reduced \"auto\" and \"register\" storage classes to be None"
+                    ),
                 },
                 Scope::Local(..) => match var.typ.storage {
-                    Some(ast::StorageClass::Static) => InitialValue::Initial(vec![0; var.typ.base.nbytes()].into()), // Local Statics with no initilizer get defaulted to zero
+                    Some(ast::StorageClass::Static) => {
+                        InitialValue::Initial(vec![0; var.typ.base.nbytes()].into())
+                    } // Local Statics with no initilizer get defaulted to zero
                     Some(ast::StorageClass::Extern) | None => InitialValue::None,
-                    _ => unreachable!("Earlier passes of the compiler should have reduced \"auto\" and \"register\" storage classes to be None")
+                    _ => unreachable!(
+                        "Earlier passes of the compiler should have reduced \"auto\" and \"register\" storage classes to be None"
+                    ),
                 },
             }
         };
@@ -61,12 +73,16 @@ impl Attribute {
             Scope::Global => match var.typ.storage {
                 Some(ast::StorageClass::Static) => false,
                 Some(ast::StorageClass::Extern) | None => true,
-                _ => unreachable!("Earlier passes of the compiler should have reduced \"auto\" and \"register\" storage classes to be None")
+                _ => unreachable!(
+                    "Earlier passes of the compiler should have reduced \"auto\" and \"register\" storage classes to be None"
+                ),
             },
             Scope::Local(..) => match var.typ.storage {
                 Some(ast::StorageClass::Static) | None => false,
                 Some(ast::StorageClass::Extern) => true,
-                _ => unreachable!("Earlier passes of the compiler should have reduced \"auto\" and \"register\" storage classes to be None")
+                _ => unreachable!(
+                    "Earlier passes of the compiler should have reduced \"auto\" and \"register\" storage classes to be None"
+                ),
             },
         };
 
@@ -82,13 +98,16 @@ impl Attribute {
         }
     }
 
-    fn from_decl_with_scope(decl: &ast::Declaration, scope: Scope) -> Result<Self> {
+    fn from_decl_with_scope(
+        decl: &ast::Declaration,
+        scope: Scope,
+        symbols: &mut SymbolTable,
+    ) -> Result<Self> {
         match decl {
             ast::Declaration::FunDecl(f) => Ok(Self::from_fun(f)),
-            ast::Declaration::VarDecl(v) => Self::from_var_with_scope(v, scope).context(format!(
-                "Failed to process attributes for variable '{}'",
-                v.name
-            )),
+            ast::Declaration::VarDecl(v) => Self::from_var_with_scope(v, scope, symbols).context(
+                format!("Failed to process attributes for variable '{}'", v.name),
+            ),
         }
     }
 
@@ -132,42 +151,60 @@ impl PartialOrd for InitialValue {
 
 impl InitialValue {
     // TODO: Make this not dependent on host computer byte ordering
-    fn from_expr(expr: &ast::Expr) -> Result<Self> {
+    fn from_expr(r#type: &ast::Type, expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<Self> {
+        let expr = try_implicit_cast(r#type, expr, symbols).context(
+            "Failed to perform implicit casting when constructing initial value for declaration",
+        )?;
         let val = const_eval::eval(expr.clone()).context("Failed to const eval expression")?;
         match val {
+            ast::Constant::I8(val) => Ok(InitialValue::Initial(val.to_ne_bytes().to_vec().into())),
+            ast::Constant::I16(val) => Ok(InitialValue::Initial(val.to_ne_bytes().to_vec().into())),
             ast::Constant::I32(val) => Ok(InitialValue::Initial(val.to_ne_bytes().to_vec().into())),
-            ast::Constant::I64(val) => {
-                Ok(InitialValue::Initial(val.to_ne_bytes().to_vec().into()))
-            }
-            _ => unimplemented!()
+            ast::Constant::I64(val) => Ok(InitialValue::Initial(val.to_ne_bytes().to_vec().into())),
+            ast::Constant::U8(val) => Ok(InitialValue::Initial(val.to_ne_bytes().to_vec().into())),
+            ast::Constant::U16(val) => Ok(InitialValue::Initial(val.to_ne_bytes().to_vec().into())),
+            ast::Constant::U32(val) => Ok(InitialValue::Initial(val.to_ne_bytes().to_vec().into())),
+            ast::Constant::U64(val) => Ok(InitialValue::Initial(val.to_ne_bytes().to_vec().into())),
         }
     }
 
-    fn from_var_with_scope(var: &ast::VarDecl, scope: Scope) -> Result<Option<Self>> {
+    fn from_var_with_scope(
+        var: &ast::VarDecl,
+        scope: Scope,
+        symbols: &mut SymbolTable,
+    ) -> Result<Option<Self>> {
         match (scope, var.init.as_ref()) {
             (Scope::Global, Some(expr)) => {
-                let init = Self::from_expr(expr)
+                let init = Self::from_expr(&var.typ, expr, symbols)
                     .context(format!("Evaluating expression for '{}' failed", var.name))?;
                 Ok(Some(init))
             }
             (Scope::Local(..), Some(expr)) => match var.typ.storage {
                 Some(ast::StorageClass::Static) => Ok(Some(
-                    Self::from_expr(expr)
+                    Self::from_expr(&var.typ, expr, symbols)
                         .context(format!("Evaluating expression for '{}' failed", var.name))?,
                 )),
                 None => Ok(None), // Locals technically dont have initial values
                 Some(ast::StorageClass::Extern) => unreachable!(),
-                _ => unreachable!("Earlier passes of the compiler should have reduced \"auto\" and \"register\" storage classes to be None")
+                _ => unreachable!(
+                    "Earlier passes of the compiler should have reduced \"auto\" and \"register\" storage classes to be None"
+                ),
             },
             (Scope::Global, None) => match var.typ.storage {
                 Some(ast::StorageClass::Static) | None => Ok(Some(InitialValue::Tentative)), // Global non-externals with no initilizer are marked as tentative
                 Some(ast::StorageClass::Extern) => Ok(Some(InitialValue::None)),
-                _ => unreachable!("Earlier passes of the compiler should have reduced \"auto\" and \"register\" storage classes to be None")
+                _ => unreachable!(
+                    "Earlier passes of the compiler should have reduced \"auto\" and \"register\" storage classes to be None"
+                ),
             },
             (Scope::Local(..), None) => match var.typ.storage {
-                Some(ast::StorageClass::Static) => Ok(Some(InitialValue::Initial(vec![0; var.typ.base.nbytes()].into()))), // Local Statics with no initilizer get defaulted to zero
+                Some(ast::StorageClass::Static) => Ok(Some(InitialValue::Initial(
+                    vec![0; var.typ.base.nbytes()].into(),
+                ))), // Local Statics with no initilizer get defaulted to zero
                 Some(ast::StorageClass::Extern) | None => Ok(Some(InitialValue::None)),
-                _ => unreachable!("Earlier passes of the compiler should have reduced \"auto\" and \"register\" storage classes to be None")
+                _ => unreachable!(
+                    "Earlier passes of the compiler should have reduced \"auto\" and \"register\" storage classes to be None"
+                ),
             },
         }
     }
@@ -204,12 +241,12 @@ impl SymbolTable {
         }
     }
 
-    fn new_entry(&self, decl: &ast::Declaration, scope: Scope) -> Result<SymbolEntry> {
+    fn new_entry(&mut self, decl: &ast::Declaration, scope: Scope) -> Result<SymbolEntry> {
         Ok(SymbolEntry {
             r#type: decl.into(),
             defined: decl.defining(),
             scope,
-            attribute: Attribute::from_decl_with_scope(decl, scope)?,
+            attribute: Attribute::from_decl_with_scope(decl, scope, self)?,
         })
     }
 
@@ -282,7 +319,9 @@ impl SymbolTable {
                     // ```
                     // are all okay
                 } else if storage_class == Some(ast::StorageClass::Static) {
-                    bail!("Redeclaring function '{name}' as static when it was previously defined with external linkage");
+                    bail!(
+                        "Redeclaring function '{name}' as static when it was previously defined with external linkage"
+                    );
                 }
             }
             Attribute::Static {
@@ -305,7 +344,9 @@ impl SymbolTable {
                             // If we (foo) are declared extern,
                             // then we cannot be redeclared as static
                             if storage_class == Some(ast::StorageClass::Static) {
-                                bail!("Redeclaring variable '{name}' as static when it was previously defined with external linkage");
+                                bail!(
+                                    "Redeclaring variable '{name}' as static when it was previously defined with external linkage"
+                                );
                             }
                         }
                     }
@@ -314,7 +355,9 @@ impl SymbolTable {
                         Some(ast::StorageClass::Static) | None => {
                             bail!("Variable '{name}' declared multiple times in scope")
                         }
-                        _ => unreachable!("Earlier passes of the compiler should have reduced \"auto\" and \"register\" storage classes to be None")
+                        _ => unreachable!(
+                            "Earlier passes of the compiler should have reduced \"auto\" and \"register\" storage classes to be None"
+                        ),
                     },
                 }
             }
@@ -325,13 +368,16 @@ impl SymbolTable {
 
     fn declare_in_scope(&mut self, decl: &ast::Declaration, scope: Scope) -> Result<()> {
         let (name, mut new_type, defining_ident) = Self::get_decl_info(decl);
-        if let Some(SymbolEntry {
-            r#type: old_type,
-            defined: already_defined,
-            scope: old_scope,
-            attribute: old_attrib,
-        }) = self.get(&name)
-        {
+
+        if let Some(entry) = self.get(&name) {
+            // Lazy way to make rust shutup about the immutable borrow
+            // overlapping with the mutable one
+            let SymbolEntry {
+                r#type: old_type,
+                defined: already_defined,
+                scope: old_scope,
+                attribute: old_attrib,
+            } = entry.clone();
             // There is already a declaration for this name, cases include:
             //  1. It is a function:
             //      I)   New declaration matches existing type (OK)
@@ -346,26 +392,30 @@ impl SymbolTable {
             //      II)  New declaration doesn't shadow (ERROR)
             //      III) New declaration storage class conflicts with previous
             //           one (ERROR)
-            if !scope.shadows(old_scope) {
+            if !scope.shadows(&old_scope) {
                 // Cases 1.1 and 2.1
                 if old_type.base != new_type.base {
                     match (&old_type.base, &new_type.base) {
                         // Case 1.2
-                        (ast::BaseType::Fun {..}, ast::BaseType::Fun { param_types, .. }) if param_types.is_empty() => new_type = old_type.clone(),
+                        (ast::BaseType::Fun { .. }, ast::BaseType::Fun { param_types, .. })
+                            if param_types.is_empty() =>
+                        {
+                            new_type = old_type.clone()
+                        }
                         _ => bail!(
                             "Redeclaring '{name}' as {new_type} when it was previously declared as {old_type}"
-                        )
+                        ),
                     }
                 }
-                if *already_defined && defining_ident {
+                if already_defined && defining_ident {
                     bail!("Redefining '{name}' when it is already defined.")
                 }
                 let mut attribute =
-                    Self::check_attribute(old_attrib, &name, new_type.storage, scope)?;
+                    Self::check_attribute(&old_attrib, &name, new_type.storage, scope)?;
                 match decl {
                     ast::Declaration::FunDecl(..) => {}
                     ast::Declaration::VarDecl(var) => {
-                        let new_attribute = Attribute::from_var_with_scope(var, scope)?;
+                        let new_attribute = Attribute::from_var_with_scope(var, scope, self)?;
                         if let (
                             Attribute::Static {
                                 initial_value: old_val,
@@ -391,17 +441,19 @@ impl SymbolTable {
                     name,
                     SymbolEntry {
                         r#type: new_type,
-                        defined: *already_defined || defining_ident,
+                        defined: already_defined || defining_ident,
                         scope,
                         attribute,
                     },
                 );
             } else {
                 // Local variables can shadow (only if not extern), but functions cannot
-                self.insert_scope(name, self.new_entry(decl, scope)?);
+                let entry = self.new_entry(decl, scope)?;
+                self.insert_scope(name, entry);
             }
         } else {
-            self.insert_scope(name, self.new_entry(decl, scope)?);
+            let entry = self.new_entry(decl, scope)?;
+            self.insert_scope(name, entry);
         }
         Ok(())
     }
@@ -440,7 +492,9 @@ impl SymbolTable {
     fn declare_var(&mut self, decl: &ast::VarDecl) -> Result<()> {
         let key = decl.name.clone();
         let storage_class = decl.typ.storage;
+        // Check if the RHS needs a cast to LHS declared typ
         let decl = ast::Declaration::VarDecl(decl.clone());
+
         match storage_class {
             Some(ast::StorageClass::Extern) => self.declare_in_scope(&decl, Scope::Global)?,
             Some(ast::StorageClass::Static)
@@ -673,11 +727,11 @@ fn try_implicit_cast(
         expr: right,
         r#type: right_t,
     } = typecheck_expr(from, symbols)
-        .context("Failed to typecheck from argument of assignment.")?;
+        .context("Failed to typecheck from argument in implicit cast.")?;
     ensure!(
-        right_t.base.can_assign_to(&target.base), 
-        "Incompatible types in assignment. Cannot assign value of type {right_t:#?} to value of type {target:#?}"
-        );
+        right_t.base.can_assign_to(&target.base),
+        "Incompatible types. Cannot assign value of type {right_t:#?} to value of type {target:#?}"
+    );
     if right_t != *target {
         Ok(ast::Expr::Cast {
             target: target.clone(),
@@ -814,45 +868,44 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
             typecheck_expr(then, symbols)?;
             typecheck_expr(r#else, symbols)
         }
-        ast::Expr::FunCall { name, args } => {
-            match symbols.get(name) {
-                Some(SymbolEntry {
-                    r#type:
-                        ast::Type {
-                            base: ast::BaseType::Fun { param_types, ret_t },
-                            ..
-                        },
-                    ..
-                }) => {
-                    if args.len() != param_types.len() {
-                        bail!(
-                            "Expected {} args but received {} when calling \"{name}\".",
-                            param_types.len(),
-                            args.len()
-                        );
-                    }
-                    let ret_t = *ret_t.clone();
-                    // Will need to be uprooted once more sophisticated types
-                    // are added in order to verify arg types match expected
-                    for arg in args.iter() {
-                        typecheck_expr(arg, symbols).context(format!(
-                            "Failed to typecheck function parameter: {arg:#?}."
-                        ))?;
-                    }
-                    Ok(TypedExpr {
-                        expr: ast::Expr::FunCall {
-                            name: Rc::clone(name),
-                            args: args.to_owned(),
-                        },
-                        r#type: ret_t,
-                    })
+        ast::Expr::FunCall { name, args } => match symbols.get(name) {
+            Some(SymbolEntry {
+                r#type:
+                    ast::Type {
+                        base: ast::BaseType::Fun { param_types, ret_t },
+                        ..
+                    },
+                ..
+            }) => {
+                // FIXME: Lazy clones
+                let param_types = param_types.clone();
+                let ret_t = ret_t.clone();
+                if args.len() != param_types.len() {
+                    bail!(
+                        "Expected {} args but received {} when calling \"{name}\".",
+                        param_types.len(),
+                        args.len()
+                    );
                 }
-                Some(SymbolEntry { r#type: t, .. }) => {
-                    bail!("Expected function type, but found type {t}.")
-                }
-                _ => bail!("Could not find symbol with name {name}."),
+                let ret_t = *ret_t.clone();
+                let args = args
+                    .iter()
+                    .zip(param_types.iter())
+                    .map(|(arg, exp_t)| try_implicit_cast(exp_t, arg, symbols))
+                    .collect::<Result<Vec<_>>>()?;
+                Ok(TypedExpr {
+                    expr: ast::Expr::FunCall {
+                        name: Rc::clone(name),
+                        args,
+                    },
+                    r#type: ret_t,
+                })
             }
-        }
+            Some(SymbolEntry { r#type: t, .. }) => {
+                bail!("Expected function type, but found type {t}.")
+            }
+            _ => bail!("Could not find symbol with name {name}."),
+        },
         expr @ ast::Expr::Cast { target, .. } => Ok(TypedExpr {
             expr: expr.clone(),
             r#type: target.clone(),

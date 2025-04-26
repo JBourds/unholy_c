@@ -749,16 +749,16 @@ impl Instruction<WithStorage> {
                 src,
                 dst: imm @ Operand::Imm(_),
             } => {
-                let r10 = Operand::Reg(Reg::X64 {
-                    reg: X64Reg::R10,
+                let r11 = Operand::Reg(Reg::X64 {
+                    reg: X64Reg::R11,
                     section: RegSection::from_size(imm.size()).expect("FIXME"),
                 });
                 vec![
                     Self::from_op(InstructionType::Mov {
                         src: imm,
-                        dst: r10.clone(),
+                        dst: r11.clone(),
                     }),
-                    Self::from_op(InstructionType::Cmp { src, dst: r10 }),
+                    Self::from_op(InstructionType::Cmp { src, dst: r11 }),
                 ]
             }
 

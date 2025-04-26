@@ -663,6 +663,30 @@ fn typecheck_stmt(
     .context(format!("Failed to typecheck statement: {stmt:#?}"))
 }
 
+fn try_implicit_cast(
+    target: &ast::Type,
+    from: &ast::Expr,
+    symbols: &mut SymbolTable,
+) -> Result<ast::Expr> {
+    let TypedExpr {
+        expr: right,
+        r#type: right_t,
+    } = typecheck_expr(from, symbols)
+        .context("Failed to typecheck from argument of assignment.")?;
+    ensure!(
+        right_t.base.can_assign_to(&target.base), 
+        "Incompatible types in assignment. Cannot assign value of type {right_t:#?} to value of type {target:#?}"
+        );
+    if right_t != *target {
+        Ok(ast::Expr::Cast {
+            target: target.clone(),
+            exp: Box::new(right),
+        })
+    } else {
+        Ok(right)
+    }
+}
+
 fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedExpr> {
     let bool_cast = |expr, symbols| {
         let TypedExpr { expr, .. } =
@@ -691,26 +715,18 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
         // converting to a cast expression frame it as an implicit promotion
         // so invalid assignments (e.g., Struct into an int) fail.
         ast::Expr::Assignment { lvalue, rvalue } => {
-            let TypedExpr {
-                expr: left,
-                r#type: left_t,
-            } = typecheck_expr(lvalue, symbols)
-                .context("Failed to typecheck lvalue argument of assignment.")?;
             ensure!(
-                left.is_lvalue(),
-                "Expected lvalue in assignment but found {expr:?}"
+                lvalue.is_lvalue(),
+                "Expected target in assignment but found {lvalue:?}"
             );
             let TypedExpr {
-                expr: right,
-                r#type: right_t,
-            } = typecheck_expr(rvalue, symbols)
-                .context("Failed to typecheck rvalue argument of assignment.")?;
-            ensure!(right_t.base.can_assign_to(&left_t.base), "Incompatible types in assignment. Cannot assign value of type {right_t:#?} to value of type {left_t:#?}");
+                expr: _,
+                r#type: left_t,
+            } = typecheck_expr(lvalue, symbols)
+                .context("Failed to typecheck lvalue in assignment.")?;
             Ok(TypedExpr {
-                expr: ast::Expr::Cast {
-                    target: left_t.clone(),
-                    exp: Box::new(right),
-                },
+                expr: try_implicit_cast(&left_t, rvalue, symbols)
+                    .context("Failed to implicitly cast righthand side during assignment.")?,
                 r#type: left_t,
             })
         }

@@ -928,15 +928,11 @@ impl Expr {
                 then,
                 r#else,
             } => {
-                let (result, e2_label, end_label) = {
+                let (e2_label, end_label) = {
                     let label = make_temp_var();
-                    // This isn't needed and can be simplified... To Bad!
-                    let Some((name, count)) = label.as_str().split_once('.') else {
-                        unreachable!("label should always be name.count");
-                    };
-                    let e2_label = format!("{name}.{count}.cond_e2");
-                    let end_label = format!("{name}.{count}.cond_end");
-                    (Rc::new(label), Rc::new(e2_label), Rc::new(end_label))
+                    let e2_label = format!("{label}.cond_e2");
+                    let end_label = format!("{label}.cond_end");
+                    (Rc::new(e2_label), Rc::new(end_label))
                 };
                 let Expr {
                     mut instructions,
@@ -953,10 +949,16 @@ impl Expr {
                     val: e1_val,
                 } = Expr::parse_with(*then, symbols, make_temp_var);
 
+                let result = Function::make_tacky_temp_var(
+                    e1_val.get_type(symbols).clone(),
+                    symbols,
+                    make_temp_var,
+                );
+
                 instructions.extend(e1_instructions);
                 instructions.push(Instruction::Copy {
                     src: e1_val,
-                    dst: Val::Var(Rc::clone(&result)),
+                    dst: result.clone(),
                 });
 
                 instructions.push(Instruction::Jump(Rc::clone(&end_label)));
@@ -971,14 +973,14 @@ impl Expr {
 
                 instructions.push(Instruction::Copy {
                     src: e2_val,
-                    dst: Val::Var(Rc::clone(&result)),
+                    dst: result.clone(),
                 });
 
                 instructions.push(Instruction::Label(end_label));
 
                 Self {
                     instructions,
-                    val: Val::Var(Rc::clone(&result)),
+                    val: result,
                 }
             }
             ast::Expr::FunCall { name, args } => {
@@ -1028,10 +1030,7 @@ impl Expr {
                 if target == val_type {
                     return Self { instructions, val };
                 }
-                let name = Rc::new(make_temp_var());
-                let dst = Val::Var(Rc::clone(&name));
-
-                symbols.new_entry(Rc::clone(&name), target.clone());
+                let dst = Function::make_tacky_temp_var(target.clone(), symbols, make_temp_var);
 
                 // FIXME: This needs to use PartialEq/Eq
                 if target.base.nbytes() > val_type.base.nbytes() {

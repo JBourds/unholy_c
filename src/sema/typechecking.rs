@@ -771,9 +771,16 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
                 r#type: left_t,
             } = typecheck_expr(lvalue, symbols)
                 .context("Failed to typecheck lvalue in assignment.")?;
+            // FIXME: Lazy clone :(
             Ok(TypedExpr {
-                expr: try_implicit_cast(&left_t, rvalue, symbols)
-                    .context("Failed to implicitly cast righthand side during assignment.")?,
+                expr: ast::Expr::Assignment {
+                    lvalue: lvalue.clone(),
+                    rvalue: Box::new(
+                        try_implicit_cast(&left_t, rvalue, symbols).context(
+                            "Failed to implicitly cast righthand side during assignment.",
+                        )?,
+                    ),
+                },
                 r#type: left_t,
             })
         }

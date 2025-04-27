@@ -1,6 +1,6 @@
 use std::cmp;
 
-use anyhow::Context;
+use anyhow::{Context, Error};
 
 use super::*;
 

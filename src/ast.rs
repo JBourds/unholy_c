@@ -1090,13 +1090,19 @@ impl Default for TypePtr {
     }
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, Clone)]
 pub struct Type {
     pub base: BaseType,
     pub alignment: NonZeroUsize,
     pub ptr: Option<TypePtr>,
     pub storage: Option<StorageClass>,
     pub is_const: bool,
+}
+
+impl PartialEq for Type {
+    fn eq(&self, other: &Self) -> bool {
+        self.base == other.base && self.alignment == other.alignment && self.ptr == other.ptr
+    }
 }
 
 impl Type {

@@ -394,7 +394,7 @@ impl SymbolTable {
             //           one (ERROR)
             if !scope.shadows(&old_scope) {
                 // Cases 1.1 and 2.1
-                if old_type.base != new_type.base {
+                if old_type != new_type {
                     match (&old_type.base, &new_type.base) {
                         // Case 1.2
                         (ast::BaseType::Fun { .. }, ast::BaseType::Fun { param_types, .. })
@@ -734,7 +734,11 @@ fn try_implicit_cast(
     );
     if right_t != *target {
         Ok(ast::Expr::Cast {
-            target: target.clone(),
+            target: ast::Type {
+                storage: None,
+                is_const: true,
+                ..target.clone()
+            },
             exp: Box::new(right),
         })
     } else {
@@ -826,6 +830,8 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
                 // arbitrary
                 let common_t = ast::Type {
                     base: conv_left_t,
+                    storage: None,
+                    is_const: true,
                     ..left_t
                 };
                 let left = if left_changed {

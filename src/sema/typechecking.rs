@@ -525,194 +525,231 @@ struct TypedExpr {
 
 pub fn validate(stage: SemaStage<IdentResolution>) -> Result<SemaStage<TypeChecking>> {
     let mut symbols = SymbolTable::new_table();
-    typecheck_program(&stage.program, &mut symbols)?;
+
     Ok(SemaStage {
-        program: stage.program,
+        program: typecheck_program(stage.program, &mut symbols)
+            .context("Failed to perform typechecking.")?,
         symbols: Some(symbols),
         stage: PhantomData::<TypeChecking>,
     })
 }
 
-fn typecheck_program(program: &ast::Program, symbols: &mut SymbolTable) -> Result<()> {
-    for decl in program.declarations.iter() {
+fn typecheck_program(program: ast::Program, symbols: &mut SymbolTable) -> Result<ast::Program> {
+    let mut declarations = vec![];
+    for decl in program.declarations.into_iter() {
         match decl {
-            ast::Declaration::FunDecl(f) => typecheck_fun_decl(f, symbols)?,
-            ast::Declaration::VarDecl(v) => typecheck_global_var_decl(v, symbols)?,
+            ast::Declaration::FunDecl(f) => {
+                let name = Rc::clone(&f.name);
+                declarations.push(ast::Declaration::FunDecl(
+                    typecheck_fun_decl(f, symbols).context(format!(
+                        "Unable to typecheck function declaration for {name}"
+                    ))?,
+                ));
+            }
+            ast::Declaration::VarDecl(v) => {
+                let name = Rc::clone(&v.name);
+                declarations.push(ast::Declaration::VarDecl(
+                    typecheck_global_var_decl(v, symbols).context(format!(
+                        "Unable to typecheck variable declaration for {name}"
+                    ))?,
+                ));
+            }
         }
     }
-    Ok(())
+    Ok(ast::Program { declarations })
 }
 
 fn typecheck_block(
-    block: &ast::Block,
+    block: ast::Block,
     symbols: &mut SymbolTable,
     function: Option<Rc<String>>,
-) -> Result<()> {
+) -> Result<ast::Block> {
     symbols.push_scope();
-    for item in block.items().iter() {
-        typecheck_block_item(item, symbols, function.clone())
-            .map(|_| ())
-            .context(format!("Failed to typecheck block {block:#?}"))?;
-    }
-    symbols.pop_scope()
+    let items = block
+        .into_items()
+        .into_iter()
+        .map(|item| typecheck_block_item(item, symbols, function.clone()))
+        .collect::<Result<Vec<_>>>()
+        .context("Failed to typecheck all block items")?;
+    symbols
+        .pop_scope()
+        .expect("We just popped the scope so this should not fail.");
+    Ok(ast::Block(items))
 }
 
 fn typecheck_block_item(
-    item: &ast::BlockItem,
+    item: ast::BlockItem,
     symbols: &mut SymbolTable,
     function: Option<Rc<String>>,
-) -> Result<()> {
+) -> Result<ast::BlockItem> {
     match item {
-        ast::BlockItem::Stmt(stmt) => typecheck_stmt(stmt, symbols, function),
-        ast::BlockItem::Decl(decl) => typecheck_decl(decl, symbols),
+        ast::BlockItem::Stmt(stmt) => Ok(ast::BlockItem::Stmt(
+            typecheck_stmt(stmt, symbols, function)
+                .context("Failed to typecheck block item: {item:#?}")?,
+        )),
+        ast::BlockItem::Decl(decl) => Ok(ast::BlockItem::Decl(
+            typecheck_decl(decl, symbols).context("Failed to typecheck block item: {item:#?}")?,
+        )),
     }
-    .map(|_| ())
-    .context(format!("Failed to typecheck block item: {item:#?}"))
 }
 
 fn typecheck_stmt(
-    stmt: &ast::Stmt,
+    stmt: ast::Stmt,
     symbols: &mut SymbolTable,
     function: Option<Rc<String>>,
-) -> Result<()> {
+) -> Result<ast::Stmt> {
     match stmt {
-        ast::Stmt::Compound(block) => typecheck_block(block, symbols, function),
+        ast::Stmt::Compound(block) => Ok::<ast::Stmt, Error>(
+                ast::Stmt::Compound(
+                    typecheck_block(block, symbols, function).context("Unable to typecheck block withint statement.")?
+                )
+            ),
         ast::Stmt::Return(Some(expr)) => {
-            if let Some(function) = function {
-                let TypedExpr { r#type: found, .. } = typecheck_expr(expr, symbols)?;
-                if let Some(SymbolEntry {
-                    r#type:
-                        ast::Type {
-                            base: ast::BaseType::Fun { ret_t: expected, .. },
-                            ..
-                        },
-                    ..
-                }) = symbols.get(&function)
-                {
-                    // TODO: Fix this once we add pointers
-                    if !found.base.can_assign_to(&expected.base) {
-                        bail!("Found return type: \"{found}\" in function \"{function}\" but expected return type: \"{expected}\"");
+                if let Some(function) = function {
+                    let TypedExpr { r#type: found, expr } = typecheck_expr(&expr, symbols)?;
+                    if let Some(SymbolEntry {
+                        r#type:
+                            ast::Type {
+                                base: ast::BaseType::Fun { ret_t: expected, .. },
+                                ..
+                            },
+                        ..
+                    }) = symbols.get(&function)
+                    {
+                        // TODO: Fix this once we add pointers
+                        if !found.base.can_assign_to(&expected.base) {
+                            bail!("Found return type: \"{found}\" in function \"{function}\" but expected return type: \"{expected}\"");
+                        } else {
+                            Ok(ast::Stmt::Return(Some(expr)))
+                        }
                     } else {
-                        Ok(())
+                        bail!("Could not find function {function} in symbol table.")
                     }
                 } else {
-                    bail!("Could not find function {function} in symbol table.")
+                    bail!("Invalid return statement out of function body.");
                 }
-            } else {
-                bail!("Invalid return statement out of function body.");
             }
-        }
-        ast::Stmt::Expr(expr) => typecheck_expr(expr, symbols)
-            .map(|_| ())
-            .context("Failed to typecheck expression statement."),
+        ast::Stmt::Expr(expr) => Ok(ast::Stmt::Expr(typecheck_expr(&expr, symbols)
+                .context("Failed to typecheck expression statement.")?.expr)),
         ast::Stmt::If {
-            condition,
-            then,
-            r#else,
-        } => {
-            typecheck_expr(condition, symbols)
-                .map(|_| ())
-                .context("Failed to typecheck if block condition.")?;
-            typecheck_stmt(then, symbols, function.clone())
-                .map(|_| ())
-                .context("Failed to typecheck if block body.")?;
-            r#else
-                .as_ref()
-                .map_or(Ok(()), |stmt| typecheck_stmt(stmt, symbols, function))
-        }
+                condition,
+                then,
+                r#else,
+            } => {
+                let condition = typecheck_expr(&condition, symbols)
+                    .context("Failed to typecheck if block condition.")?.expr;
+                let then = typecheck_stmt(*then, symbols, function.clone())
+                    .context("Failed to typecheck if branch of conditional.")?;
+                let r#else = if let Some(r#else) = r#else { Some(typecheck_stmt(*r#else, symbols, function)
+                    .context("Failed to typecheck else branch of conditional.")?)
+                } else { None };
+                Ok(ast::Stmt::If { condition, then: Box::new(then), r#else: r#else.map(Box::new) })
+
+            }
         ast::Stmt::While {
-            condition, body, ..
-        } => {
-            typecheck_expr(condition, symbols)
-                .map(|_| ())
-                .context("Failed to typecheck while loop condition.")?;
-            typecheck_stmt(body, symbols, function)
-                .map(|_| ())
-                .context("Failed to typecheck while loop body.")
-        }
+                condition, body, label,
+            } => {
+                let condition = typecheck_expr(&condition, symbols)
+                        .context("Failed to typecheck for loop condition.")?.expr;
+                let body = typecheck_stmt(*body, symbols, function)
+                    .context("Failed to typecheck for loop body.")?;
+                Ok(ast::Stmt::While { body: Box::new(body), condition, label })
+            }
         ast::Stmt::DoWhile {
-            body, condition, ..
-        } => {
-            typecheck_expr(condition, symbols)
-                .map(|_| ())
-                .context("Failed to typecheck do-while loop condition.")?;
-            typecheck_stmt(body, symbols, function)
-                .map(|_| ())
-                .context("Failed to typecheck do-while loop body.")
-        }
+                body, condition, label,
+            } => {
+                let condition = typecheck_expr(&condition, symbols)
+                        .context("Failed to typecheck for loop condition.")?.expr;
+                let body = typecheck_stmt(*body, symbols, function)
+                    .context("Failed to typecheck for loop body.")?;
+                Ok(ast::Stmt::DoWhile { body: Box::new(body), condition, label })
+            }
         ast::Stmt::For {
-            init,
-            condition,
-            post,
-            body,
-            ..
-        } => {
-            match **init {
-                ast::ForInit::Decl(ref decl) => {
-                    if decl.typ.storage.is_some() {
-                        bail!(
-                            "For-loop counter var '{}' cannot have storage class specifier",
-                            decl.name
-                        );
+                init,
+                condition,
+                post,
+                body,
+                label,
+            } => {
+                let init = match *init {
+                    ast::ForInit::Decl(decl) => {
+                        if decl.typ.storage.is_some() {
+                            bail!(
+                                "For-loop counter var '{}' cannot have storage class specifier",
+                                decl.name
+                            );
+                        }
+                        ast::ForInit::Decl(
+                            typecheck_var_decl(decl, symbols)
+                            .context("Failed to typecheck for loop initializations.")?)
                     }
-                    typecheck_var_decl(decl, symbols)
-                        .map(|_| ())
-                        .context("Failed to typecheck for loop initializations.")?;
-                }
-                ast::ForInit::Expr(Some(ref expr)) => {
-                    typecheck_expr(expr, symbols)
-                        .map(|_| ())
-                        .context("Failed to typecheck for loop initialization expression.")?;
-                }
-                _ => {}
+                    ast::ForInit::Expr(Some(ref expr)) => {
+                        ast::ForInit::Expr(
+                            Some(typecheck_expr(expr, symbols)
+                            .map(|t_expr| t_expr.expr)
+                            .context("Failed to typecheck for loop initialization expression.")?)
+                        )
+                    }
+                    _ => ast::ForInit::Expr(None)
+                };
+                let post = if let Some(post) = post {
+                    Some(typecheck_expr(&post, symbols)
+                        .context("Failed to typecheck for loop post condition.")?.expr)
+                } else { None };
+                let condition = if let Some(condition) = condition {
+                    Some(typecheck_expr(&condition, symbols)
+                        .context("Failed to typecheck for loop condition.")?.expr)
+                } else { None };
+                let body = typecheck_stmt(*body, symbols, function)
+                    .context("Failed to typecheck for loop body.")?;
+                Ok(ast::Stmt::For {
+                    init: Box::new(init), condition, post, body: Box::new(body), label
+                })
             }
-            if let Some(condition) = condition {
-                typecheck_expr(condition, symbols)
-                    .map(|_| ())
-                    .context("Failed to typecheck for loop condition.")?;
+        ast::Stmt::Case { value, stmt, label } => {
+                let value = typecheck_expr(&value, symbols)
+                    .context("Failed to typecheck case value.")?.expr;
+                let stmt = typecheck_stmt(*stmt, symbols, function)
+                    .context("Failed to typecheck case statement.")?;
+                Ok(ast::Stmt::Case { value, stmt: Box::new(stmt), label })
             }
-            if let Some(post) = post {
-                typecheck_expr(post, symbols)
-                    .map(|_| ())
-                    .context("Failed to typecheck for loop post condition.")?;
-            }
-            typecheck_stmt(body, symbols, function)
-                .map(|_| ())
-                .context("Failed to typecheck for loop body.")
-        }
-        ast::Stmt::Case { value, stmt, .. } => {
-            typecheck_expr(value, symbols)
-                .map(|_| ())
-                .context("Failed to typecheck case value.")?;
-            typecheck_stmt(stmt, symbols, function)
-                .map(|_| ())
-                .context("Failed to typecheck case statement.")
-        }
         ast::Stmt::Switch {
-            condition,
-            body,
-            cases,
-            ..
-        } => {
-            typecheck_expr(condition, symbols)
-                .map(|_| ())
-                .context("Failed to typecheck switch expression.")?;
-            typecheck_stmt(body, symbols, function)
-                .map(|_| ())
-                .context("Failed to typecheck switch body.")?;
-            if let Some(cases) = cases {
-                for (literal, name) in cases.iter() {
-                    if !literal.is_int() {
-                        bail!("Non-integer type in case {name}.");
+                condition,
+                body,
+                cases,
+                label,
+                default,
+            } => {
+                let condition = typecheck_expr(&condition, symbols)
+                    .context("Failed to typecheck switch expression.")?.expr;
+                let body = typecheck_stmt(*body, symbols, function)
+                    .context("Failed to typecheck switch body.")?;
+                if let Some(ref cases) = cases {
+                    for (literal, name) in cases.iter() {
+                        if !literal.is_int() {
+                            bail!("Non-integer type in case {name}.");
+                        }
                     }
                 }
+                Ok(ast::Stmt::Switch { condition, body: Box::new(body), cases, label, default})
             }
-            Ok(())
+        ast::Stmt::Null => Ok(stmt),
+        ast::Stmt::Break(_) => Ok(stmt),
+        ast::Stmt::Continue(_) => Ok(stmt),
+        ast::Stmt::Label { name, stmt } => Ok(ast::Stmt::Label { 
+            name, 
+            stmt: Box::new(typecheck_stmt(*stmt, symbols, function).context("Unable to typecheck statement within label.")?) 
         }
-        _ => Ok(()),
+        ),
+        ast::Stmt::Default { label, stmt } => Ok(ast::Stmt::Default { 
+            label, 
+            stmt: Box::new(typecheck_stmt(*stmt, symbols, function).context("Unable to typecheck statement within default label.")?) 
+        }
+        ),
+        ast::Stmt::Goto(_) => Ok(stmt),
+        ast::Stmt::Return(None) => Ok(ast::Stmt::Return(None)),
     }
-    .map(|_| ())
-    .context(format!("Failed to typecheck statement: {stmt:#?}"))
+    .context("Failed to typecheck statement.")
 }
 
 fn try_implicit_cast(
@@ -930,47 +967,75 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
     }
 }
 
-fn typecheck_decl(decl: &ast::Declaration, symbols: &mut SymbolTable) -> Result<()> {
-    match decl {
-        ast::Declaration::FunDecl(decl) => typecheck_fun_decl(decl, symbols),
-        ast::Declaration::VarDecl(decl) => typecheck_var_decl(decl, symbols),
-    }
+fn typecheck_decl(decl: ast::Declaration, symbols: &mut SymbolTable) -> Result<ast::Declaration> {
+    Ok(match decl {
+        ast::Declaration::FunDecl(decl) => {
+            let name = Rc::clone(&decl.name);
+            ast::Declaration::FunDecl(
+                typecheck_fun_decl(decl, symbols)
+                    .context(format!("Unable to typecheck \"{name}\" declaration"))?,
+            )
+        }
+        ast::Declaration::VarDecl(decl) => {
+            let name = Rc::clone(&decl.name);
+            ast::Declaration::VarDecl(
+                typecheck_var_decl(decl, symbols)
+                    .context(format!("Unable to typecheck \"{name}\" declaration"))?,
+            )
+        }
+    })
 }
 
-fn typecheck_fun_decl(decl: &ast::FunDecl, symbols: &mut SymbolTable) -> Result<()> {
+fn typecheck_fun_decl(decl: ast::FunDecl, symbols: &mut SymbolTable) -> Result<ast::FunDecl> {
     // Special case: Push scope and iterate over block items here so the
     // function parameters get put into the same scope as the block items
     symbols.push_scope();
-    symbols.declare_fun(decl)?;
+    symbols.declare_fun(&decl)?;
     // Treat parameters as declarations without values
-    if let Some(ref block) = decl.block {
-        for item in block.items() {
-            typecheck_block_item(item, symbols, Some(decl.name.clone()))
-                .map(|_| ())
-                .context(format!(
-                    "Failed to typecheck function declaration for \"{}\"",
-                    decl.name
-                ))?;
-        }
-    }
-    symbols.pop_scope()
+    let block = if let Some(block) = decl.block {
+        let items = block
+            .into_items()
+            .into_iter()
+            .map(|item| typecheck_block_item(item, symbols, Some(decl.name.clone())))
+            .collect::<Result<Vec<_>>>()
+            .context(format!(
+                "Failed to typecheck function declaration for \"{}\"",
+                decl.name
+            ))?;
+        Some(ast::Block(items))
+    } else {
+        None
+    };
+    symbols
+        .pop_scope()
+        .expect("We just popped the scope so this should not fail.");
+    Ok(ast::FunDecl { block, ..decl })
 }
 
-fn typecheck_global_var_decl(decl: &ast::VarDecl, symbols: &mut SymbolTable) -> Result<()> {
+fn typecheck_global_var_decl(
+    decl: ast::VarDecl,
+    symbols: &mut SymbolTable,
+) -> Result<ast::VarDecl> {
     ensure!(
         symbols.scope() == Scope::Global,
         "Global vars must be declared in global scope"
     );
-    symbols.declare_var(decl).map(|_| ()).context(format!(
-        "Failed to typecheck global variable declaration: {decl:#?}"
-    ))
+    typecheck_var_decl(decl, symbols)
 }
 
-fn typecheck_var_decl(decl: &ast::VarDecl, symbols: &mut SymbolTable) -> Result<()> {
-    symbols.declare_var(decl)?;
-    decl.init.as_ref().map_or(Ok(()), |init| {
-        typecheck_expr(init, symbols).map(|_| ()).context(format!(
-            "Failed to typecheck variable initialization: {init:#?}"
-        ))
-    })
+fn typecheck_var_decl(decl: ast::VarDecl, symbols: &mut SymbolTable) -> Result<ast::VarDecl> {
+    let entry = symbols.declare_var(&decl).context(format!(
+        "Failed to typecheck local variable declaration: for {}",
+        decl.name
+    ))?;
+    let target = entry.r#type;
+    let init = if let Some(init) = decl.init {
+        Some(try_implicit_cast(&target, &init, symbols).context(format!(
+            "Failed to typecheck initialization for variable \"{}\": {init:#?}",
+            decl.name
+        ))?)
+    } else {
+        None
+    };
+    Ok(ast::VarDecl { init, ..decl })
 }

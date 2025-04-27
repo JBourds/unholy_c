@@ -492,7 +492,6 @@ impl SymbolTable {
     fn declare_var(&mut self, decl: &ast::VarDecl) -> Result<()> {
         let key = decl.name.clone();
         let storage_class = decl.typ.storage;
-        // Check if the RHS needs a cast to LHS declared typ
         let decl = ast::Declaration::VarDecl(decl.clone());
 
         match storage_class {
@@ -747,17 +746,6 @@ fn try_implicit_cast(
 }
 
 fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedExpr> {
-    let bool_cast = |expr, symbols| {
-        let TypedExpr { expr, .. } =
-            typecheck_expr(expr, symbols).context("Failed to typecheck inner unary expression.")?;
-        Ok(TypedExpr {
-            expr: ast::Expr::Cast {
-                target: ast::Type::bool(),
-                exp: Box::new(expr),
-            },
-            r#type: ast::Type::bool(),
-        })
-    };
     match expr {
         ast::Expr::Var(var) => {
             if let Some(t) = symbols.get(var) {
@@ -791,7 +779,11 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
         }
         ast::Expr::Unary { op, expr } => {
             if op.is_logical() {
-                bool_cast(expr, symbols)
+                let target = ast::Type::bool();
+                try_implicit_cast(&target, expr, symbols).map(|expr| TypedExpr {
+                    r#type: target,
+                    expr,
+                })
             } else {
                 typecheck_expr(expr, symbols)
                     .context("Failed to typecheck nested unary expression.")
@@ -856,7 +848,11 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
                     right: Box::new(right),
                 };
                 if op.is_logical() {
-                    bool_cast(&exp, symbols)
+                    let target = ast::Type::bool();
+                    try_implicit_cast(&target, expr, symbols).map(|expr| TypedExpr {
+                        r#type: target,
+                        expr,
+                    })
                 } else {
                     Ok(TypedExpr {
                         expr: exp,

@@ -366,11 +366,11 @@ impl SymbolTable {
         Ok(old_attrib.clone())
     }
 
-    fn declare_in_scope(&mut self, decl: &ast::Declaration, scope: Scope) -> Result<()> {
+    fn declare_in_scope(&mut self, decl: &ast::Declaration, scope: Scope) -> Result<SymbolEntry> {
         let (name, mut new_type, defining_ident) = Self::get_decl_info(decl);
 
-        if let Some(entry) = self.get(&name) {
-            // Lazy way to make rust shutup about the immutable borrow
+        let entry = if let Some(entry) = self.get(&name) {
+            // FIXME: Lazy way to make rust shutup about the immutable borrow
             // overlapping with the mutable one
             let SymbolEntry {
                 r#type: old_type,
@@ -437,25 +437,21 @@ impl SymbolTable {
                         }
                     }
                 }
-                self.insert_scope(
-                    name,
-                    SymbolEntry {
-                        r#type: new_type,
-                        defined: already_defined || defining_ident,
-                        scope,
-                        attribute,
-                    },
-                );
+                SymbolEntry {
+                    r#type: new_type,
+                    defined: already_defined || defining_ident,
+                    scope,
+                    attribute,
+                }
             } else {
                 // Local variables can shadow (only if not extern), but functions cannot
-                let entry = self.new_entry(decl, scope)?;
-                self.insert_scope(name, entry);
+                self.new_entry(decl, scope)?
             }
         } else {
-            let entry = self.new_entry(decl, scope)?;
-            self.insert_scope(name, entry);
-        }
-        Ok(())
+            self.new_entry(decl, scope)?
+        };
+        self.insert_scope(name, entry.clone());
+        Ok(entry)
     }
 
     // Lazy clones :(
@@ -489,13 +485,15 @@ impl SymbolTable {
         }
         Ok(())
     }
-    fn declare_var(&mut self, decl: &ast::VarDecl) -> Result<()> {
+    fn declare_var(&mut self, decl: &ast::VarDecl) -> Result<SymbolEntry> {
         let key = decl.name.clone();
         let storage_class = decl.typ.storage;
         let decl = ast::Declaration::VarDecl(decl.clone());
 
         match storage_class {
-            Some(ast::StorageClass::Extern) => self.declare_in_scope(&decl, Scope::Global)?,
+            Some(ast::StorageClass::Extern) => {
+                self.declare_in_scope(&decl, Scope::Global)?;
+            }
             Some(ast::StorageClass::Static)
                 if self.get_global(&key).is_none() && self.scope() != Scope::Global =>
             {

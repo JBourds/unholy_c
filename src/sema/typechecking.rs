@@ -822,13 +822,16 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
         ast::Expr::Unary { op, expr } => {
             if op.is_logical() {
                 let target = ast::Type::bool();
-                try_implicit_cast(&target, expr, symbols).map(|expr| TypedExpr {
-                    r#type: target,
+                let expr = try_implicit_cast(&target, expr, symbols).map(|expr| TypedExpr {
+                    r#type: target.clone(),
                     expr,
-                })
+                }).context("Failed to implicitly cast argument in unary operation.")?.expr;
+
+                Ok(TypedExpr { expr: ast::Expr::Unary { op: *op, expr: Box::new(expr) }, r#type: target })
             } else {
-                typecheck_expr(expr, symbols)
-                    .context("Failed to typecheck nested unary expression.")
+               let TypedExpr { expr, r#type } = typecheck_expr(expr, symbols)
+                    .context("Failed to typecheck nested unary expression.")?;
+                Ok(TypedExpr { expr: ast::Expr::Unary { op: *op, expr: Box::new(expr) }, r#type })
             }
         }
         // TODO: Fix once we get to pointers

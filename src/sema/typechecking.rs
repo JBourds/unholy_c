@@ -822,27 +822,13 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
         ast::Expr::Unary { op, expr } => {
             let TypedExpr { expr, r#type } = typecheck_expr(expr, symbols)
                 .context("Failed to typecheck nested unary expression.")?;
-            if op.is_logical() {
-                let target = ast::Type::bool();
-                Ok(TypedExpr {
-                    expr: ast::Expr::Unary {
-                        op: *op,
-                        expr: Box::new(ast::Expr::Cast {
-                            target: target.clone(),
-                            exp: Box::new(expr),
-                        }),
-                    },
-                    r#type: target,
-                })
-            } else {
-                Ok(TypedExpr {
-                    expr: ast::Expr::Unary {
-                        op: *op,
-                        expr: Box::new(expr),
-                    },
-                    r#type,
-                })
-            }
+            Ok(TypedExpr {
+                expr: ast::Expr::Unary {
+                    op: *op,
+                    expr: Box::new(expr),
+                },
+                r#type,
+            })
         }
         // TODO: Fix once we get to pointers
         ast::Expr::Binary { op, left, right } => {

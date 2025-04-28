@@ -736,14 +736,14 @@ fn typecheck_stmt(
         ast::Stmt::Null => Ok(stmt),
         ast::Stmt::Break(_) => Ok(stmt),
         ast::Stmt::Continue(_) => Ok(stmt),
-        ast::Stmt::Label { name, stmt } => Ok(ast::Stmt::Label { 
-            name, 
-            stmt: Box::new(typecheck_stmt(*stmt, symbols, function).context("Unable to typecheck statement within label.")?) 
+        ast::Stmt::Label { name, stmt } => Ok(ast::Stmt::Label {
+            name,
+            stmt: Box::new(typecheck_stmt(*stmt, symbols, function).context("Unable to typecheck statement within label.")?)
         }
         ),
-        ast::Stmt::Default { label, stmt } => Ok(ast::Stmt::Default { 
-            label, 
-            stmt: Box::new(typecheck_stmt(*stmt, symbols, function).context("Unable to typecheck statement within default label.")?) 
+        ast::Stmt::Default { label, stmt } => Ok(ast::Stmt::Default {
+            label,
+            stmt: Box::new(typecheck_stmt(*stmt, symbols, function).context("Unable to typecheck statement within default label.")?)
         }
         ),
         ast::Stmt::Goto(_) => Ok(stmt),
@@ -822,16 +822,31 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
         ast::Expr::Unary { op, expr } => {
             if op.is_logical() {
                 let target = ast::Type::bool();
-                let expr = try_implicit_cast(&target, expr, symbols).map(|expr| TypedExpr {
-                    r#type: target.clone(),
-                    expr,
-                }).context("Failed to implicitly cast argument in unary operation.")?.expr;
+                let expr = try_implicit_cast(&target, expr, symbols)
+                    .map(|expr| TypedExpr {
+                        r#type: target.clone(),
+                        expr,
+                    })
+                    .context("Failed to implicitly cast argument in unary operation.")?
+                    .expr;
 
-                Ok(TypedExpr { expr: ast::Expr::Unary { op: *op, expr: Box::new(expr) }, r#type: target })
+                Ok(TypedExpr {
+                    expr: ast::Expr::Unary {
+                        op: *op,
+                        expr: Box::new(expr),
+                    },
+                    r#type: target,
+                })
             } else {
-               let TypedExpr { expr, r#type } = typecheck_expr(expr, symbols)
+                let TypedExpr { expr, r#type } = typecheck_expr(expr, symbols)
                     .context("Failed to typecheck nested unary expression.")?;
-                Ok(TypedExpr { expr: ast::Expr::Unary { op: *op, expr: Box::new(expr) }, r#type })
+                Ok(TypedExpr {
+                    expr: ast::Expr::Unary {
+                        op: *op,
+                        expr: Box::new(expr),
+                    },
+                    r#type,
+                })
             }
         }
         // TODO: Fix once we get to pointers
@@ -913,19 +928,42 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
         } => {
             // TODO: Make two branches have same output type
             let target = ast::Type::bool();
-            let condition = Box::new(try_implicit_cast(&target, condition, symbols)
-                .context("Unable to implicitly cast ternary expression condition into a boolean value.")?);
-            let TypedExpr { expr: then_expr, r#type: then_type } = typecheck_expr(then, symbols)
-                    .context("Failed to typecheck ternay expression then branch.")?;
-            let TypedExpr { expr: else_expr, r#type: else_type } = typecheck_expr(r#else, symbols)
-                    .context("Failed to typecheck ternay expression else branch.")?;
+            let condition = Box::new(try_implicit_cast(&target, condition, symbols).context(
+                "Unable to implicitly cast ternary expression condition into a boolean value.",
+            )?);
+            let TypedExpr {
+                expr: then_expr,
+                r#type: then_type,
+            } = typecheck_expr(then, symbols)
+                .context("Failed to typecheck ternay expression then branch.")?;
+            let TypedExpr {
+                expr: else_expr,
+                r#type: else_type,
+            } = typecheck_expr(r#else, symbols)
+                .context("Failed to typecheck ternay expression else branch.")?;
             let (then_base, _) = ast::BaseType::lift(then_type.base.clone(), else_type.base)
                 .context("Ternary expression branches evaluate to different types.")?;
-            let common_type = ast::Type { base: then_base, ..then_type.clone() };
-            let then = Box::new(ast::Expr::Cast { target: common_type.clone(), exp: Box::new(then_expr) });
-            let r#else = Box::new(ast::Expr::Cast { target: common_type, exp: Box::new(else_expr) });
+            let common_type = ast::Type {
+                base: then_base,
+                ..then_type.clone()
+            };
+            let then = Box::new(ast::Expr::Cast {
+                target: common_type.clone(),
+                exp: Box::new(then_expr),
+            });
+            let r#else = Box::new(ast::Expr::Cast {
+                target: common_type,
+                exp: Box::new(else_expr),
+            });
             // Find common type between then and else
-            Ok(TypedExpr { expr: ast::Expr::Conditional { condition, then, r#else }, r#type: then_type })
+            Ok(TypedExpr {
+                expr: ast::Expr::Conditional {
+                    condition,
+                    then,
+                    r#else,
+                },
+                r#type: then_type,
+            })
         }
         ast::Expr::FunCall { name, args } => match symbols.get(name) {
             Some(SymbolEntry {

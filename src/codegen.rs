@@ -877,7 +877,7 @@ impl Instruction<WithStorage> {
             } if imm.size() > 4 => {
                 let r10 = Operand::Reg(Reg::X64 {
                     reg: X64Reg::R10,
-                    section: RegSection::from_size(imm.size()).expect("FIXME"),
+                    section: RegSection::from_size(dst.size()).expect("FIXME"),
                 });
                 vec![
                     Self::from_op(InstructionType::Mov {

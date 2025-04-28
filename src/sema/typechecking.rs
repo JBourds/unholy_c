@@ -820,26 +820,21 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
             })
         }
         ast::Expr::Unary { op, expr } => {
+            let TypedExpr { expr, r#type } = typecheck_expr(expr, symbols)
+                .context("Failed to typecheck nested unary expression.")?;
             if op.is_logical() {
                 let target = ast::Type::bool();
-                let expr = try_implicit_cast(&target, expr, symbols)
-                    .map(|expr| TypedExpr {
-                        r#type: target.clone(),
-                        expr,
-                    })
-                    .context("Failed to implicitly cast argument in unary operation.")?
-                    .expr;
-
                 Ok(TypedExpr {
                     expr: ast::Expr::Unary {
                         op: *op,
-                        expr: Box::new(expr),
+                        expr: Box::new(ast::Expr::Cast {
+                            target: target.clone(),
+                            exp: Box::new(expr),
+                        }),
                     },
                     r#type: target,
                 })
             } else {
-                let TypedExpr { expr, r#type } = typecheck_expr(expr, symbols)
-                    .context("Failed to typecheck nested unary expression.")?;
                 Ok(TypedExpr {
                     expr: ast::Expr::Unary {
                         op: *op,

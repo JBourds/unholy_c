@@ -1,11 +1,12 @@
 use crate::ast;
 use crate::sema;
+use std::collections::HashMap;
 use std::rc::Rc;
 
 #[derive(Debug)]
 pub struct Program {
     pub top_level: Vec<TopLevel>,
-    pub symbols: sema::tc::SymbolTable,
+    pub symbols: SymbolTable,
 }
 
 #[derive(Debug, PartialEq)]
@@ -14,9 +15,61 @@ pub enum TopLevel {
     Static(StaticVariable),
 }
 
+#[derive(Debug, Default)]
+pub struct SymbolTable {
+    pub table: HashMap<Rc<String>, SymbolEntry>,
+}
+
+impl SymbolTable {
+    pub fn get(&self, key: &Rc<String>) -> Option<&SymbolEntry> {
+        self.table.get(key)
+    }
+
+    pub fn new_entry(&mut self, key: Rc<String>, r#type: ast::Type) {
+        let old_key = self.table.insert(
+            Rc::clone(&key),
+            SymbolEntry {
+                r#type,
+                attribute: sema::tc::Attribute::Local,
+            },
+        );
+
+        assert!(
+            old_key.is_none(),
+            "Every new entry into SymbolTable should have a unique name!, but {key} did not!"
+        );
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct SymbolEntry {
+    pub r#type: ast::Type,
+    pub attribute: sema::tc::Attribute,
+}
+
+impl From<sema::tc::SymbolTable> for SymbolTable {
+    fn from(value: sema::tc::SymbolTable) -> Self {
+        Self {
+            table: value
+                .global
+                .into_iter()
+                .map(|(k, v)| {
+                    (
+                        k,
+                        SymbolEntry {
+                            r#type: v.r#type,
+                            attribute: v.attribute,
+                        },
+                    )
+                })
+                .collect(),
+        }
+    }
+}
+
 impl StaticVariable {
     fn from_symbol_with_name(name: Rc<String>, symbol: &sema::tc::SymbolEntry) -> Option<Self> {
-        match symbol.attribute {
+        match &symbol.attribute {
             sema::tc::Attribute::Fun { .. } => None,
             sema::tc::Attribute::Static {
                 initial_value,
@@ -24,13 +77,13 @@ impl StaticVariable {
             } => match initial_value {
                 sema::tc::InitialValue::Initial(i) => Some(StaticVariable {
                     identifier: name,
-                    external_linkage,
-                    init: Some(i),
+                    external_linkage: *external_linkage,
+                    init: Some(Rc::clone(i)),
                 }),
                 sema::tc::InitialValue::Tentative => Some(StaticVariable {
                     identifier: name,
-                    external_linkage,
-                    init: Some(0),
+                    external_linkage: *external_linkage,
+                    init: Some(vec![0; symbol.r#type.base.nbytes()].into()),
                 }),
                 sema::tc::InitialValue::None => None,
             },
@@ -43,41 +96,40 @@ impl StaticVariable {
 pub struct StaticVariable {
     pub identifier: Rc<String>,
     pub external_linkage: bool,
-    pub init: Option<i32>,
+    pub init: Option<Rc<[u8]>>,
 }
 
 impl From<sema::ValidAst> for Program {
     fn from(ast: sema::ValidAst) -> Self {
+        let sema::ValidAst { program, symbols } = ast;
+        let mut statics = vec![];
+        for (name, symbol) in symbols.global.iter() {
+            if let Some(r#static) = StaticVariable::from_symbol_with_name(Rc::clone(name), symbol) {
+                statics.push(r#static);
+            }
+        }
+        let mut symbols = SymbolTable::from(symbols);
         let mut valid_functions = vec![];
-        for decl in ast.program.declarations.into_iter() {
+        for decl in program.declarations.into_iter() {
             match decl {
                 // Only declarations with bodies will be returned here.
                 // We need to do some fixup so that if the definition for a
                 // function was not marked static but the first declaration was
                 // that the function gets defined as static.
                 ast::Declaration::FunDecl(f) => {
-                    if let Some(f) = Function::from_symbol(f, &ast.symbols) {
+                    if let Some(f) = Function::from_symbol(f, &mut symbols) {
                         valid_functions.push(f);
                     }
                 }
                 ast::Declaration::VarDecl(_) => {}
             };
         }
-        let mut statics = vec![];
-        for (name, symbol) in ast.symbols.global.iter() {
-            if let Some(r#static) = StaticVariable::from_symbol_with_name(Rc::clone(name), symbol) {
-                statics.push(r#static);
-            }
-        }
         let top_level = valid_functions
             .into_iter()
             .map(TopLevel::Fun)
             .chain(statics.into_iter().map(TopLevel::Static))
             .collect::<Vec<TopLevel>>();
-        Self {
-            top_level,
-            symbols: ast.symbols,
-        }
+        Self { top_level, symbols }
     }
 }
 
@@ -94,13 +146,23 @@ impl Function {
         move || {
             let n = *counter;
             *counter += 1;
-            format!("{name}.{n}")
+            format!("tacky.{name}.{n}")
         }
+    }
+
+    fn make_tacky_temp_var(
+        r#type: ast::Type,
+        symbols: &mut SymbolTable,
+        make_temp_var: &mut impl FnMut() -> String,
+    ) -> Val {
+        let name = Rc::new(make_temp_var());
+        symbols.new_entry(Rc::clone(&name), r#type);
+        Val::Var(name)
     }
 }
 
-impl From<ast::FunDecl> for Option<Function> {
-    fn from(decl: ast::FunDecl) -> Self {
+impl Function {
+    fn from_symbol(decl: ast::FunDecl, symbols: &mut SymbolTable) -> Option<Self> {
         let ast::FunDecl {
             name,
             signature,
@@ -110,65 +172,79 @@ impl From<ast::FunDecl> for Option<Function> {
         else {
             return None;
         };
+
+        // Insert function parameter types for type inference
+        // FIXME: Make sure that parameter names are unique!!!!
+        signature.iter().for_each(|(r#type, name)| {
+            if let Some(name) = name {
+                let name = Rc::clone(name);
+                symbols.new_entry(name, r#type.clone());
+            }
+        });
+
         let mut temp_var_counter = 0;
         let mut make_temp_var =
             Function::make_temp_var(Rc::new(name.to_string()), &mut temp_var_counter);
-        let mut instructions = Instruction::parse_block_with(block, &mut make_temp_var);
+        let mut instructions = Instruction::parse_block_with(block, symbols, &mut make_temp_var);
 
         // Temporary fix suggested by the book for the case where a function
         // is supposed to return something but does not.
-        instructions.push(Instruction::Return(Some(Val::Constant(0))));
+        instructions.push(Instruction::Return(Some(Val::Constant(
+            ast::Constant::I32(0),
+        ))));
+
+        let name = Rc::new(name.to_string());
 
         let params = signature
             .into_iter()
             .map(|x| x.1)
             .collect::<Vec<Option<Rc<String>>>>();
 
+        // Check symbol table to get external linkage since the function
+        // declaration could be static but the definition can elide it.
+        // ```
+        // static int foo();
+        // int foo() {
+        //      ...
+        // }
+        // ```
+
+        let external_linkage = {
+            if let Some(SymbolEntry {
+                r#type:
+                    ast::Type {
+                        base: ast::BaseType::Fun { .. },
+                        ..
+                    },
+                attribute,
+            }) = symbols.get(&name)
+            {
+                attribute.has_external_linkage()
+            } else {
+                unreachable!()
+            }
+        };
+
         Some(Function {
-            name: Rc::new(name.to_string()),
+            name,
             params,
-            external_linkage: decl.storage_class != Some(ast::StorageClass::Static),
+            external_linkage,
             instructions,
         })
-    }
-}
-
-impl Function {
-    fn from_symbol(decl: ast::FunDecl, symbols: &sema::tc::SymbolTable) -> Option<Self> {
-        if let Some(f @ Function { .. }) = Option::<Self>::from(decl) {
-            // Check symbol table to get external linkage since the function
-            // declaration could be static but the definition can elide it.
-            // ```
-            // static int foo();
-            // int foo() {
-            //      ...
-            // }
-            // ```
-            let external_linkage = {
-                if let Some(sema::tc::SymbolEntry {
-                    r#type: ast::Type::Fun { .. },
-                    attribute: sema::tc::Attribute::Fun { external_linkage },
-                    ..
-                }) = symbols.get(&f.name)
-                {
-                    external_linkage
-                } else {
-                    unreachable!()
-                }
-            };
-            Some(Function {
-                external_linkage: *external_linkage,
-                ..f
-            })
-        } else {
-            None
-        }
     }
 }
 
 #[derive(Debug, PartialEq)]
 pub enum Instruction {
     Return(Option<Val>),
+    SignExtend {
+        src: Val,
+        dst: Val,
+    },
+    Truncate {
+        src: Val,
+        dst: Val,
+    },
     Unary {
         op: UnaryOp,
         src: Val,
@@ -204,10 +280,13 @@ pub enum Instruction {
 impl Instruction {
     fn parse_decl_with(
         decl: ast::Declaration,
+        symbols: &mut SymbolTable,
         make_temp_var: &mut impl FnMut() -> String,
     ) -> Vec<Self> {
         match decl {
-            ast::Declaration::VarDecl(decl) => Self::parse_var_decl_with(decl, make_temp_var),
+            ast::Declaration::VarDecl(decl) => {
+                Self::parse_var_decl_with(decl, symbols, make_temp_var)
+            }
             ast::Declaration::FunDecl(decl) => Self::parse_fun_decl_with(decl, make_temp_var),
         }
     }
@@ -216,21 +295,23 @@ impl Instruction {
         decl: ast::FunDecl,
         _make_temp_var: &mut impl FnMut() -> String,
     ) -> Vec<Self> {
-        if Option::<Function>::from(decl).is_some() {
-            unreachable!("Function declerations inside statements should be caught in sema");
-        }
+        assert!(decl.block.is_none());
         vec![]
     }
 
     fn parse_var_decl_with(
         decl: ast::VarDecl,
+        symbols: &mut SymbolTable,
         make_temp_var: &mut impl FnMut() -> String,
     ) -> Vec<Self> {
+        if decl.typ.storage != Some(ast::StorageClass::Extern) {
+            symbols.new_entry(Rc::clone(&decl.name), decl.typ.clone());
+        }
         if let Some(init) = decl.init {
             let Expr {
                 mut instructions,
                 val: src,
-            } = Expr::parse_with(init, make_temp_var);
+            } = Expr::parse_with(init, symbols, make_temp_var);
             let dst = Val::Var(Rc::clone(&decl.name));
             instructions.push(Instruction::Copy {
                 src,
@@ -241,7 +322,11 @@ impl Instruction {
             vec![]
         }
     }
-    fn parse_stmt_with(stmt: ast::Stmt, make_temp_var: &mut impl FnMut() -> String) -> Vec<Self> {
+    fn parse_stmt_with(
+        stmt: ast::Stmt,
+        symbols: &mut SymbolTable,
+        make_temp_var: &mut impl FnMut() -> String,
+    ) -> Vec<Self> {
         let mut block_instructions = vec![];
         match stmt {
             ast::Stmt::Null => {}
@@ -249,7 +334,7 @@ impl Instruction {
                 let Expr {
                     mut instructions,
                     val,
-                } = Expr::parse_with(expr, make_temp_var);
+                } = Expr::parse_with(expr, symbols, make_temp_var);
                 instructions.push(Instruction::Return(Some(val)));
                 block_instructions.extend(instructions);
             }
@@ -257,18 +342,18 @@ impl Instruction {
                 block_instructions.push(Instruction::Return(None));
             }
             ast::Stmt::Expr(expr) => {
-                let Expr { instructions, .. } = Expr::parse_with(expr, make_temp_var);
+                let Expr { instructions, .. } = Expr::parse_with(expr, symbols, make_temp_var);
                 block_instructions.extend(instructions);
             }
             ast::Stmt::Compound(block) => {
-                block_instructions.extend(Self::parse_block_with(block, make_temp_var));
+                block_instructions.extend(Self::parse_block_with(block, symbols, make_temp_var));
             }
             ast::Stmt::Goto(label) => {
                 block_instructions.push(Instruction::Jump(label));
             }
             ast::Stmt::Label { name, stmt } => {
                 block_instructions.push(Instruction::Label(name));
-                block_instructions.extend(Self::parse_stmt_with(*stmt, make_temp_var));
+                block_instructions.extend(Self::parse_stmt_with(*stmt, symbols, make_temp_var));
             }
             ast::Stmt::Break(label) => {
                 let label = Rc::new(format!("{}.break", label.unwrap()));
@@ -291,7 +376,8 @@ impl Instruction {
                 block_instructions.push(Instruction::Label(Rc::clone(&label_continue)));
                 // <instructions for condition>
                 // v = <result of condition>
-                let Expr { instructions, val } = Expr::parse_with(condition, make_temp_var);
+                let Expr { instructions, val } =
+                    Expr::parse_with(condition, symbols, make_temp_var);
                 block_instructions.extend(instructions);
                 // JumpIfZero(v, break_label)
                 block_instructions.push(Self::JumpIfZero {
@@ -299,7 +385,11 @@ impl Instruction {
                     target: Rc::clone(&label_break),
                 });
                 // <instructions for body>
-                block_instructions.extend(Instruction::parse_stmt_with(*body, make_temp_var));
+                block_instructions.extend(Instruction::parse_stmt_with(
+                    *body,
+                    symbols,
+                    make_temp_var,
+                ));
                 // Jump(continue_label)
                 block_instructions.push(Instruction::Jump(label_continue));
                 // Label(break_label)
@@ -318,12 +408,17 @@ impl Instruction {
                 // Label(start)
                 block_instructions.push(Instruction::Label(Rc::clone(&label_start)));
                 // <instructions for body>
-                block_instructions.extend(Instruction::parse_stmt_with(*body, make_temp_var));
+                block_instructions.extend(Instruction::parse_stmt_with(
+                    *body,
+                    symbols,
+                    make_temp_var,
+                ));
                 // Label(continue_label)
                 block_instructions.push(Instruction::Label(label_continue));
                 // <instructions for condition>
                 // v = <result of condition>
-                let Expr { instructions, val } = Expr::parse_with(condition, make_temp_var);
+                let Expr { instructions, val } =
+                    Expr::parse_with(condition, symbols, make_temp_var);
                 block_instructions.extend(instructions);
                 // JumpIfNotZero(v, start)
                 block_instructions.push(Instruction::JumpIfNotZero {
@@ -346,13 +441,17 @@ impl Instruction {
                 let label_break = Rc::new(format!("{label}.break"));
 
                 // <instructions for init>
-                match init {
+                match *init {
                     ast::ForInit::Decl(decl) => {
-                        block_instructions
-                            .extend(Instruction::parse_var_decl_with(decl, make_temp_var));
+                        block_instructions.extend(Instruction::parse_var_decl_with(
+                            decl,
+                            symbols,
+                            make_temp_var,
+                        ));
                     }
                     ast::ForInit::Expr(Some(expr)) => {
-                        let Expr { instructions, .. } = Expr::parse_with(expr, make_temp_var);
+                        let Expr { instructions, .. } =
+                            Expr::parse_with(expr, symbols, make_temp_var);
                         block_instructions.extend(instructions);
                     }
                     ast::ForInit::Expr(None) => {}
@@ -365,7 +464,7 @@ impl Instruction {
                     let Expr {
                         instructions: instructions_condition,
                         val: val_condition,
-                    } = Expr::parse_with(cond, make_temp_var);
+                    } = Expr::parse_with(cond, symbols, make_temp_var);
                     block_instructions.extend(instructions_condition);
                     // JumpIfZero(v, break_label)
                     block_instructions.push(Instruction::JumpIfZero {
@@ -374,7 +473,11 @@ impl Instruction {
                     });
                 }
                 // <instructions for body>
-                block_instructions.extend(Instruction::parse_stmt_with(*body, make_temp_var));
+                block_instructions.extend(Instruction::parse_stmt_with(
+                    *body,
+                    symbols,
+                    make_temp_var,
+                ));
                 // Label(continue_label)
                 block_instructions.push(Instruction::Label(label_continue));
                 // <instructions for post>
@@ -382,7 +485,7 @@ impl Instruction {
                     let Expr {
                         instructions: instructions_post,
                         ..
-                    } = Expr::parse_with(post, make_temp_var);
+                    } = Expr::parse_with(post, symbols, make_temp_var);
                     block_instructions.extend(instructions_post);
                 }
                 // Jump(Start)
@@ -408,7 +511,7 @@ impl Instruction {
                 let Expr {
                     mut instructions,
                     val,
-                } = Expr::parse_with(condition, make_temp_var);
+                } = Expr::parse_with(condition, symbols, make_temp_var);
 
                 instructions.push(Self::JumpIfZero {
                     condition: val,
@@ -420,6 +523,7 @@ impl Instruction {
 
                 instructions.extend(Instruction::parse_block_with(
                     ast::Block(vec![ast::BlockItem::Stmt(*then)]),
+                    symbols,
                     make_temp_var,
                 ));
 
@@ -428,6 +532,7 @@ impl Instruction {
                     instructions.push(Instruction::Label(Rc::clone(&else_label)));
                     instructions.extend(Instruction::parse_block_with(
                         ast::Block(vec![ast::BlockItem::Stmt(*r#else)]),
+                        symbols,
                         make_temp_var,
                     ));
                 }
@@ -442,12 +547,12 @@ impl Instruction {
             } => {
                 let label = label.expect("Case must have label");
                 block_instructions.push(Instruction::Label(Rc::clone(&label)));
-                block_instructions.extend(Self::parse_stmt_with(*stmt, make_temp_var));
+                block_instructions.extend(Self::parse_stmt_with(*stmt, symbols, make_temp_var));
             }
             ast::Stmt::Default { label, stmt } => {
                 let label = label.expect("Default must have label");
                 block_instructions.push(Instruction::Label(Rc::clone(&label)));
-                block_instructions.extend(Self::parse_stmt_with(*stmt, make_temp_var));
+                block_instructions.extend(Self::parse_stmt_with(*stmt, symbols, make_temp_var));
             }
             ast::Stmt::Switch {
                 condition,
@@ -468,13 +573,14 @@ impl Instruction {
                 // 3. Perform a linear comparison for each case and jump if the
                 //  value matches.
                 if cases.is_empty() {
-                    let Expr { instructions, .. } = Expr::parse_with(condition, make_temp_var);
+                    let Expr { instructions, .. } =
+                        Expr::parse_with(condition, symbols, make_temp_var);
                     block_instructions.extend(instructions);
                     block_instructions.push(Instruction::Jump(
                         default.unwrap_or(Rc::clone(&break_label)),
                     ));
-                    block_instructions.extend(Self::parse_stmt_with(*body, make_temp_var));
-                } else if let ast::Expr::Literal(cond) = condition {
+                    block_instructions.extend(Self::parse_stmt_with(*body, symbols, make_temp_var));
+                } else if let ast::Expr::Constant(cond) = condition {
                     let jump_label = cases
                         .iter()
                         .find(|&&(case, _)| case == cond)
@@ -482,7 +588,7 @@ impl Instruction {
                     let has_jump_label = jump_label.is_some();
                     let jump_label = jump_label.unwrap_or(break_label.clone());
                     block_instructions.push(Instruction::Jump(jump_label.clone()));
-                    block_instructions.extend(Self::parse_stmt_with(*body, make_temp_var));
+                    block_instructions.extend(Self::parse_stmt_with(*body, symbols, make_temp_var));
                     if !has_jump_label {
                         block_instructions.push(Instruction::Label(jump_label));
                     }
@@ -490,15 +596,19 @@ impl Instruction {
                     let Expr {
                         instructions,
                         val: switch_val,
-                    } = Expr::parse_with(condition, make_temp_var);
+                    } = Expr::parse_with(condition, symbols, make_temp_var);
                     block_instructions.extend(instructions);
                     for (case, label) in cases.iter() {
                         let Expr {
                             instructions,
                             val: case_val,
-                        } = Expr::parse_with(ast::Expr::Literal(*case), make_temp_var);
+                        } = Expr::parse_with(ast::Expr::Constant(*case), symbols, make_temp_var);
                         block_instructions.extend(instructions);
-                        let dst = Val::Var(Rc::new(make_temp_var()));
+                        let dst = Function::make_tacky_temp_var(
+                            ast::Type::bool(),
+                            symbols,
+                            make_temp_var,
+                        );
                         block_instructions.push(Self::Binary {
                             op: BinaryOp::Equal,
                             src1: switch_val.clone(),
@@ -513,7 +623,7 @@ impl Instruction {
                     block_instructions.push(Instruction::Jump(
                         default.unwrap_or(Rc::clone(&break_label)),
                     ));
-                    block_instructions.extend(Self::parse_stmt_with(*body, make_temp_var));
+                    block_instructions.extend(Self::parse_stmt_with(*body, symbols, make_temp_var));
                 }
                 // Break label always goes after all instructions
                 block_instructions.push(Instruction::Label(break_label));
@@ -521,7 +631,11 @@ impl Instruction {
         }
         block_instructions
     }
-    fn parse_block_with(node: ast::Block, make_temp_var: &mut impl FnMut() -> String) -> Vec<Self> {
+    fn parse_block_with(
+        node: ast::Block,
+        symbols: &mut SymbolTable,
+        make_temp_var: &mut impl FnMut() -> String,
+    ) -> Vec<Self> {
         let mut block_instructions = vec![];
         for item in node.into_items().into_iter() {
             match item {
@@ -529,14 +643,18 @@ impl Instruction {
                 // If we reinitialized them here they would act like local
                 // variables (suboptimal)
                 ast::BlockItem::Decl(ast::Declaration::VarDecl(ast::VarDecl {
-                    storage_class: Some(ast::StorageClass::Static),
+                    typ:
+                        ast::Type {
+                            storage: Some(ast::StorageClass::Static),
+                            ..
+                        },
                     ..
                 })) => {}
                 ast::BlockItem::Decl(decl) => {
-                    block_instructions.extend(Self::parse_decl_with(decl, make_temp_var));
+                    block_instructions.extend(Self::parse_decl_with(decl, symbols, make_temp_var));
                 }
                 ast::BlockItem::Stmt(stmt) => {
-                    block_instructions.extend(Self::parse_stmt_with(stmt, make_temp_var));
+                    block_instructions.extend(Self::parse_stmt_with(stmt, symbols, make_temp_var));
                 }
             }
         }
@@ -551,9 +669,13 @@ pub struct Expr {
 }
 
 impl Expr {
-    fn parse_with(node: ast::Expr, make_temp_var: &mut impl FnMut() -> String) -> Expr {
+    fn parse_with(
+        node: ast::Expr,
+        symbols: &mut SymbolTable,
+        make_temp_var: &mut impl FnMut() -> String,
+    ) -> Expr {
         match node {
-            ast::Expr::Literal(v) => Self {
+            ast::Expr::Constant(v) => Self {
                 instructions: vec![],
                 val: Val::from(v),
             },
@@ -561,19 +683,23 @@ impl Expr {
                 let Self {
                     mut instructions,
                     val,
-                } = Expr::parse_with(*expr, make_temp_var);
+                } = Expr::parse_with(*expr, symbols, make_temp_var);
                 let dst = match op {
                     ast::UnaryOp::PreInc => {
                         instructions.push(Instruction::Binary {
                             op: BinaryOp::Add,
                             src1: val.clone(),
-                            src2: Val::Constant(1),
+                            src2: Val::Constant(ast::Constant::I32(1)),
                             dst: val.clone(),
                         });
                         val.clone()
                     }
                     ast::UnaryOp::PostInc => {
-                        let dst = Val::Var(make_temp_var().into());
+                        let dst = Function::make_tacky_temp_var(
+                            val.get_type(symbols),
+                            symbols,
+                            make_temp_var,
+                        );
                         instructions.push(Instruction::Copy {
                             src: val.clone(),
                             dst: dst.clone(),
@@ -581,7 +707,7 @@ impl Expr {
                         instructions.push(Instruction::Binary {
                             op: BinaryOp::Add,
                             src1: val.clone(),
-                            src2: Val::Constant(1),
+                            src2: Val::Constant(ast::Constant::I32(1)),
                             dst: val.clone(),
                         });
                         dst
@@ -590,13 +716,17 @@ impl Expr {
                         instructions.push(Instruction::Binary {
                             op: BinaryOp::Subtract,
                             src1: val.clone(),
-                            src2: Val::Constant(1),
+                            src2: Val::Constant(ast::Constant::I32(1)),
                             dst: val.clone(),
                         });
                         val.clone()
                     }
                     ast::UnaryOp::PostDec => {
-                        let dst = Val::Var(make_temp_var().into());
+                        let dst = Function::make_tacky_temp_var(
+                            val.get_type(symbols),
+                            symbols,
+                            make_temp_var,
+                        );
                         instructions.push(Instruction::Copy {
                             src: val.clone(),
                             dst: dst.clone(),
@@ -604,14 +734,20 @@ impl Expr {
                         instructions.push(Instruction::Binary {
                             op: BinaryOp::Subtract,
                             src1: val.clone(),
-                            src2: Val::Constant(1),
+                            src2: Val::Constant(ast::Constant::I32(1)),
                             dst: val.clone(),
                         });
                         dst
                     }
                     // Other operations have tacky unary op equivalents
                     _ => {
-                        let dst = Val::Var(make_temp_var().into());
+                        // FIXME: This may not be the correct type.
+                        // Does type promotion happen explicitly in ast/sema?
+                        let dst = Function::make_tacky_temp_var(
+                            val.get_type(symbols),
+                            symbols,
+                            make_temp_var,
+                        );
                         instructions.push(Instruction::Unary {
                             op: UnaryOp::from(op),
                             src: val,
@@ -632,7 +768,7 @@ impl Expr {
                     let Self {
                         mut instructions,
                         val: left_val,
-                    } = Self::parse_with(*left, make_temp_var);
+                    } = Self::parse_with(*left, symbols, make_temp_var);
 
                     let label = {
                         let mut label = make_temp_var();
@@ -665,10 +801,11 @@ impl Expr {
                     let Self {
                         instructions: right_instructions,
                         val: right_val,
-                    } = Self::parse_with(*right, make_temp_var);
+                    } = Self::parse_with(*right, symbols, make_temp_var);
                     instructions.extend(right_instructions);
 
-                    let dst = Val::Var(make_temp_var().into());
+                    let dst =
+                        Function::make_tacky_temp_var(ast::Type::bool(), symbols, make_temp_var);
                     let end = {
                         // FIXME: Support label use case
                         let mut end = make_temp_var();
@@ -687,7 +824,7 @@ impl Expr {
 
                     // result = 1
                     instructions.push(Instruction::Copy {
-                        src: Val::Constant(result_nojmp),
+                        src: Val::Constant(ast::Constant::I32(result_nojmp)),
                         dst: dst.clone(),
                     });
 
@@ -699,7 +836,7 @@ impl Expr {
 
                     // result = 0
                     instructions.push(Instruction::Copy {
-                        src: Val::Constant(result_jmp),
+                        src: Val::Constant(ast::Constant::I32(result_jmp)),
                         dst: dst.clone(),
                     });
 
@@ -720,7 +857,7 @@ impl Expr {
                         let Self {
                             mut instructions,
                             val: src,
-                        } = Self::parse_with(binary, make_temp_var);
+                        } = Self::parse_with(binary, symbols, make_temp_var);
 
                         instructions.push(Instruction::Copy {
                             src,
@@ -737,14 +874,19 @@ impl Expr {
                     let Self {
                         mut instructions,
                         val: left_val,
-                    } = Self::parse_with(*left, make_temp_var);
+                    } = Self::parse_with(*left, symbols, make_temp_var);
                     let Self {
                         instructions: right_instructions,
                         val: right_val,
-                    } = Self::parse_with(*right, make_temp_var);
+                    } = Self::parse_with(*right, symbols, make_temp_var);
                     instructions.extend(right_instructions);
 
-                    let dst = Val::Var(make_temp_var().into());
+                    // FIXME: Same as above, not exactly sure where the type casting happens
+                    let dst = Function::make_tacky_temp_var(
+                        left_val.get_type(symbols),
+                        symbols,
+                        make_temp_var,
+                    );
 
                     instructions.push(Instruction::Binary {
                         op: op.into(),
@@ -767,7 +909,7 @@ impl Expr {
                     let Self {
                         mut instructions,
                         val: src,
-                    } = Self::parse_with(*rvalue, make_temp_var);
+                    } = Self::parse_with(*rvalue, symbols, make_temp_var);
                     let dst = Val::Var(Rc::clone(name));
                     instructions.push(Instruction::Copy {
                         src,
@@ -786,20 +928,16 @@ impl Expr {
                 then,
                 r#else,
             } => {
-                let (result, e2_label, end_label) = {
+                let (e2_label, end_label) = {
                     let label = make_temp_var();
-                    // This isn't needed and can be simplified... To Bad!
-                    let Some((name, count)) = label.as_str().split_once('.') else {
-                        unreachable!("label should always be name.count");
-                    };
-                    let e2_label = format!("{name}.{count}.cond_e2");
-                    let end_label = format!("{name}.{count}.cond_end");
-                    (Rc::new(label), Rc::new(e2_label), Rc::new(end_label))
+                    let e2_label = format!("{label}.cond_e2");
+                    let end_label = format!("{label}.cond_end");
+                    (Rc::new(e2_label), Rc::new(end_label))
                 };
                 let Expr {
                     mut instructions,
                     val,
-                } = Expr::parse_with(*condition, make_temp_var);
+                } = Expr::parse_with(*condition, symbols, make_temp_var);
 
                 instructions.push(Instruction::JumpIfZero {
                     condition: val,
@@ -809,12 +947,18 @@ impl Expr {
                 let Expr {
                     instructions: e1_instructions,
                     val: e1_val,
-                } = Expr::parse_with(*then, make_temp_var);
+                } = Expr::parse_with(*then, symbols, make_temp_var);
+
+                let result = Function::make_tacky_temp_var(
+                    e1_val.get_type(symbols).clone(),
+                    symbols,
+                    make_temp_var,
+                );
 
                 instructions.extend(e1_instructions);
                 instructions.push(Instruction::Copy {
                     src: e1_val,
-                    dst: Val::Var(Rc::clone(&result)),
+                    dst: result.clone(),
                 });
 
                 instructions.push(Instruction::Jump(Rc::clone(&end_label)));
@@ -823,33 +967,48 @@ impl Expr {
                 let Expr {
                     instructions: e2_instructions,
                     val: e2_val,
-                } = Expr::parse_with(*r#else, make_temp_var);
+                } = Expr::parse_with(*r#else, symbols, make_temp_var);
 
                 instructions.extend(e2_instructions);
 
                 instructions.push(Instruction::Copy {
                     src: e2_val,
-                    dst: Val::Var(Rc::clone(&result)),
+                    dst: result.clone(),
                 });
 
                 instructions.push(Instruction::Label(end_label));
 
                 Self {
                     instructions,
-                    val: Val::Var(Rc::clone(&result)),
+                    val: result,
                 }
             }
             ast::Expr::FunCall { name, args } => {
-                let label = Rc::new(make_temp_var());
+                let SymbolEntry {
+                    r#type:
+                        ast::Type {
+                            base: ast::BaseType::Fun { ret_t, .. },
+                            ..
+                        },
+                    ..
+                } = symbols
+                    .get(&name)
+                    .expect("Function '{name}' should already be in symbol table, but it was not!")
+                else {
+                    unreachable!(
+                        "Function name '{name}' resulted in non-function type in symbol table"
+                    );
+                };
+                let dst = Function::make_tacky_temp_var(*ret_t.clone(), symbols, make_temp_var);
                 let (mut instructions, args) =
                     args.into_iter()
                         .fold((vec![], vec![]), |(mut instrs, mut args), arg| {
-                            let Expr { instructions, val } = Expr::parse_with(arg, make_temp_var);
+                            let Expr { instructions, val } =
+                                Expr::parse_with(arg, symbols, make_temp_var);
                             instrs.extend(instructions);
                             args.push(val);
                             (instrs, args)
                         });
-                let dst = Val::Var(label);
                 instructions.push(Instruction::FunCall {
                     name,
                     args,
@@ -860,21 +1019,64 @@ impl Expr {
                     val: dst,
                 }
             }
+            ast::Expr::Cast { target, exp: expr } => {
+                let Expr {
+                    mut instructions,
+                    val,
+                } = Expr::parse_with(*expr, symbols, make_temp_var);
+
+                // I do this cause get_type currently clones on vars
+                let val_type = val.get_type(symbols);
+                if target == val_type {
+                    return Self { instructions, val };
+                }
+                let dst = Function::make_tacky_temp_var(target.clone(), symbols, make_temp_var);
+
+                // FIXME: This needs to use PartialEq/Eq
+                if target.base.nbytes() > val_type.base.nbytes() {
+                    instructions.push(Instruction::SignExtend {
+                        src: val,
+                        dst: dst.clone(),
+                    });
+                } else {
+                    instructions.push(Instruction::Truncate {
+                        src: val,
+                        dst: dst.clone(),
+                    });
+                }
+
+                Self {
+                    instructions,
+                    val: dst,
+                }
+            }
         }
     }
 }
 
-// TODO: Other types
 #[derive(Clone, Debug, PartialEq)]
 pub enum Val {
-    Constant(i32),
+    Constant(ast::Constant),
     Var(Rc<String>),
 }
-impl From<ast::Literal> for Val {
-    fn from(node: ast::Literal) -> Self {
-        match node {
-            ast::Literal::Int(i) => Self::Constant(i),
+
+impl Val {
+    fn get_type(&self, symbols: &SymbolTable) -> ast::Type {
+        match self {
+            Self::Constant(c) => c.get_type(),
+            Self::Var(name) => {
+                let Some(entry) = symbols.get(name) else {
+                    unreachable!("Variable name '{name}' not found in symbol table");
+                };
+                entry.r#type.clone()
+            }
         }
+    }
+}
+
+impl From<ast::Constant> for Val {
+    fn from(node: ast::Constant) -> Self {
+        Self::Constant(node)
     }
 }
 
@@ -972,39 +1174,44 @@ mod tests {
 
     #[test]
     fn test_return_literal() {
+        let mut symbols = SymbolTable::default();
         let ast = ast::Block(vec![ast::BlockItem::Stmt(ast::Stmt::Return(Some(
-            ast::Expr::Literal(ast::Literal::Int(2)),
+            ast::Expr::Constant(ast::Constant::I32(2)),
         )))]);
         let mut counter = 0;
         let mut make_temp_var = Function::make_temp_var(Rc::new("test".to_string()), &mut counter);
-        let actual = Instruction::parse_block_with(ast, &mut make_temp_var);
-        let expected = vec![Instruction::Return(Some(Val::Constant(2)))];
+        let actual = Instruction::parse_block_with(ast, &mut symbols, &mut make_temp_var);
+        let expected = vec![Instruction::Return(Some(Val::Constant(
+            ast::Constant::I32(2),
+        )))];
         assert_eq!(actual, expected);
     }
 
     #[test]
     fn test_return_unary() {
+        let mut symbols = SymbolTable::default();
         let ast = ast::Block(vec![ast::BlockItem::Stmt(ast::Stmt::Return(Some(
             ast::Expr::Unary {
                 op: ast::UnaryOp::Complement,
-                expr: Box::new(ast::Expr::Literal(ast::Literal::Int(2))),
+                expr: Box::new(ast::Expr::Constant(ast::Constant::I32(2))),
             },
         )))]);
         let mut counter = 0;
         let mut make_temp_var = Function::make_temp_var(Rc::new("test".to_string()), &mut counter);
-        let actual = Instruction::parse_block_with(ast, &mut make_temp_var);
+        let actual = Instruction::parse_block_with(ast, &mut symbols, &mut make_temp_var);
         let expected = vec![
             Instruction::Unary {
                 op: UnaryOp::Complement,
-                src: Val::Constant(2),
-                dst: Val::Var("test.0".to_string().into()),
+                src: Val::Constant(ast::Constant::I32(2)),
+                dst: Val::Var("tacky.test.0".to_string().into()),
             },
-            Instruction::Return(Some(Val::Var("test.0".to_string().into()))),
+            Instruction::Return(Some(Val::Var("tacky.test.0".to_string().into()))),
         ];
         assert_eq!(actual, expected);
     }
     #[test]
     fn test_return_nested_unary() {
+        let mut symbols = SymbolTable::default();
         let ast = ast::Block(vec![ast::BlockItem::Stmt(ast::Stmt::Return(Some(
             ast::Expr::Unary {
                 op: ast::UnaryOp::Negate,
@@ -1012,85 +1219,86 @@ mod tests {
                     op: ast::UnaryOp::Complement,
                     expr: Box::new(ast::Expr::Unary {
                         op: ast::UnaryOp::Negate,
-                        expr: Box::new(ast::Expr::Literal(ast::Literal::Int(2))),
+                        expr: Box::new(ast::Expr::Constant(ast::Constant::I32(2))),
                     }),
                 }),
             },
         )))]);
         let mut counter = 0;
         let mut make_temp_var = Function::make_temp_var(Rc::new("test".to_string()), &mut counter);
-        let actual = Instruction::parse_block_with(ast, &mut make_temp_var);
+        let actual = Instruction::parse_block_with(ast, &mut symbols, &mut make_temp_var);
         let expected = vec![
             Instruction::Unary {
                 op: UnaryOp::Negate,
-                src: Val::Constant(2),
-                dst: Val::Var("test.0".to_string().into()),
+                src: Val::Constant(ast::Constant::I32(2)),
+                dst: Val::Var("tacky.test.0".to_string().into()),
             },
             Instruction::Unary {
                 op: UnaryOp::Complement,
-                src: Val::Var("test.0".to_string().into()),
-                dst: Val::Var("test.1".to_string().into()),
+                src: Val::Var("tacky.test.0".to_string().into()),
+                dst: Val::Var("tacky.test.1".to_string().into()),
             },
             Instruction::Unary {
                 op: UnaryOp::Negate,
-                src: Val::Var("test.1".to_string().into()),
-                dst: Val::Var("test.2".to_string().into()),
+                src: Val::Var("tacky.test.1".to_string().into()),
+                dst: Val::Var("tacky.test.2".to_string().into()),
             },
-            Instruction::Return(Some(Val::Var("test.2".to_string().into()))),
+            Instruction::Return(Some(Val::Var("tacky.test.2".to_string().into()))),
         ];
         assert_eq!(actual, expected);
     }
 
     #[test]
     fn test_binary_expr() {
+        let mut symbols = SymbolTable::default();
         let ast_binary_expr = ast::Expr::Binary {
             op: ast::BinaryOp::Subtract,
             left: Box::new(ast::Expr::Binary {
                 op: ast::BinaryOp::Multiply,
-                left: Box::new(ast::Expr::Literal(ast::Literal::Int(1))),
-                right: Box::new(ast::Expr::Literal(ast::Literal::Int(2))),
+                left: Box::new(ast::Expr::Constant(ast::Constant::I32(1))),
+                right: Box::new(ast::Expr::Constant(ast::Constant::I32(2))),
             }),
             right: Box::new(ast::Expr::Binary {
                 op: ast::BinaryOp::Multiply,
-                left: Box::new(ast::Expr::Literal(ast::Literal::Int(3))),
+                left: Box::new(ast::Expr::Constant(ast::Constant::I32(3))),
                 right: Box::new(ast::Expr::Binary {
                     op: ast::BinaryOp::Add,
-                    left: Box::new(ast::Expr::Literal(ast::Literal::Int(4))),
-                    right: Box::new(ast::Expr::Literal(ast::Literal::Int(5))),
+                    left: Box::new(ast::Expr::Constant(ast::Constant::I32(4))),
+                    right: Box::new(ast::Expr::Constant(ast::Constant::I32(5))),
                 }),
             }),
         };
         let mut counter = 0;
         let mut make_temp_var = Function::make_temp_var(Rc::new("test".to_string()), &mut counter);
-        let tacky_expr = Expr::parse_with(ast_binary_expr, &mut make_temp_var);
+        let tacky_expr = Expr::parse_with(ast_binary_expr, &mut symbols, &mut make_temp_var);
         let expected = Expr {
             instructions: vec![
                 Instruction::Binary {
                     op: BinaryOp::Multiply,
-                    src1: Val::Constant(1),
-                    src2: Val::Constant(2),
-                    dst: Val::Var(Rc::new("test.0".to_string())),
+                    src1: Val::Constant(ast::Constant::I32(1)),
+                    src2: Val::Constant(ast::Constant::I32(2)),
+                    dst: Val::Var(Rc::new("tacky.test.0".to_string())),
                 },
                 Instruction::Binary {
                     op: BinaryOp::Add,
-                    src1: Val::Constant(4),
-                    src2: Val::Constant(5),
-                    dst: Val::Var(Rc::new("test.1".to_string())),
+                    src1: Val::Constant(ast::Constant::I32(4)),
+                    src2: Val::Constant(ast::Constant::I32(5)),
+                    dst: Val::Var(Rc::new("tacky.test.1".to_string())),
                 },
                 Instruction::Binary {
                     op: BinaryOp::Multiply,
-                    src1: Val::Constant(3),
-                    src2: Val::Var(Rc::new("test.1".to_string())),
-                    dst: Val::Var(Rc::new("test.2".to_string())),
+                    src1: Val::Constant(ast::Constant::I32(3)),
+                    src2: Val::Var(Rc::new("tacky.test.1".to_string())),
+                    dst: Val::Var(Rc::new("tacky.test.2".to_string())),
                 },
                 Instruction::Binary {
                     op: BinaryOp::Subtract,
-                    src1: Val::Var(Rc::new("test.0".to_string())),
-                    src2: Val::Var(Rc::new("test.2".to_string())),
-                    dst: Val::Var(Rc::new("test.3".to_string())),
+                    src1: Val::Var(Rc::new("tacky.test.0".to_string())),
+                    src2: Val::Var(Rc::new("tacky.test.2".to_string())),
+                    dst: Val::Var(Rc::new("tacky.test.3".to_string())),
                 },
             ],
-            val: Val::Var(Rc::new("test.3".to_string())),
+            val: Val::Var(Rc::new("tacky.test.3".to_string())),
         };
         assert_eq!(expected, tacky_expr);
     }

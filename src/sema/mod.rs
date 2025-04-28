@@ -8,7 +8,7 @@ mod typechecking;
 use std::{collections::HashMap, marker::PhantomData, rc::Rc};
 
 use crate::ast;
-use anyhow::{bail, ensure, Error, Result};
+use anyhow::{Error, Result, bail, ensure};
 
 // Module internals
 #[derive(Debug)]

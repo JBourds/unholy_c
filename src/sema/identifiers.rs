@@ -96,12 +96,12 @@ fn resolve_local_var_decl(
     if let Some(prev_entry) = ident_map.get(&decl.name) {
         if prev_entry.from_current_scope
             && !(prev_entry.has_external_linkage
-                && decl.storage_class == Some(ast::StorageClass::Extern))
+                && decl.typ.storage == Some(ast::StorageClass::Extern))
         {
             bail!("Conflicting local declaration '{}' ", decl.name);
         }
     }
-    if let Some(ast::StorageClass::Extern) = decl.storage_class {
+    if let Some(ast::StorageClass::Extern) = decl.typ.storage {
         _ = ident_map.insert(
             Rc::clone(&decl.name),
             IdentEntry::new_external(Rc::clone(&decl.name)),
@@ -289,10 +289,12 @@ fn resolve_stmt(
             label,
         } => {
             let mut new_map = make_new_scope(ident_map);
-            let init = match init {
-                ast::ForInit::Decl(decl) => {
-                    ast::ForInit::Decl(resolve_local_var_decl(decl, &mut new_map, make_temporary)?)
-                }
+            let init = match *init {
+                ast::ForInit::Decl(ref decl) => ast::ForInit::Decl(resolve_local_var_decl(
+                    decl.clone(),
+                    &mut new_map,
+                    make_temporary,
+                )?),
                 ast::ForInit::Expr(Some(expr)) => {
                     ast::ForInit::Expr(Some(resolve_expr(expr, &new_map)?))
                 }
@@ -309,7 +311,7 @@ fn resolve_stmt(
                 None
             };
             Ok(ast::Stmt::For {
-                init,
+                init: Box::new(init),
                 condition,
                 post,
                 body: Box::new(resolve_stmt(*body, &new_map, make_temporary)?),
@@ -374,7 +376,7 @@ fn resolve_expr(expr: ast::Expr, ident_map: &HashMap<Rc<String>, IdentEntry>) ->
                 bail!("Undeclared variable '{var}'")
             }
         }
-        ast::Expr::Literal(lit) => Ok(ast::Expr::Literal(lit)),
+        node @ ast::Expr::Constant(_) => Ok(node),
         ast::Expr::Unary { op, expr } => {
             if op.is_valid_for(&expr) {
                 Ok(ast::Expr::Unary {
@@ -417,5 +419,9 @@ fn resolve_expr(expr: ast::Expr, ident_map: &HashMap<Rc<String>, IdentEntry>) ->
                 args: valid_args,
             })
         }
+        ast::Expr::Cast { exp, target } => Ok(ast::Expr::Cast {
+            target,
+            exp: Box::new(resolve_expr(*exp, ident_map)?),
+        }),
     }
 }

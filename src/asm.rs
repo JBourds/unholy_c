@@ -3,21 +3,24 @@ use anyhow::Result;
 use std::fmt::Write;
 
 pub trait AsmGen<W> {
-    fn gen(writer: W, program: codegen::Program) -> Result<()>
+    fn r#gen(writer: W, program: codegen::Program) -> Result<()>
     where
         W: Write;
 }
 
 pub mod x64 {
     use super::AsmGen;
-    use crate::codegen::{self, Operand};
-    use anyhow::{bail, Result};
+    use crate::{
+        codegen::{self, Operand},
+        tacky,
+    };
+    use anyhow::{Result, bail};
     use std::fmt::Write;
 
     pub struct Generator;
 
     impl<W> AsmGen<W> for Generator {
-        fn gen(mut writer: W, program: crate::codegen::Program) -> Result<()>
+        fn r#gen(mut writer: W, program: crate::codegen::Program) -> Result<()>
         where
             W: std::fmt::Write,
         {
@@ -32,7 +35,7 @@ pub mod x64 {
         for entry in program.top_level.into_iter() {
             match entry {
                 codegen::TopLevel::Fun(f) => gen_function(w, f)?,
-                codegen::TopLevel::Static(v) => gen_static(w, v)?,
+                codegen::TopLevel::Static(v) => gen_static(w, v, &program.symbols)?,
             }
         }
 
@@ -40,23 +43,40 @@ pub mod x64 {
         Ok(())
     }
 
-    fn gen_static(w: &mut impl Write, var: codegen::StaticVariable) -> Result<()> {
+    fn gen_static(
+        w: &mut impl Write,
+        var: codegen::StaticVariable,
+        symbols: &tacky::SymbolTable,
+    ) -> Result<()> {
+        let symbol = symbols.get(&var.identifier).unwrap();
         if var.global {
             w.write_fmt(format_args!("\t.globl {}\n", var.identifier))?;
         }
-        let init_value = var.init.unwrap_or(0);
-        if init_value == 0 {
+        let init_value = var.init.expect("all statics have some init after tacky?");
+        let in_bss = init_value.iter().all(|x| *x == 0);
+        if in_bss {
             w.write_fmt(format_args!("\t.bss\n"))?;
         } else {
             w.write_fmt(format_args!("\t.data\n"))?;
         }
-        // TODO: Unhardcode 4 here - take symbol info into this pass and calculate alignment
-        w.write_fmt(format_args!("\t.align 4\n"))?;
+        w.write_fmt(format_args!("\t.align {}\n", symbol.r#type.alignment))?;
         w.write_fmt(format_args!("{}:\n", var.identifier))?;
-        if init_value == 0 {
-            w.write_fmt(format_args!("\t.zero {}\n", 4))?;
+        if in_bss {
+            w.write_fmt(format_args!("\t.zero {}\n", symbol.r#type.size_of()))?;
         } else {
-            w.write_fmt(format_args!("\t.long {}\n", init_value))?;
+            // FIXME: This is not how this should be done
+            let nbytes = symbol.r#type.size_of();
+            match nbytes {
+                8 => w.write_fmt(format_args!(
+                    "\t.quad {}\n",
+                    i64::from_le_bytes(init_value[0..nbytes].try_into().unwrap())
+                ))?,
+                4 => w.write_fmt(format_args!(
+                    "\t.long {}\n",
+                    i32::from_le_bytes(init_value[0..nbytes].try_into().unwrap())
+                ))?,
+                _ => unreachable!(),
+            }
         }
         w.write_char('\n')?;
 
@@ -109,6 +129,12 @@ pub mod x64 {
                     get_specifier(Some(&src), &dst)
                 ))?;
             }
+            codegen::InstructionType::Movsx { src, dst } => {
+                w.write_fmt(format_args!(
+                    "\tmovslq {}{dst}, {src}\n",
+                    get_specifier(Some(&src), &dst)
+                ))?;
+            }
             codegen::InstructionType::Ret => {
                 w.write_str("\tmov rsp, rbp\n")?;
                 w.write_str("\tpop rbp\n")?;
@@ -117,17 +143,7 @@ pub mod x64 {
             codegen::InstructionType::Unary { op, dst } => {
                 w.write_fmt(format_args!("\t{op} {}{dst}\n", get_specifier(None, &dst)))?
             }
-            codegen::InstructionType::AllocStack(size) => {
-                w.write_fmt(format_args!("\tsub rsp, {size}\n"))?;
-            }
-            codegen::InstructionType::DeAllocStack(size) => {
-                w.write_fmt(format_args!("\tadd rsp, {size}\n"))?;
-            }
-            codegen::InstructionType::Binary {
-                op,
-                src,
-                dst,
-            } => {
+            codegen::InstructionType::Binary { op, src, dst } => {
                 // Special case- if we are bitshifting then the "cl" register
                 // can be the src2 operand but says nothing about the size of
                 // the data it points to
@@ -139,9 +155,11 @@ pub mod x64 {
                 };
                 w.write_fmt(format_args!("\t{op} {specifier}{dst}, {src}\n",))?
             }
-            codegen::InstructionType::Cdq => {
-                w.write_str("\tcdq\n")?;
-            }
+            codegen::InstructionType::Cdq(section) => match section {
+                codegen::RegSection::Dword => w.write_str("\tcdq\n")?,
+                codegen::RegSection::Qword => w.write_str("\tcqo\n")?,
+                _ => unreachable!(),
+            },
             codegen::InstructionType::Idiv(operand) => w.write_fmt(format_args!(
                 "\tidiv {}{operand}\n",
                 get_specifier(None, &operand)
@@ -163,9 +181,13 @@ pub mod x64 {
             }
             codegen::InstructionType::SetCC { cond_code, dst } => {
                 let dst = match dst {
-                    codegen::Operand::Reg(r) => codegen::Operand::Reg(r.as_section(codegen::RegSection::LowByte)),
-                    codegen::Operand::StackOffset { offset, .. } => codegen::Operand::StackOffset { offset, size: 1 },
-                    _ => dst
+                    codegen::Operand::Reg(r) => {
+                        codegen::Operand::Reg(r.as_section(codegen::RegSection::LowByte))
+                    }
+                    codegen::Operand::StackOffset { offset, .. } => {
+                        codegen::Operand::StackOffset { offset, size: 1 }
+                    }
+                    _ => dst,
                 };
                 w.write_fmt(format_args!(
                     "\tset{cond_code} {}{dst}\n",
@@ -188,21 +210,22 @@ pub mod x64 {
                 };
                 w.write_fmt(format_args!("\tpush {}{op}\n", get_specifier(None, &op)))?;
             }
-            codegen::InstructionType::Pop(op) => {
-                match op {
-                    codegen::Operand::Reg(_) | codegen::Operand::StackOffset { .. } => {
-                        let op = if let codegen::Operand::Reg(r) = op {
-                            codegen::Operand::Reg(r.as_section(codegen::RegSection::Qword))
-                        } else {
-                            op
-                        };
-                        w.write_fmt(format_args!("\tpop {}{op}\n", get_specifier(None, &op)))?;
-                    }
-                    _ => bail!("Cannot push stack to argument {} which is neither a register nor a memory location.", op)
+            codegen::InstructionType::Pop(op) => match op {
+                codegen::Operand::Reg(_) | codegen::Operand::StackOffset { .. } => {
+                    let op = if let codegen::Operand::Reg(r) = op {
+                        codegen::Operand::Reg(r.as_section(codegen::RegSection::Qword))
+                    } else {
+                        op
+                    };
+                    w.write_fmt(format_args!("\tpop {}{op}\n", get_specifier(None, &op)))?;
                 }
-            }
+                _ => bail!(
+                    "Cannot push stack to argument {} which is neither a register nor a memory location.",
+                    op
+                ),
+            },
             codegen::InstructionType::Call(name) => {
-                w.write_fmt(format_args!("\tcall {name}@PLT\n"))?;
+                w.write_fmt(format_args!("\tcall \"{name}\"@PLT\n"))?;
             }
         }
         Ok(())

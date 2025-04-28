@@ -1,11 +1,11 @@
 use anyhow::ensure;
-use ast::Literal;
+use ast::Constant;
 
 use super::*;
 
 struct SwitchContext {
     name: Option<Rc<String>>,
-    label_map: HashMap<ast::Literal, Rc<String>>,
+    label_map: HashMap<ast::Constant, Rc<String>>,
     active: bool,
     default: Option<Rc<String>>,
 }
@@ -133,13 +133,15 @@ fn resolve_stmt(
             if switch_context.label_map.contains_key(&const_value) {
                 bail!("Duplicate case statement: {const_value}");
             }
-            ensure!(switch_context
-                .label_map
-                .insert(const_value, Rc::clone(&label))
-                .is_none());
+            ensure!(
+                switch_context
+                    .label_map
+                    .insert(const_value, Rc::clone(&label))
+                    .is_none()
+            );
             let stmt = resolve_stmt(*stmt, switch_context, make_label)?;
             Ok(ast::Stmt::Case {
-                value: ast::Expr::Literal(const_value),
+                value: ast::Expr::Constant(const_value),
                 stmt: Box::new(stmt),
                 label: Some(label),
             })
@@ -161,9 +163,9 @@ fn resolve_stmt(
             let cases = switch_context
                 .label_map
                 .drain()
-                .collect::<Vec<(Literal, Rc<String>)>>();
+                .collect::<Vec<(Constant, Rc<String>)>>();
             let condition = if let Ok(cond) = const_eval::eval(condition.clone()) {
-                ast::Expr::Literal(cond)
+                ast::Expr::Constant(cond)
             } else {
                 condition
             };

@@ -620,7 +620,9 @@ fn typecheck_stmt(
                         if !found.base.can_assign_to(&expected.base) {
                             bail!("Found return type: \"{found}\" in function \"{function}\" but expected return type: \"{expected}\"");
                         } else {
-                            Ok(ast::Stmt::Return(Some(expr)))
+                            Ok(ast::Stmt::Return(Some(try_implicit_cast(&expected.clone(), &expr, symbols)
+                                        .context(format!("Unable to implicitly cast return value to expected return type in \"{}\"", function))?
+                                        )))
                         }
                     } else {
                         bail!("Could not find function {function} in symbol table.")

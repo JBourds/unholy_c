@@ -856,64 +856,55 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
                 r#type: right_t,
             } = typecheck_expr(right, symbols)
                 .context("Failed to typecheck righthand argument of binary operation.")?;
+
+            let (lifted_left_t, lifted_right_t) =
+                ast::BaseType::lift(left_t.base.clone(), right_t.base.clone())
+                    .context("Unable to promote {left_t:#?} and {right_t:#?} to a common type.")?;
+            // With a binary expression, we force both operands to be of
+            // the same type so the decision between left or right is
+            // arbitrary
+            let common_t = ast::Type {
+                base: lifted_left_t.clone(),
+                storage: None,
+                is_const: true,
+                ..left_t
+            };
+            let left = if lifted_left_t != left_t.base {
+                ast::Expr::Cast {
+                    target: common_t.clone(),
+                    exp: Box::new(left),
+                }
+            } else {
+                left
+            };
+            let right = if lifted_right_t != right_t.base {
+                ast::Expr::Cast {
+                    target: common_t.clone(),
+                    exp: Box::new(right),
+                }
+            } else {
+                right
+            };
+            let exp = ast::Expr::Binary {
+                op: *op,
+                left: Box::new(left),
+                right: Box::new(right),
+            };
             if op.is_logical() {
+                // Booleans are always represented as integers
+                let target = ast::Type::bool();
                 Ok(TypedExpr {
-                    expr: ast::Expr::Binary {
-                        op: *op,
-                        left: Box::new(left),
-                        right: Box::new(right),
+                    expr: ast::Expr::Cast {
+                        target: target.clone(),
+                        exp: Box::new(exp),
                     },
-                    r#type: ast::Type::bool(),
+                    r#type: target,
                 })
             } else {
-                let (conv_left_t, conv_right_t) =
-                    ast::BaseType::lift(left_t.base.clone(), right_t.base.clone()).context(
-                        "Unable to promote {left_t:#?} and {right_t:#?} to a common type.",
-                    )?;
-                let left_changed = conv_left_t != left_t.base;
-                let right_changed = conv_right_t != right_t.base;
-                // With a binary expression, we force both operands to be of
-                // the same type so the decision between left or right is
-                // arbitrary
-                let common_t = ast::Type {
-                    base: conv_left_t,
-                    storage: None,
-                    is_const: true,
-                    ..left_t
-                };
-                let left = if left_changed {
-                    ast::Expr::Cast {
-                        target: common_t.clone(),
-                        exp: Box::new(left),
-                    }
-                } else {
-                    left
-                };
-                let right = if right_changed {
-                    ast::Expr::Cast {
-                        target: common_t.clone(),
-                        exp: Box::new(right),
-                    }
-                } else {
-                    right
-                };
-                let exp = ast::Expr::Binary {
-                    op: *op,
-                    left: Box::new(left),
-                    right: Box::new(right),
-                };
-                if op.is_logical() {
-                    let target = ast::Type::bool();
-                    try_implicit_cast(&target, expr, symbols).map(|expr| TypedExpr {
-                        r#type: target,
-                        expr,
-                    })
-                } else {
-                    Ok(TypedExpr {
-                        expr: exp,
-                        r#type: common_t,
-                    })
-                }
+                Ok(TypedExpr {
+                    expr: exp,
+                    r#type: common_t,
+                })
             }
         }
         ast::Expr::Conditional {

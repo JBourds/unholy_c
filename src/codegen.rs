@@ -763,7 +763,13 @@ impl Instruction<WithStorage> {
     fn fixup_immediates(self) -> Vec<Self> {
         match self.op {
             InstructionType::Binary {
-                op: BinaryOp::Add,
+                op:
+                    op @ BinaryOp::Add
+                    | op @ BinaryOp::Subtract
+                    | op @ BinaryOp::Multiply
+                    | op @ BinaryOp::BitAnd
+                    | op @ BinaryOp::BitOr
+                    | op @ BinaryOp::Xor,
                 src: src @ Operand::Imm(..),
                 dst,
             } if src.size() > 4 => {
@@ -780,61 +786,7 @@ impl Instruction<WithStorage> {
                         src,
                         dst: r10.clone(),
                     }),
-                    Self::from_op(InstructionType::Binary {
-                        op: BinaryOp::Add,
-                        src: r10,
-                        dst,
-                    }),
-                ]
-            }
-            InstructionType::Binary {
-                op: BinaryOp::Subtract,
-                src: src @ Operand::Imm(..),
-                dst,
-            } if src.size() > 4 => {
-                assert!(
-                    !matches!(dst, Operand::Imm(..)),
-                    "The destination of an immediate in addition should have already been resolved"
-                );
-                let r10 = Operand::Reg(Reg::X64 {
-                    reg: X64Reg::R10,
-                    section: RegSection::from_size(src.size()).expect("FIXME"),
-                });
-                vec![
-                    Self::from_op(InstructionType::Mov {
-                        src,
-                        dst: r10.clone(),
-                    }),
-                    Self::from_op(InstructionType::Binary {
-                        op: BinaryOp::Subtract,
-                        src: r10,
-                        dst,
-                    }),
-                ]
-            }
-            InstructionType::Binary {
-                op: BinaryOp::Multiply,
-                src: src @ Operand::Imm(..),
-                dst,
-            } if src.size() > 4 => {
-                assert!(
-                    !matches!(dst, Operand::Imm(..)),
-                    "The destination of an immediate in addition should have already been resolved"
-                );
-                let r10 = Operand::Reg(Reg::X64 {
-                    reg: X64Reg::R10,
-                    section: RegSection::from_size(src.size()).expect("FIXME"),
-                });
-                vec![
-                    Self::from_op(InstructionType::Mov {
-                        src,
-                        dst: r10.clone(),
-                    }),
-                    Self::from_op(InstructionType::Binary {
-                        op: BinaryOp::Add,
-                        src: r10,
-                        dst,
-                    }),
+                    Self::from_op(InstructionType::Binary { op, src: r10, dst }),
                 ]
             }
             InstructionType::Cmp {

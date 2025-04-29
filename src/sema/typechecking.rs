@@ -722,8 +722,13 @@ fn typecheck_stmt(
                 label,
                 default,
             } => {
-                let condition = typecheck_expr(&condition, symbols)
-                    .context("Failed to typecheck switch expression.")?.expr;
+                let TypedExpr { expr: condition, r#type: condition_type } = typecheck_expr(&condition, symbols)
+                    .context("Failed to typecheck switch expression.")?;
+
+                if matches!(condition_type.base, ast::BaseType::Fun { .. }) {
+                    bail!("Cannot switch on {condition:#?} as it has type {condition_type:#?}");
+                }
+                
                 let body = typecheck_stmt(*body, symbols, function)
                     .context("Failed to typecheck switch body.")?;
                 if let Some(ref cases) = cases {

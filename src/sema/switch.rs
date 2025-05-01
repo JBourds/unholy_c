@@ -30,7 +30,7 @@ impl SwitchContext {
     }
 }
 
-pub fn validate(stage: SemaStage<GotoValidation>) -> Result<SemaStage<SwitchLabelling>> {
+pub fn validate(stage: SemaStage<IdentResolution>) -> Result<SemaStage<SwitchLabelling>> {
     let valid_declarations = stage
         .program
         .declarations

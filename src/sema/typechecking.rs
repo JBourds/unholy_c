@@ -523,7 +523,7 @@ struct TypedExpr {
     r#type: ast::Type,
 }
 
-pub fn validate(stage: SemaStage<IdentResolution>) -> Result<SemaStage<TypeChecking>> {
+pub fn validate(stage: SemaStage<SwitchLabelling>) -> Result<SemaStage<TypeChecking>> {
     let mut symbols = SymbolTable::new_table();
 
     Ok(SemaStage {

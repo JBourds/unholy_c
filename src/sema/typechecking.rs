@@ -731,14 +731,17 @@ fn typecheck_stmt(
                 
                 let body = typecheck_stmt(*body, symbols, function)
                     .context("Failed to typecheck switch body.")?;
-                if let Some(ref cases) = cases {
-                    for (literal, name) in cases.iter() {
-                        if !literal.is_int() {
-                            bail!("Non-integer type in case {name}.");
-                        }
-                    }
+                let mut casted_cases = vec![];
+                let cases = cases.as_ref().expect("At this point there should be cases or an empty vector, but never a None variant.");
+                for (val, s) in cases.iter() {
+                    let expr = 
+                        try_implicit_cast(&condition_type, &ast::Expr::Constant(*val), symbols)
+                        .context(format!("Unable to implicitly case constant to type {condition_type:#?}"))?;
+                    let constant = const_eval::eval(expr)
+                        .context("Unable to convert case expression into constant value.")?;
+                    casted_cases.push((constant, Rc::clone(s)));
                 }
-                Ok(ast::Stmt::Switch { condition, body: Box::new(body), cases, label, default})
+                Ok(ast::Stmt::Switch { condition, body: Box::new(body), cases: Some(casted_cases), label, default})
             }
         ast::Stmt::Null => Ok(stmt),
         ast::Stmt::Break(_) => Ok(stmt),

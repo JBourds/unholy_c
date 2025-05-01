@@ -814,7 +814,6 @@ impl Factor {
             }
             _ => match tokens {
                 [Token::Constant { .. }, ..] => {
-                    println!("Matched constant!");
                     let (lit, tokens) = Constant::consume(tokens)?;
                     Ok((Expr::Constant(lit), tokens))
                 }

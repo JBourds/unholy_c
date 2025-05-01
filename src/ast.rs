@@ -813,6 +813,7 @@ impl Factor {
             }
             _ => match tokens {
                 [Token::Constant { .. }, ..] => {
+                    println!("Matched constant!");
                     let (lit, tokens) = Constant::consume(tokens)?;
                     Ok((Expr::Constant(lit), tokens))
                 }
@@ -1467,27 +1468,49 @@ impl AstNode for Constant {
                 // NOTE: The text in these nodes does not include the negative
                 // sign so we don't need to worry about absolute value sign
                 Token::Constant { text, suffix: None } => {
-                    // TODO: Update this once we support unsigned types too?
-                    // Try all our parsing rules out until we get one which
-                    // has the necessary precision
                     if let Ok(val) = text.parse::<i32>() {
                         Ok((Self::I32(val), &tokens[1..]))
                     } else if let Ok(val) = text.parse::<i64>() {
                         Ok((Self::I64(val), &tokens[1..]))
+                    } else if let Ok(val) = text.parse::<u32>() {
+                        Ok((Self::U32(val), &tokens[1..]))
+                    } else if let Ok(val) = text.parse::<u64>() {
+                        Ok((Self::U64(val), &tokens[1..]))
                     } else {
                         bail!("Could not parse interger literal into constant.")
                     }
                 }
-                Token::Constant {
-                    text,
-                    suffix: Some(ConstantSuffix::Long),
-                } => {
-                    if let Ok(long) = text.parse::<i64>() {
-                        Ok((Self::I64(long), &tokens[1..]))
-                    } else {
-                        bail!("Could not parse token into constant.")
+                Token::Constant { text, suffix } => match suffix {
+                    Some(ConstantSuffix::Unsigned) => {
+                        let val = if let Ok(val) = text.parse::<u32>() {
+                            Self::U32(val)
+                        } else if let Ok(val) = text.parse::<u64>() {
+                            Self::U64(val)
+                        } else {
+                            eprintln!("Warning: Integer constant is being truncated to fit.");
+                            todo!();
+                        };
+                        Ok((val, &tokens[1..]))
                     }
-                }
+                    Some(ConstantSuffix::UnsignedLong) => Ok((
+                        Self::U64(text.parse::<u64>().context(
+                            "Unable to parse unsigned long from integer constant text.",
+                        )?),
+                        &tokens[1..],
+                    )),
+                    Some(ConstantSuffix::Long) => {
+                        let val = if let Ok(val) = text.parse::<i64>() {
+                            Self::I64(val)
+                        } else if let Ok(val) = text.parse::<u64>() {
+                            Self::U64(val)
+                        } else {
+                            eprintln!("Warning: Integer constant is being truncated to fit.");
+                            todo!();
+                        };
+                        Ok((val, &tokens[1..]))
+                    }
+                    _ => bail!("Could not parse token into constant."),
+                },
                 _ => bail!("Could not parse token into constant."),
             }
         } else {

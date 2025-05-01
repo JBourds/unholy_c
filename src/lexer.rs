@@ -389,14 +389,17 @@ impl Token {
                 &[.., c1, c2] => {
                     let c1 = c1.to_ascii_lowercase();
                     let c2 = c2.to_ascii_lowercase();
-                    let suffix = match (c1, c2) {
-                        (b'u', b'l') | (b'l', b'u') => Some(ConstantSuffix::UnsignedLong),
-                        (_, b'l') => Some(ConstantSuffix::Long),
-                        (_, b'u') => Some(ConstantSuffix::Unsigned),
-                        _ => None,
+                    let (suffix_len, suffix) = match (c1, c2) {
+                        (b'u', b'l') | (b'l', b'u') => (2, Some(ConstantSuffix::UnsignedLong)),
+                        (_, b'l') => (1, Some(ConstantSuffix::Long)),
+                        (_, b'u') => (1, Some(ConstantSuffix::Unsigned)),
+                        _ => (0, None),
                     };
 
-                    (literal.chars().take(literal.len() - 1).collect(), suffix)
+                    (
+                        literal.chars().take(literal.len() - suffix_len).collect(),
+                        suffix,
+                    )
                 }
                 _ => (literal.to_string(), None),
             };

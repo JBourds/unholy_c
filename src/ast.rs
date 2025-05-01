@@ -1,6 +1,7 @@
 use crate::lexer::{ConstantSuffix, Token};
 
 use anyhow::{Context, Error, Result, bail, ensure};
+use num::bigint::BigUint;
 use std::{
     num::{NonZeroU8, NonZeroUsize},
     rc::Rc,
@@ -1461,8 +1462,18 @@ impl std::fmt::Display for Constant {
         }
     }
 }
+
+fn get_digits(text: &str) -> Result<Vec<u32>> {
+    text.chars()
+        .rev()
+        .map(|c| c.to_digit(9))
+        .collect::<Option<Vec<_>>>()
+        .context("Unable to parse each string character as a digit.")
+}
+
 impl AstNode for Constant {
     fn consume(tokens: &[Token]) -> Result<(Constant, &[Token])> {
+        // FIXME: Is this how we would like to handle integer overflow?
         if let Some(token) = tokens.first() {
             match token {
                 // NOTE: The text in these nodes does not include the negative
@@ -1488,24 +1499,52 @@ impl AstNode for Constant {
                             Self::U64(val)
                         } else {
                             eprintln!("Warning: Integer constant is being truncated to fit.");
-                            todo!();
+                            let digits = get_digits(text)
+                                .context("Unable to parse digits of integer constant.")?;
+                            let mut bytes = BigUint::new(digits).to_bytes_le();
+                            bytes.resize(core::mem::size_of::<u64>(), 0);
+                            Self::U64(u64::from_le_bytes(
+                                bytes.into_boxed_slice()[..core::mem::size_of::<u64>()]
+                                    .try_into()
+                                    .unwrap(),
+                            ))
                         };
                         Ok((val, &tokens[1..]))
                     }
-                    Some(ConstantSuffix::UnsignedLong) => Ok((
-                        Self::U64(text.parse::<u64>().context(
-                            "Unable to parse unsigned long from integer constant text.",
-                        )?),
-                        &tokens[1..],
-                    )),
+                    Some(ConstantSuffix::UnsignedLong) => {
+                        let val = if let Ok(val) = text.parse::<u64>() {
+                            Self::U64(val)
+                        } else {
+                            eprintln!("Warning: Integer constant is being truncated to fit .");
+                            let digits = get_digits(text)
+                                .context("Unable to parse digits of integer constant.")?;
+                            let mut bytes = BigUint::new(digits).to_bytes_le();
+                            bytes.resize(core::mem::size_of::<u64>(), 0);
+                            Self::U64(u64::from_le_bytes(
+                                bytes.into_boxed_slice()[..core::mem::size_of::<u64>()]
+                                    .try_into()
+                                    .unwrap(),
+                            ))
+                        };
+
+                        Ok((val, &tokens[1..]))
+                    }
                     Some(ConstantSuffix::Long) => {
                         let val = if let Ok(val) = text.parse::<i64>() {
                             Self::I64(val)
                         } else if let Ok(val) = text.parse::<u64>() {
                             Self::U64(val)
                         } else {
-                            eprintln!("Warning: Integer constant is being truncated to fit.");
-                            todo!();
+                            eprintln!("Warning: Integer constant is being truncated to fit .");
+                            let digits = get_digits(text)
+                                .context("Unable to parse digits of integer constant.")?;
+                            let mut bytes = BigUint::new(digits).to_bytes_le();
+                            bytes.resize(core::mem::size_of::<u64>(), 0);
+                            Self::U64(u64::from_le_bytes(
+                                bytes.into_boxed_slice()[..core::mem::size_of::<u64>()]
+                                    .try_into()
+                                    .unwrap(),
+                            ))
                         };
                         Ok((val, &tokens[1..]))
                     }

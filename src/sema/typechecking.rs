@@ -1,4 +1,6 @@
+use std::collections::HashSet;
 use std::cmp;
+
 
 use anyhow::{Context, Error};
 
@@ -733,12 +735,14 @@ fn typecheck_stmt(
                     .context("Failed to typecheck switch body.")?;
                 let mut casted_cases = vec![];
                 let cases = cases.as_ref().expect("At this point there should be cases or an empty vector, but never a None variant.");
+                let mut case_values = HashSet::new();
                 for (val, s) in cases.iter() {
                     let expr = 
                         try_implicit_cast(&condition_type, &ast::Expr::Constant(*val), symbols)
                         .context(format!("Unable to implicitly case constant to type {condition_type:#?}"))?;
                     let constant = const_eval::eval(expr)
                         .context("Unable to convert case expression into constant value.")?;
+                    ensure!(case_values.insert(constant), format!("Duplicate case values in switch: {constant:?}"));
                     casted_cases.push((constant, Rc::clone(s)));
                 }
                 Ok(ast::Stmt::Switch { condition, body: Box::new(body), cases: Some(casted_cases), label, default})

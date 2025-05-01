@@ -1,4 +1,5 @@
 use std::cmp;
+use std::collections::HashSet;
 
 use anyhow::{Context, Error};
 
@@ -523,7 +524,7 @@ struct TypedExpr {
     r#type: ast::Type,
 }
 
-pub fn validate(stage: SemaStage<IdentResolution>) -> Result<SemaStage<TypeChecking>> {
+pub fn validate(stage: SemaStage<SwitchLabelling>) -> Result<SemaStage<TypeChecking>> {
     let mut symbols = SymbolTable::new_table();
 
     Ok(SemaStage {
@@ -722,18 +723,26 @@ fn typecheck_stmt(
                 label,
                 default,
             } => {
-                let condition = typecheck_expr(&condition, symbols)
-                    .context("Failed to typecheck switch expression.")?.expr;
+                let TypedExpr { expr: condition, r#type: condition_type } = typecheck_expr(&condition, symbols)
+                    .context("Failed to typecheck switch expression.")?;
+
+                if matches!(condition_type.base, ast::BaseType::Fun { .. }) {
+                    bail!("Cannot switch on {condition:#?} as it has type {condition_type:#?}");
+                }
                 let body = typecheck_stmt(*body, symbols, function)
                     .context("Failed to typecheck switch body.")?;
-                if let Some(ref cases) = cases {
-                    for (literal, name) in cases.iter() {
-                        if !literal.is_int() {
-                            bail!("Non-integer type in case {name}.");
-                        }
-                    }
+                let mut casted_cases = vec![];
+                let cases = cases.as_ref().expect("At this point there should be cases or an empty vector, but never a None variant.");
+                let mut case_values = HashSet::new();
+                for (val, s) in cases.iter() {
+                    let expr = try_implicit_cast(&condition_type, &ast::Expr::Constant(*val), symbols)
+                        .context(format!("Unable to implicitly case constant to type {condition_type:#?}"))?;
+                    let constant = const_eval::eval(expr)
+                        .context("Unable to convert case expression into constant value.")?;
+                    ensure!(case_values.insert(constant), format!("Duplicate case values in switch: {constant:?}"));
+                    casted_cases.push((constant, Rc::clone(s)));
                 }
-                Ok(ast::Stmt::Switch { condition, body: Box::new(body), cases, label, default})
+                Ok(ast::Stmt::Switch { condition, body: Box::new(body), cases: Some(casted_cases), label, default})
             }
         ast::Stmt::Null => Ok(stmt),
         ast::Stmt::Break(_) => Ok(stmt),
@@ -844,6 +853,18 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
                 r#type: right_t,
             } = typecheck_expr(right, symbols)
                 .context("Failed to typecheck righthand argument of binary operation.")?;
+
+            // Bitshifts do not upcast, and are just the type of the LHS
+            if matches!(op, ast::BinaryOp::LShift | ast::BinaryOp::RShift) {
+                return Ok(TypedExpr {
+                    expr: ast::Expr::Binary {
+                        op: *op,
+                        left: Box::new(left),
+                        right: Box::new(right),
+                    },
+                    r#type: left_t,
+                });
+            }
 
             let (lifted_left_t, lifted_right_t) =
                 ast::BaseType::lift(left_t.base.clone(), right_t.base.clone())

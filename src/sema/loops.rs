@@ -1,6 +1,6 @@
 use super::*;
 
-pub fn validate(stage: SemaStage<SwitchLabelling>) -> Result<SemaStage<LoopLabelling>> {
+pub fn validate(stage: SemaStage<GotoValidation>) -> Result<SemaStage<LoopLabelling>> {
     let valid_declarations = stage
         .program
         .declarations

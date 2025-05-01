@@ -857,6 +857,11 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
             } = typecheck_expr(right, symbols)
                 .context("Failed to typecheck righthand argument of binary operation.")?;
 
+            // Bitshifts do not upcast, and are just the type of the LHS
+            if matches!(op, ast::BinaryOp::LShift | ast::BinaryOp::RShift) {
+                return Ok(TypedExpr { expr: ast::Expr::Binary { op: *op, left: Box::new(left), right: Box::new(right) }, r#type: left_t });
+            }
+
             let (lifted_left_t, lifted_right_t) =
                 ast::BaseType::lift(left_t.base.clone(), right_t.base.clone())
                     .context("Unable to promote {left_t:#?} and {right_t:#?} to a common type.")?;

@@ -1,6 +1,5 @@
-use std::collections::HashSet;
 use std::cmp;
-
+use std::collections::HashSet;
 
 use anyhow::{Context, Error};
 
@@ -730,15 +729,13 @@ fn typecheck_stmt(
                 if matches!(condition_type.base, ast::BaseType::Fun { .. }) {
                     bail!("Cannot switch on {condition:#?} as it has type {condition_type:#?}");
                 }
-                
                 let body = typecheck_stmt(*body, symbols, function)
                     .context("Failed to typecheck switch body.")?;
                 let mut casted_cases = vec![];
                 let cases = cases.as_ref().expect("At this point there should be cases or an empty vector, but never a None variant.");
                 let mut case_values = HashSet::new();
                 for (val, s) in cases.iter() {
-                    let expr = 
-                        try_implicit_cast(&condition_type, &ast::Expr::Constant(*val), symbols)
+                    let expr = try_implicit_cast(&condition_type, &ast::Expr::Constant(*val), symbols)
                         .context(format!("Unable to implicitly case constant to type {condition_type:#?}"))?;
                     let constant = const_eval::eval(expr)
                         .context("Unable to convert case expression into constant value.")?;
@@ -859,7 +856,14 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
 
             // Bitshifts do not upcast, and are just the type of the LHS
             if matches!(op, ast::BinaryOp::LShift | ast::BinaryOp::RShift) {
-                return Ok(TypedExpr { expr: ast::Expr::Binary { op: *op, left: Box::new(left), right: Box::new(right) }, r#type: left_t });
+                return Ok(TypedExpr {
+                    expr: ast::Expr::Binary {
+                        op: *op,
+                        left: Box::new(left),
+                        right: Box::new(right),
+                    },
+                    r#type: left_t,
+                });
             }
 
             let (lifted_left_t, lifted_right_t) =

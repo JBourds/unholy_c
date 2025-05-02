@@ -860,7 +860,7 @@ impl Factor {
     }
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, Clone)]
 pub enum BaseType {
     Int {
         nbytes: usize,
@@ -876,6 +876,42 @@ pub enum BaseType {
     // TODO: Implement later and make this a non unit variant
     Struct,
     Void,
+}
+
+// Need to implement this since the optional signed parameter should
+// be considered signed by default or use the actual value
+impl PartialEq for BaseType {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (
+                Self::Int {
+                    nbytes: l_nbytes,
+                    signed: l_signed,
+                },
+                Self::Int {
+                    nbytes: r_nbytes,
+                    signed: r_signed,
+                },
+            ) => {
+                let l_signed = l_signed.is_none_or(|signed| signed);
+                let r_signed = r_signed.is_none_or(|signed| signed);
+                l_nbytes == r_nbytes && l_signed == r_signed
+            }
+            (Self::Float(l0), Self::Float(r0)) => l0 == r0,
+            (Self::Double(l0), Self::Double(r0)) => l0 == r0,
+            (
+                Self::Fun {
+                    ret_t: l_ret_t,
+                    param_types: l_param_types,
+                },
+                Self::Fun {
+                    ret_t: r_ret_t,
+                    param_types: r_param_types,
+                },
+            ) => l_ret_t == r_ret_t && l_param_types == r_param_types,
+            _ => core::mem::discriminant(self) == core::mem::discriminant(other),
+        }
+    }
 }
 
 impl BaseType {

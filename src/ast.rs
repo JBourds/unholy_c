@@ -1398,6 +1398,7 @@ impl std::fmt::Display for BaseType {
                         write!(f, ", ")?;
                     }
                 }
+                write!(f, ") -> ")?;
                 ret_t.fmt(f)
             }
             Self::Void => write!(f, "void"),

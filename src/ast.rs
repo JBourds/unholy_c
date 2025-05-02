@@ -937,10 +937,18 @@ impl BaseType {
         // Completely arbitrary numbers but this ensures that rank favors size,
         // and that floating point representations will always win out
         match self {
-            Self::Char => Some(0),
-            Self::Int { nbytes, .. } => Some(*nbytes + 1),
-            Self::Float(nbytes) => Some(*nbytes + 1000),
-            Self::Double(nbytes) => Some(*nbytes + 2000),
+            Self::Int { nbytes, signed } => Some(
+                *nbytes * 10
+                    + 1
+                    // Hack to make sure unsigned ints rank above signed
+                    + if signed.is_some_and(|signed| !signed) {
+                        1
+                    } else {
+                        0
+                    },
+            ),
+            Self::Float(nbytes) => Some(*nbytes * 20),
+            Self::Double(nbytes) => Some(*nbytes * 30),
             _ => None,
         }
     }

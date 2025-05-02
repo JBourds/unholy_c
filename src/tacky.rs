@@ -1088,7 +1088,7 @@ pub enum Val {
 }
 
 impl Val {
-    fn get_type(&self, symbols: &SymbolTable) -> ast::Type {
+    pub fn get_type(&self, symbols: &SymbolTable) -> ast::Type {
         match self {
             Self::Constant(c) => c.get_type(),
             Self::Var(name) => {

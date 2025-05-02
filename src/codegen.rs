@@ -1103,6 +1103,7 @@ impl Instruction<Initial> {
                 | tacky::BinaryOp::LessOrEqual
                 | tacky::BinaryOp::GreaterThan
                 | tacky::BinaryOp::GreaterOrEqual => {
+                    let use_signed_cmp = is_signed(&src1, symbols);
                     vec![
                         new_instr(InstructionType::Cmp {
                             src: Operand::from_tacky(src2, symbols),
@@ -1113,8 +1114,7 @@ impl Instruction<Initial> {
                             dst: Operand::from_tacky(dst.clone(), symbols),
                         }),
                         new_instr(InstructionType::SetCC {
-                            // FIXME: Unhardcode true
-                            cond_code: CondCode::from_signed_op(op, true),
+                            cond_code: CondCode::from_signed_op(op, use_signed_cmp),
                             dst: {
                                 // FIXME: Since SetCC takes a byte value we must manually
                                 // fixup the stack location size
@@ -1251,6 +1251,17 @@ impl Instruction<Initial> {
                 })]
             }
         }
+    }
+}
+
+fn is_signed(val: &tacky::Val, symbols: &tacky::SymbolTable) -> bool {
+    match val.get_type(symbols) {
+        ast::Type {
+            base: ast::BaseType::Int { signed, .. },
+            ptr: None,
+            ..
+        } => signed.is_none_or(|signed| signed),
+        _ => true,
     }
 }
 

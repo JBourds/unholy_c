@@ -1202,6 +1202,7 @@ impl Instruction<Initial> {
                 v.push(new_instr(InstructionType::Mov { src: ax, dst }));
                 v
             }
+            _ => todo!(),
         }
     }
 }

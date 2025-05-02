@@ -647,6 +647,7 @@ impl Instruction<WithStorage> {
                     dst: convert_operand_offset(dst),
                 },
                 InstructionType::Idiv(op) => InstructionType::Idiv(convert_operand_offset(op)),
+                InstructionType::Div(op) => InstructionType::Div(convert_operand_offset(op)),
                 InstructionType::Cmp { src, dst } => InstructionType::Cmp {
                     src: convert_operand_offset(src),
                     dst: convert_operand_offset(dst),
@@ -758,6 +759,19 @@ impl Instruction<WithStorage> {
                         dst: r10.clone(),
                     }),
                     Self::from_op(InstructionType::Idiv(r10)),
+                ]
+            }
+            InstructionType::Div(src @ Operand::Imm(_)) => {
+                let r10 = Operand::Reg(Reg::X64 {
+                    reg: X64Reg::R10,
+                    section: RegSection::from_size(src.size()).expect("FIXME"),
+                });
+                vec![
+                    Self::from_op(InstructionType::Mov {
+                        src,
+                        dst: r10.clone(),
+                    }),
+                    Self::from_op(InstructionType::Div(r10)),
                 ]
             }
             InstructionType::Cmp {

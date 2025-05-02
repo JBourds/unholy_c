@@ -429,6 +429,10 @@ pub enum CondCode {
     GE,
     L,
     LE,
+    A,
+    AE,
+    B,
+    BE,
 }
 
 impl fmt::Display for CondCode {
@@ -440,19 +444,47 @@ impl fmt::Display for CondCode {
             Self::GE => write!(f, "ge"),
             Self::L => write!(f, "l"),
             Self::LE => write!(f, "le"),
+            Self::A => write!(f, "a"),
+            Self::AE => write!(f, "ae"),
+            Self::B => write!(f, "b"),
+            Self::BE => write!(f, "be"),
         }
     }
 }
 
-impl From<tacky::BinaryOp> for CondCode {
-    fn from(value: tacky::BinaryOp) -> Self {
+impl CondCode {
+    fn from_signed_op(value: tacky::BinaryOp, signed: bool) -> Self {
         match value {
             tacky::BinaryOp::Equal => Self::E,
             tacky::BinaryOp::NotEqual => Self::NE,
-            tacky::BinaryOp::LessThan => Self::L,
-            tacky::BinaryOp::LessOrEqual => Self::LE,
-            tacky::BinaryOp::GreaterThan => Self::G,
-            tacky::BinaryOp::GreaterOrEqual => Self::GE,
+            tacky::BinaryOp::LessThan => {
+                if signed {
+                    Self::L
+                } else {
+                    Self::B
+                }
+            }
+            tacky::BinaryOp::LessOrEqual => {
+                if signed {
+                    Self::LE
+                } else {
+                    Self::BE
+                }
+            }
+            tacky::BinaryOp::GreaterThan => {
+                if signed {
+                    Self::G
+                } else {
+                    Self::A
+                }
+            }
+            tacky::BinaryOp::GreaterOrEqual => {
+                if signed {
+                    Self::GE
+                } else {
+                    Self::AE
+                }
+            }
             _ => unreachable!("Only relational operands can convert to CondCode"),
         }
     }
@@ -475,6 +507,10 @@ pub enum InstructionType {
         src: Operand,
         dst: Operand,
     },
+    MovZeroExtend {
+        src: Operand,
+        dst: Operand,
+    },
     Unary {
         op: UnaryOp,
         dst: Operand,
@@ -489,6 +525,7 @@ pub enum InstructionType {
         dst: Operand,
     },
     Idiv(Operand),
+    Div(Operand),
     Cdq(RegSection),
     Jmp(Rc<String>),
     JmpCC {
@@ -1065,28 +1102,33 @@ impl Instruction<Initial> {
                 | tacky::BinaryOp::LessThan
                 | tacky::BinaryOp::LessOrEqual
                 | tacky::BinaryOp::GreaterThan
-                | tacky::BinaryOp::GreaterOrEqual => vec![
-                    new_instr(InstructionType::Cmp {
-                        src: Operand::from_tacky(src2, symbols),
-                        dst: Operand::from_tacky(src1, symbols),
-                    }),
-                    new_instr(InstructionType::Mov {
-                        src: Operand::Imm(ast::Constant::I32(0)),
-                        dst: Operand::from_tacky(dst.clone(), symbols),
-                    }),
-                    new_instr(InstructionType::SetCC {
-                        cond_code: op.into(),
-                        dst: {
-                            // FIXME: Since SetCC takes a byte value we must manually
-                            // fixup the stack location size
-                            let dst: Operand = Operand::from_tacky(dst, symbols);
-                            match dst {
-                                Operand::Pseudo { name, .. } => Operand::Pseudo { name, size: 1 },
-                                _ => dst,
-                            }
-                        },
-                    }),
-                ],
+                | tacky::BinaryOp::GreaterOrEqual => {
+                    vec![
+                        new_instr(InstructionType::Cmp {
+                            src: Operand::from_tacky(src2, symbols),
+                            dst: Operand::from_tacky(src1, symbols),
+                        }),
+                        new_instr(InstructionType::Mov {
+                            src: Operand::Imm(ast::Constant::I32(0)),
+                            dst: Operand::from_tacky(dst.clone(), symbols),
+                        }),
+                        new_instr(InstructionType::SetCC {
+                            // FIXME: Unhardcode true
+                            cond_code: CondCode::from_signed_op(op, true),
+                            dst: {
+                                // FIXME: Since SetCC takes a byte value we must manually
+                                // fixup the stack location size
+                                let dst = Operand::from_tacky(dst, symbols);
+                                match dst {
+                                    Operand::Pseudo { name, .. } => {
+                                        Operand::Pseudo { name, size: 1 }
+                                    }
+                                    _ => dst,
+                                }
+                            },
+                        }),
+                    ]
+                }
                 _ => unimplemented!(),
             },
             tacky::Instruction::JumpIfZero { condition, target } => vec![
@@ -1202,7 +1244,7 @@ impl Instruction<Initial> {
                 v.push(new_instr(InstructionType::Mov { src: ax, dst }));
                 v
             }
-            _ => todo!(),
+            tacky::Instruction::ZeroExtend { .. } => todo!(),
         }
     }
 }

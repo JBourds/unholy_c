@@ -398,16 +398,12 @@ impl SymbolTable {
             if !scope.shadows(&old_scope) {
                 // Cases 1.1 and 2.1
                 if old_type != new_type {
-                    match (&old_type.base, &new_type.base) {
-                        // Case 1.2
-                        (ast::BaseType::Fun { .. }, ast::BaseType::Fun { param_types, .. })
-                            if param_types.is_empty() =>
-                        {
-                            new_type = old_type.clone()
-                        }
-                        _ => bail!(
-                            "Redeclaring '{name}' as {new_type} when it was previously declared as {old_type}"
-                        ),
+                    if old_type == new_type {
+                        new_type = old_type.clone();
+                    } else {
+                        bail!(
+                            "Redeclaring \"{name}\" as \"{new_type}\" when it was previously declared as \"{old_type}\""
+                        )
                     }
                 }
                 if already_defined && defining_ident {

@@ -199,10 +199,24 @@ impl InitialValue {
                 ),
             },
             (Scope::Local(..), None) => match var.typ.storage {
+                // Local Statics with no initilizer get defaulted to zero
                 Some(ast::StorageClass::Static) => Ok(Some(InitialValue::Initial(
                     vec![0; var.typ.base.nbytes()].into(),
-                ))), // Local Statics with no initilizer get defaulted to zero
-                Some(ast::StorageClass::Extern) | None => Ok(Some(InitialValue::None)),
+                ))),
+                // Resolve any existing declaration's initial value
+                Some(ast::StorageClass::Extern) => {
+                    if let Some(entry) = symbols.get(&var.name) {
+                        match &entry.attribute {
+                            Attribute::Static { initial_value, .. } => {
+                                Ok(Some(initial_value.clone()))
+                            }
+                            _ => unreachable!(),
+                        }
+                    } else {
+                        Ok(Some(InitialValue::None))
+                    }
+                }
+                None => Ok(Some(InitialValue::None)),
                 _ => unreachable!(
                     "Earlier passes of the compiler should have reduced \"auto\" and \"register\" storage classes to be None"
                 ),

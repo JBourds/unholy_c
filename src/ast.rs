@@ -2,6 +2,7 @@ use crate::lexer::{ConstantSuffix, Token};
 
 use anyhow::{Context, Error, Result, bail, ensure};
 use num::bigint::BigUint;
+use std::str::FromStr;
 use std::{
     num::{NonZeroU8, NonZeroUsize},
     rc::Rc,
@@ -1530,14 +1531,6 @@ impl std::fmt::Display for Constant {
     }
 }
 
-fn get_digits(text: &str) -> Result<Vec<u32>> {
-    text.chars()
-        .rev()
-        .map(|c| c.to_digit(9))
-        .collect::<Option<Vec<_>>>()
-        .context("Unable to parse each string character as a digit.")
-}
-
 impl AstNode for Constant {
     fn consume(tokens: &[Token]) -> Result<(Constant, &[Token])> {
         // FIXME: Is this how we would like to handle integer overflow?
@@ -1566,9 +1559,9 @@ impl AstNode for Constant {
                             Self::U64(val)
                         } else {
                             eprintln!("Warning: Integer constant is being truncated to fit.");
-                            let digits = get_digits(text)
-                                .context("Unable to parse digits of integer constant.")?;
-                            let mut bytes = BigUint::new(digits).to_bytes_le();
+                            let mut bytes = BigUint::from_str(text)
+                                .context(format!("Unable to parse BigUint from text: \"{text}\""))?
+                                .to_bytes_le();
                             bytes.resize(core::mem::size_of::<u64>(), 0);
                             Self::U64(u64::from_le_bytes(
                                 bytes.into_boxed_slice()[..core::mem::size_of::<u64>()]
@@ -1583,9 +1576,9 @@ impl AstNode for Constant {
                             Self::U64(val)
                         } else {
                             eprintln!("Warning: Integer constant is being truncated to fit .");
-                            let digits = get_digits(text)
-                                .context("Unable to parse digits of integer constant.")?;
-                            let mut bytes = BigUint::new(digits).to_bytes_le();
+                            let mut bytes = BigUint::from_str(text)
+                                .context(format!("Unable to parse BigUint from text: \"{text}\""))?
+                                .to_bytes_le();
                             bytes.resize(core::mem::size_of::<u64>(), 0);
                             Self::U64(u64::from_le_bytes(
                                 bytes.into_boxed_slice()[..core::mem::size_of::<u64>()]
@@ -1603,9 +1596,9 @@ impl AstNode for Constant {
                             Self::U64(val)
                         } else {
                             eprintln!("Warning: Integer constant is being truncated to fit .");
-                            let digits = get_digits(text)
-                                .context("Unable to parse digits of integer constant.")?;
-                            let mut bytes = BigUint::new(digits).to_bytes_le();
+                            let mut bytes = BigUint::from_str(text)
+                                .context(format!("Unable to parse BigUint from text: \"{text}\""))?
+                                .to_bytes_le();
                             bytes.resize(core::mem::size_of::<u64>(), 0);
                             Self::U64(u64::from_le_bytes(
                                 bytes.into_boxed_slice()[..core::mem::size_of::<u64>()]

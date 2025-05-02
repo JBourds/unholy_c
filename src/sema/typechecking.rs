@@ -398,13 +398,9 @@ impl SymbolTable {
             if !scope.shadows(&old_scope) {
                 // Cases 1.1 and 2.1
                 if old_type != new_type {
-                    if old_type == new_type {
-                        new_type = old_type.clone();
-                    } else {
-                        bail!(
-                            "Redeclaring \"{name}\" as \"{new_type}\" when it was previously declared as \"{old_type}\""
-                        )
-                    }
+                    bail!(
+                        "Redeclaring \"{name}\" as \"{new_type}\" when it was previously declared as \"{old_type}\""
+                    );
                 }
                 if already_defined && defining_ident {
                     bail!("Redefining \"{name}\" when it is already defined.")

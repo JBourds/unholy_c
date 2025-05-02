@@ -1244,7 +1244,12 @@ impl Instruction<Initial> {
                 v.push(new_instr(InstructionType::Mov { src: ax, dst }));
                 v
             }
-            tacky::Instruction::ZeroExtend { .. } => todo!(),
+            tacky::Instruction::ZeroExtend { src, dst } => {
+                vec![new_instr(InstructionType::MovZeroExtend {
+                    src: Operand::from_tacky(src, symbols),
+                    dst: Operand::from_tacky(dst, symbols),
+                })]
+            }
         }
     }
 }

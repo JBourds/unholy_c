@@ -637,6 +637,10 @@ impl Instruction<WithStorage> {
                     src: convert_operand_offset(src),
                     dst: convert_operand_offset(dst),
                 },
+                InstructionType::MovZeroExtend { src, dst } => InstructionType::MovZeroExtend {
+                    src: convert_operand_offset(src),
+                    dst: convert_operand_offset(dst),
+                },
                 InstructionType::Unary { op, dst } => InstructionType::Unary {
                     op,
                     dst: convert_operand_offset(dst),
@@ -730,6 +734,28 @@ impl Instruction<WithStorage> {
                 instrs.extend(dst_instrs);
 
                 instrs
+            }
+            InstructionType::MovZeroExtend {
+                src,
+                dst: reg @ Operand::Reg(_),
+            } => {
+                vec![Self::from_op(InstructionType::Mov { src, dst: reg })]
+            }
+            InstructionType::MovZeroExtend {
+                src,
+                dst: reg @ Operand::StackOffset { .. },
+            } => {
+                let r11 = Operand::Reg(Reg::X64 {
+                    reg: X64Reg::R11,
+                    section: RegSection::Qword,
+                });
+                vec![
+                    Self::from_op(InstructionType::Mov {
+                        src,
+                        dst: r11.clone(),
+                    }),
+                    Self::from_op(InstructionType::Mov { src: r11, dst: reg }),
+                ]
             }
             InstructionType::Binary {
                 op,

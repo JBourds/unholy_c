@@ -1475,7 +1475,7 @@ impl Constant {
     pub fn get_type(&self) -> Type {
         match self {
             Self::U8(_) | Self::U16(_) | Self::U32(_) | Self::U64(_) => {
-                Type::int(self.size_bytes(), Some(true))
+                Type::int(self.size_bytes(), Some(false))
             }
             Self::I8(_) | Self::I16(_) | Self::I32(_) | Self::I64(_) => {
                 Type::int(self.size_bytes(), Some(true))

@@ -384,7 +384,7 @@ impl SymbolTable {
     }
 
     fn declare_in_scope(&mut self, decl: &ast::Declaration, scope: Scope) -> Result<SymbolEntry> {
-        let (name, mut new_type, defining_ident) = Self::get_decl_info(decl);
+        let (name, new_type, defining_ident) = Self::get_decl_info(decl);
 
         let entry = if let Some(entry) = self.get(&name) {
             // FIXME: Lazy way to make rust shutup about the immutable borrow

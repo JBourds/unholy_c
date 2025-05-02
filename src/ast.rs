@@ -1548,7 +1548,17 @@ impl AstNode for Constant {
                     } else if let Ok(val) = text.parse::<u64>() {
                         Ok((Self::U64(val), &tokens[1..]))
                     } else {
-                        bail!("Could not parse interger literal into constant.")
+                        eprintln!("Warning: Integer constant is being truncated to fit.");
+                        let mut bytes = BigUint::from_str(text)
+                            .context(format!("Unable to parse BigUint from text: \"{text}\""))?
+                            .to_bytes_le();
+                        bytes.resize(core::mem::size_of::<i64>(), 0);
+                        let val = Self::I64(i64::from_le_bytes(
+                            bytes.into_boxed_slice()[..core::mem::size_of::<i64>()]
+                                .try_into()
+                                .unwrap(),
+                        ));
+                        Ok((val, &tokens[1..]))
                     }
                 }
                 Token::Constant { text, suffix } => match suffix {

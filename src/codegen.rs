@@ -1026,30 +1026,55 @@ impl Instruction<Initial> {
                     ]
                 }
                 tacky::BinaryOp::Divide => {
+                    let signed_div = is_signed(&src1, symbols);
                     let src1 = Operand::from_tacky(src1, symbols);
-                    let section =
-                        RegSection::from_size(src1.size()).expect("NOT IMPLEMENTED YET :(");
+                    let op_size = src1.size();
+                    let section = RegSection::from_size(op_size).expect("NOT IMPLEMENTED YET :(");
                     let ax = Operand::Reg(Reg::X86 {
                         reg: X86Reg::Ax,
                         section,
                     });
-                    vec![
-                        new_instr(InstructionType::Mov {
-                            src: src1,
-                            dst: ax.clone(),
-                        }),
-                        new_instr(InstructionType::Cdq(section)),
-                        new_instr(InstructionType::Idiv(Operand::from_tacky(src2, symbols))),
-                        new_instr(InstructionType::Mov {
-                            src: ax,
-                            dst: Operand::from_tacky(dst, symbols),
-                        }),
-                    ]
+                    let dx = Operand::Reg(Reg::X86 {
+                        reg: X86Reg::Dx,
+                        section: RegSection::from_size(src1.size())
+                            .expect("NOT IMPLEMENTED YET :("),
+                    });
+                    if signed_div {
+                        vec![
+                            new_instr(InstructionType::Mov {
+                                src: src1,
+                                dst: ax.clone(),
+                            }),
+                            new_instr(InstructionType::Cdq(section)),
+                            new_instr(InstructionType::Idiv(Operand::from_tacky(src2, symbols))),
+                            new_instr(InstructionType::Mov {
+                                src: ax,
+                                dst: Operand::from_tacky(dst, symbols),
+                            }),
+                        ]
+                    } else {
+                        vec![
+                            new_instr(InstructionType::Mov {
+                                src: src1,
+                                dst: ax.clone(),
+                            }),
+                            new_instr(InstructionType::Mov {
+                                src: make_zero(op_size, signed_div),
+                                dst: dx.clone(),
+                            }),
+                            new_instr(InstructionType::Div(Operand::from_tacky(src2, symbols))),
+                            new_instr(InstructionType::Mov {
+                                src: ax,
+                                dst: Operand::from_tacky(dst, symbols),
+                            }),
+                        ]
+                    }
                 }
                 tacky::BinaryOp::Remainder => {
+                    let signed_rem = is_signed(&src1, symbols);
                     let src1 = Operand::from_tacky(src1, symbols);
-                    let section =
-                        RegSection::from_size(src1.size()).expect("NOT IMPLEMENTED YET :(");
+                    let op_size = src1.size();
+                    let section = RegSection::from_size(op_size).expect("NOT IMPLEMENTED YET :(");
                     let ax = Operand::Reg(Reg::X86 {
                         reg: X86Reg::Ax,
                         section,
@@ -1060,15 +1085,30 @@ impl Instruction<Initial> {
                             .expect("NOT IMPLEMENTED YET :("),
                     });
 
-                    vec![
-                        new_instr(InstructionType::Mov { src: src1, dst: ax }),
-                        new_instr(InstructionType::Cdq(section)),
-                        new_instr(InstructionType::Idiv(Operand::from_tacky(src2, symbols))),
-                        new_instr(InstructionType::Mov {
-                            src: dx,
-                            dst: Operand::from_tacky(dst, symbols),
-                        }),
-                    ]
+                    if signed_rem {
+                        vec![
+                            new_instr(InstructionType::Mov { src: src1, dst: ax }),
+                            new_instr(InstructionType::Cdq(section)),
+                            new_instr(InstructionType::Idiv(Operand::from_tacky(src2, symbols))),
+                            new_instr(InstructionType::Mov {
+                                src: dx,
+                                dst: Operand::from_tacky(dst, symbols),
+                            }),
+                        ]
+                    } else {
+                        vec![
+                            new_instr(InstructionType::Mov { src: src1, dst: ax }),
+                            new_instr(InstructionType::Mov {
+                                src: make_zero(op_size, signed_rem),
+                                dst: dx.clone(),
+                            }),
+                            new_instr(InstructionType::Div(Operand::from_tacky(src2, symbols))),
+                            new_instr(InstructionType::Mov {
+                                src: dx,
+                                dst: Operand::from_tacky(dst, symbols),
+                            }),
+                        ]
+                    }
                 }
                 op @ tacky::BinaryOp::LShift | op @ tacky::BinaryOp::RShift => {
                     let mut v = vec![];
@@ -1262,6 +1302,23 @@ fn is_signed(val: &tacky::Val, symbols: &tacky::SymbolTable) -> bool {
             ..
         } => signed.is_none_or(|signed| signed),
         _ => true,
+    }
+}
+
+fn make_zero(size_bytes: usize, signed: bool) -> Operand {
+    match (size_bytes, signed) {
+        (1, true) => Operand::Imm(ast::Constant::I8(0)),
+        (2, true) => Operand::Imm(ast::Constant::I16(0)),
+        (4, true) => Operand::Imm(ast::Constant::I32(0)),
+        (8, true) => Operand::Imm(ast::Constant::I64(0)),
+        (1, false) => Operand::Imm(ast::Constant::U8(0)),
+        (2, false) => Operand::Imm(ast::Constant::U16(0)),
+        (4, false) => Operand::Imm(ast::Constant::U32(0)),
+        (8, false) => Operand::Imm(ast::Constant::U64(0)),
+        _ => unreachable!(
+            "Unable to create a {} constant operand with {size_bytes} size",
+            if signed { "signed" } else { "unsigned" }
+        ),
     }
 }
 

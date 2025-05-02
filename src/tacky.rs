@@ -1050,7 +1050,7 @@ impl Expr {
                             dst: dst.clone(),
                         });
                     }
-                    std::cmp::Ordering::Greater => match target {
+                    _ => match val_type {
                         ast::Type {
                             base: ast::BaseType::Int { signed, .. },
                             ptr: None,

@@ -164,6 +164,10 @@ pub mod x64 {
                 "\tidiv {}{operand}\n",
                 get_specifier(None, &operand)
             ))?,
+            codegen::InstructionType::Div(operand) => w.write_fmt(format_args!(
+                "\tdiv {}{operand}\n",
+                get_specifier(None, &operand)
+            ))?,
             codegen::InstructionType::Cmp { src, dst } => {
                 w.write_fmt(format_args!(
                     "\tcmp {}{dst}, {src}\n",
@@ -227,8 +231,7 @@ pub mod x64 {
             codegen::InstructionType::Call(name) => {
                 w.write_fmt(format_args!("\tcall \"{name}\"@PLT\n"))?;
             }
-            codegen::InstructionType::MovZeroExtend { .. } => todo!(),
-            codegen::InstructionType::Div(..) => todo!(),
+            codegen::InstructionType::MovZeroExtend { .. } => unreachable!(),
         }
         Ok(())
     }

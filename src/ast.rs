@@ -1467,6 +1467,29 @@ impl Constant {
         true
     }
 
+    pub fn fits_in<T>(&self) -> bool
+    where
+        T: TryFrom<i8>,
+        T: TryFrom<i16>,
+        T: TryFrom<i32>,
+        T: TryFrom<i64>,
+        T: TryFrom<u8>,
+        T: TryFrom<u16>,
+        T: TryFrom<u32>,
+        T: TryFrom<u64>,
+    {
+        match &self {
+            Constant::I8(v) => <T as TryFrom<i8>>::try_from(*v).is_ok(),
+            Constant::I16(v) => <T as TryFrom<i16>>::try_from(*v).is_ok(),
+            Constant::I32(v) => <T as TryFrom<i32>>::try_from(*v).is_ok(),
+            Constant::I64(v) => <T as TryFrom<i64>>::try_from(*v).is_ok(),
+            Constant::U8(v) => <T as TryFrom<u8>>::try_from(*v).is_ok(),
+            Constant::U16(v) => <T as TryFrom<u16>>::try_from(*v).is_ok(),
+            Constant::U32(v) => <T as TryFrom<u32>>::try_from(*v).is_ok(),
+            Constant::U64(v) => <T as TryFrom<u64>>::try_from(*v).is_ok(),
+        }
+    }
+
     pub fn size_bytes(&self) -> usize {
         match self {
             Constant::I8(_) => core::mem::size_of::<i8>(),

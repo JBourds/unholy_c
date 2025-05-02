@@ -891,8 +891,9 @@ impl Instruction<WithStorage> {
                     Self::from_op(InstructionType::Cmp { src: r10, dst }),
                 ]
             }
-
-            InstructionType::Push(imm @ Operand::Imm(..)) if imm.size() > 4 => {
+            // Anything outside of the range of i32 needs a mov first
+            InstructionType::Push(Operand::Imm(constant)) if !constant.fits_in::<i32>() => {
+                let imm = Operand::Imm(constant);
                 let r10 = Operand::Reg(Reg::X64 {
                     reg: X64Reg::R10,
                     section: RegSection::from_size(imm.size()).expect("FIXME"),

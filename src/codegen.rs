@@ -238,20 +238,22 @@ pub enum BinaryOp {
     BitOr,
     Xor,
     LShift,
-    RShift,
+    Sar,
+    Shr,
 }
 
-impl From<tacky::BinaryOp> for BinaryOp {
-    fn from(node: tacky::BinaryOp) -> Self {
-        match node {
-            tacky::BinaryOp::Add => Self::Add,
-            tacky::BinaryOp::Subtract => Self::Subtract,
-            tacky::BinaryOp::Multiply => Self::Multiply,
-            tacky::BinaryOp::BitAnd => Self::BitAnd,
-            tacky::BinaryOp::BitOr => Self::BitOr,
-            tacky::BinaryOp::Xor => Self::Xor,
-            tacky::BinaryOp::LShift => Self::LShift,
-            tacky::BinaryOp::RShift => Self::RShift,
+impl BinaryOp {
+    fn from_op_and_sign(op: tacky::BinaryOp, signed: bool) -> Self {
+        match (op, signed) {
+            (tacky::BinaryOp::Add, _) => Self::Add,
+            (tacky::BinaryOp::Subtract, _) => Self::Subtract,
+            (tacky::BinaryOp::Multiply, _) => Self::Multiply,
+            (tacky::BinaryOp::BitAnd, _) => Self::BitAnd,
+            (tacky::BinaryOp::BitOr, _) => Self::BitOr,
+            (tacky::BinaryOp::Xor, _) => Self::Xor,
+            (tacky::BinaryOp::LShift, _) => Self::LShift,
+            (tacky::BinaryOp::RShift, true) => Self::Sar,
+            (tacky::BinaryOp::RShift, false) => Self::Shr,
             _ => unreachable!("No instruction conversion in binary op."),
         }
     }
@@ -267,7 +269,8 @@ impl fmt::Display for BinaryOp {
             Self::BitOr => write!(f, "or"),
             Self::Xor => write!(f, "xor"),
             Self::LShift => write!(f, "sal"),
-            Self::RShift => write!(f, "sar"),
+            Self::Sar => write!(f, "sar"),
+            Self::Shr => write!(f, "shr"),
         }
     }
 }
@@ -1037,13 +1040,14 @@ impl Instruction<Initial> {
                 | tacky::BinaryOp::BitAnd
                 | tacky::BinaryOp::BitOr
                 | tacky::BinaryOp::Xor => {
+                    let signed_op = is_signed(&src1, symbols);
                     vec![
                         new_instr(InstructionType::Mov {
                             src: Operand::from_tacky(src1, symbols),
                             dst: Operand::from_tacky(dst.clone(), symbols),
                         }),
                         new_instr(InstructionType::Binary {
-                            op: op.into(),
+                            op: BinaryOp::from_op_and_sign(op, signed_op),
                             src: Operand::from_tacky(src2, symbols),
                             dst: Operand::from_tacky(dst, symbols),
                         }),
@@ -1157,6 +1161,7 @@ impl Instruction<Initial> {
                     }
                 }
                 op @ tacky::BinaryOp::LShift | op @ tacky::BinaryOp::RShift => {
+                    let signed_op = is_signed(&src1, symbols);
                     let mut v = vec![];
                     let src = match src2 {
                         tacky::Val::Constant(v) => Operand::Imm(v),
@@ -1177,7 +1182,7 @@ impl Instruction<Initial> {
                         dst: Operand::from_tacky(dst.clone(), symbols),
                     }));
                     v.push(new_instr(InstructionType::Binary {
-                        op: op.into(),
+                        op: BinaryOp::from_op_and_sign(op, signed_op),
                         src,
                         dst: Operand::from_tacky(dst, symbols),
                     }));

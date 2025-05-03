@@ -1,6 +1,8 @@
 use crate::lexer::{ConstantSuffix, Token};
 
 use anyhow::{Context, Error, Result, bail, ensure};
+use num::bigint::BigUint;
+use std::str::FromStr;
 use std::{
     num::{NonZeroU8, NonZeroUsize},
     rc::Rc,
@@ -859,7 +861,7 @@ impl Factor {
     }
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, Clone)]
 pub enum BaseType {
     Int {
         nbytes: usize,
@@ -875,6 +877,42 @@ pub enum BaseType {
     // TODO: Implement later and make this a non unit variant
     Struct,
     Void,
+}
+
+// Need to implement this since the optional signed parameter should
+// be considered signed by default or use the actual value
+impl PartialEq for BaseType {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (
+                Self::Int {
+                    nbytes: l_nbytes,
+                    signed: l_signed,
+                },
+                Self::Int {
+                    nbytes: r_nbytes,
+                    signed: r_signed,
+                },
+            ) => {
+                let l_signed = l_signed.is_none_or(|signed| signed);
+                let r_signed = r_signed.is_none_or(|signed| signed);
+                l_nbytes == r_nbytes && l_signed == r_signed
+            }
+            (Self::Float(l0), Self::Float(r0)) => l0 == r0,
+            (Self::Double(l0), Self::Double(r0)) => l0 == r0,
+            (
+                Self::Fun {
+                    ret_t: l_ret_t,
+                    param_types: l_param_types,
+                },
+                Self::Fun {
+                    ret_t: r_ret_t,
+                    param_types: r_param_types,
+                },
+            ) => l_ret_t == r_ret_t && l_param_types == r_param_types,
+            _ => core::mem::discriminant(self) == core::mem::discriminant(other),
+        }
+    }
 }
 
 impl BaseType {
@@ -900,10 +938,18 @@ impl BaseType {
         // Completely arbitrary numbers but this ensures that rank favors size,
         // and that floating point representations will always win out
         match self {
-            Self::Char => Some(0),
-            Self::Int { nbytes, .. } => Some(*nbytes + 1),
-            Self::Float(nbytes) => Some(*nbytes + 1000),
-            Self::Double(nbytes) => Some(*nbytes + 2000),
+            Self::Int { nbytes, signed } => Some(
+                *nbytes * 10
+                    + 1
+                    // Hack to make sure unsigned ints rank above signed
+                    + if signed.is_some_and(|signed| !signed) {
+                        1
+                    } else {
+                        0
+                    },
+            ),
+            Self::Float(nbytes) => Some(*nbytes * 20),
+            Self::Double(nbytes) => Some(*nbytes * 30),
             _ => None,
         }
     }
@@ -1397,6 +1443,7 @@ impl std::fmt::Display for BaseType {
                         write!(f, ", ")?;
                     }
                 }
+                write!(f, ") -> ")?;
                 ret_t.fmt(f)
             }
             Self::Void => write!(f, "void"),
@@ -1421,6 +1468,29 @@ impl Constant {
         true
     }
 
+    pub fn fits_in<T>(&self) -> bool
+    where
+        T: TryFrom<i8>,
+        T: TryFrom<i16>,
+        T: TryFrom<i32>,
+        T: TryFrom<i64>,
+        T: TryFrom<u8>,
+        T: TryFrom<u16>,
+        T: TryFrom<u32>,
+        T: TryFrom<u64>,
+    {
+        match &self {
+            Constant::I8(v) => <T as TryFrom<i8>>::try_from(*v).is_ok(),
+            Constant::I16(v) => <T as TryFrom<i16>>::try_from(*v).is_ok(),
+            Constant::I32(v) => <T as TryFrom<i32>>::try_from(*v).is_ok(),
+            Constant::I64(v) => <T as TryFrom<i64>>::try_from(*v).is_ok(),
+            Constant::U8(v) => <T as TryFrom<u8>>::try_from(*v).is_ok(),
+            Constant::U16(v) => <T as TryFrom<u16>>::try_from(*v).is_ok(),
+            Constant::U32(v) => <T as TryFrom<u32>>::try_from(*v).is_ok(),
+            Constant::U64(v) => <T as TryFrom<u64>>::try_from(*v).is_ok(),
+        }
+    }
+
     pub fn size_bytes(&self) -> usize {
         match self {
             Constant::I8(_) => core::mem::size_of::<i8>(),
@@ -1437,7 +1507,7 @@ impl Constant {
     pub fn get_type(&self) -> Type {
         match self {
             Self::U8(_) | Self::U16(_) | Self::U32(_) | Self::U64(_) => {
-                Type::int(self.size_bytes(), Some(true))
+                Type::int(self.size_bytes(), Some(false))
             }
             Self::I8(_) | Self::I16(_) | Self::I32(_) | Self::I64(_) => {
                 Type::int(self.size_bytes(), Some(true))
@@ -1460,34 +1530,96 @@ impl std::fmt::Display for Constant {
         }
     }
 }
+
 impl AstNode for Constant {
     fn consume(tokens: &[Token]) -> Result<(Constant, &[Token])> {
+        // FIXME: Is this how we would like to handle integer overflow?
         if let Some(token) = tokens.first() {
             match token {
                 // NOTE: The text in these nodes does not include the negative
                 // sign so we don't need to worry about absolute value sign
                 Token::Constant { text, suffix: None } => {
-                    // TODO: Update this once we support unsigned types too?
-                    // Try all our parsing rules out until we get one which
-                    // has the necessary precision
                     if let Ok(val) = text.parse::<i32>() {
                         Ok((Self::I32(val), &tokens[1..]))
                     } else if let Ok(val) = text.parse::<i64>() {
                         Ok((Self::I64(val), &tokens[1..]))
+                    } else if let Ok(val) = text.parse::<u32>() {
+                        Ok((Self::U32(val), &tokens[1..]))
+                    } else if let Ok(val) = text.parse::<u64>() {
+                        Ok((Self::U64(val), &tokens[1..]))
                     } else {
-                        bail!("Could not parse interger literal into constant.")
+                        eprintln!("Warning: Integer constant is being truncated to fit.");
+                        let mut bytes = BigUint::from_str(text)
+                            .context(format!("Unable to parse BigUint from text: \"{text}\""))?
+                            .to_bytes_le();
+                        bytes.resize(core::mem::size_of::<i64>(), 0);
+                        let val = Self::I64(i64::from_le_bytes(
+                            bytes.into_boxed_slice()[..core::mem::size_of::<i64>()]
+                                .try_into()
+                                .unwrap(),
+                        ));
+                        Ok((val, &tokens[1..]))
                     }
                 }
-                Token::Constant {
-                    text,
-                    suffix: Some(ConstantSuffix::Long),
-                } => {
-                    if let Ok(long) = text.parse::<i64>() {
-                        Ok((Self::I64(long), &tokens[1..]))
-                    } else {
-                        bail!("Could not parse token into constant.")
+                Token::Constant { text, suffix } => match suffix {
+                    Some(ConstantSuffix::Unsigned) => {
+                        let val = if let Ok(val) = text.parse::<u32>() {
+                            Self::U32(val)
+                        } else if let Ok(val) = text.parse::<u64>() {
+                            Self::U64(val)
+                        } else {
+                            eprintln!("Warning: Integer constant is being truncated to fit.");
+                            let mut bytes = BigUint::from_str(text)
+                                .context(format!("Unable to parse BigUint from text: \"{text}\""))?
+                                .to_bytes_le();
+                            bytes.resize(core::mem::size_of::<u64>(), 0);
+                            Self::U64(u64::from_le_bytes(
+                                bytes.into_boxed_slice()[..core::mem::size_of::<u64>()]
+                                    .try_into()
+                                    .unwrap(),
+                            ))
+                        };
+                        Ok((val, &tokens[1..]))
                     }
-                }
+                    Some(ConstantSuffix::UnsignedLong) => {
+                        let val = if let Ok(val) = text.parse::<u64>() {
+                            Self::U64(val)
+                        } else {
+                            eprintln!("Warning: Integer constant is being truncated to fit .");
+                            let mut bytes = BigUint::from_str(text)
+                                .context(format!("Unable to parse BigUint from text: \"{text}\""))?
+                                .to_bytes_le();
+                            bytes.resize(core::mem::size_of::<u64>(), 0);
+                            Self::U64(u64::from_le_bytes(
+                                bytes.into_boxed_slice()[..core::mem::size_of::<u64>()]
+                                    .try_into()
+                                    .unwrap(),
+                            ))
+                        };
+
+                        Ok((val, &tokens[1..]))
+                    }
+                    Some(ConstantSuffix::Long) => {
+                        let val = if let Ok(val) = text.parse::<i64>() {
+                            Self::I64(val)
+                        } else if let Ok(val) = text.parse::<u64>() {
+                            Self::U64(val)
+                        } else {
+                            eprintln!("Warning: Integer constant is being truncated to fit .");
+                            let mut bytes = BigUint::from_str(text)
+                                .context(format!("Unable to parse BigUint from text: \"{text}\""))?
+                                .to_bytes_le();
+                            bytes.resize(core::mem::size_of::<u64>(), 0);
+                            Self::U64(u64::from_le_bytes(
+                                bytes.into_boxed_slice()[..core::mem::size_of::<u64>()]
+                                    .try_into()
+                                    .unwrap(),
+                            ))
+                        };
+                        Ok((val, &tokens[1..]))
+                    }
+                    _ => bail!("Could not parse token into constant."),
+                },
                 _ => bail!("Could not parse token into constant."),
             }
         } else {

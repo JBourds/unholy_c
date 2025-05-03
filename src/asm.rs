@@ -148,7 +148,7 @@ pub mod x64 {
                 // can be the src2 operand but says nothing about the size of
                 // the data it points to
                 let specifier = match op {
-                    codegen::BinaryOp::LShift | codegen::BinaryOp::RShift => {
+                    codegen::BinaryOp::LShift | codegen::BinaryOp::Sar | codegen::BinaryOp::Shr => {
                         get_specifier(None, &dst)
                     }
                     _ => get_specifier(Some(&src), &dst),
@@ -162,6 +162,10 @@ pub mod x64 {
             },
             codegen::InstructionType::Idiv(operand) => w.write_fmt(format_args!(
                 "\tidiv {}{operand}\n",
+                get_specifier(None, &operand)
+            ))?,
+            codegen::InstructionType::Div(operand) => w.write_fmt(format_args!(
+                "\tdiv {}{operand}\n",
                 get_specifier(None, &operand)
             ))?,
             codegen::InstructionType::Cmp { src, dst } => {
@@ -227,6 +231,7 @@ pub mod x64 {
             codegen::InstructionType::Call(name) => {
                 w.write_fmt(format_args!("\tcall \"{name}\"@PLT\n"))?;
             }
+            codegen::InstructionType::MovZeroExtend { .. } => unreachable!(),
         }
         Ok(())
     }

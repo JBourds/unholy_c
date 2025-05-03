@@ -37,6 +37,8 @@ impl Lexer {
 #[derive(Clone, Debug, PartialEq)]
 pub enum ConstantSuffix {
     Long,
+    Unsigned,
+    UnsignedLong,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -135,7 +137,9 @@ pub enum Token {
 impl std::fmt::Display for ConstantSuffix {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Long => write!(f, "L"),
+            Self::Long => write!(f, "l"),
+            Self::Unsigned => write!(f, "u"),
+            Self::UnsignedLong => write!(f, "ul"),
         }
     }
 }
@@ -237,11 +241,10 @@ impl std::fmt::Display for Token {
 
 impl Token {
     const IDENT: &'static str = r"^[a-zA-Z_]\w*\b";
-    // TODO: Expand (e.g., Integer suffixes)
     const STRING: &'static str = r#""(?:[^"\\]|\\[\s\S])*""#;
     const CHAR: &'static str = r"'[^'\\]|\\[\s\S]'";
     const FLOAT: &'static str = r"^[0-9]+\.[0-9]+";
-    const INT: &'static str = r"^[0-9]+[lL]?\b";
+    const INT: &'static str = r"^[0-9]+(?:[uU]|[lL]|[uU][lL]|[lL][uU])?\b";
 
     const KEYWORDS: &'static [(&'static str, Token)] = &[
         ("return", Token::Return),
@@ -383,10 +386,21 @@ impl Token {
     ) -> Option<(Token, &'a str)> {
         fn make_literal(literal: &str) -> Token {
             let (text, suffix) = match literal.as_bytes() {
-                &[.., b'l' | b'L'] => (
-                    literal.chars().take(literal.len() - 1).collect(),
-                    Some(ConstantSuffix::Long),
-                ),
+                &[.., c1, c2] => {
+                    let c1 = c1.to_ascii_lowercase();
+                    let c2 = c2.to_ascii_lowercase();
+                    let (suffix_len, suffix) = match (c1, c2) {
+                        (b'u', b'l') | (b'l', b'u') => (2, Some(ConstantSuffix::UnsignedLong)),
+                        (_, b'l') => (1, Some(ConstantSuffix::Long)),
+                        (_, b'u') => (1, Some(ConstantSuffix::Unsigned)),
+                        _ => (0, None),
+                    };
+
+                    (
+                        literal.chars().take(literal.len() - suffix_len).collect(),
+                        suffix,
+                    )
+                }
                 _ => (literal.to_string(), None),
             };
             Token::Constant {

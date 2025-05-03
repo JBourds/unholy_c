@@ -238,20 +238,22 @@ pub enum BinaryOp {
     BitOr,
     Xor,
     LShift,
-    RShift,
+    Sar,
+    Shr,
 }
 
-impl From<tacky::BinaryOp> for BinaryOp {
-    fn from(node: tacky::BinaryOp) -> Self {
-        match node {
-            tacky::BinaryOp::Add => Self::Add,
-            tacky::BinaryOp::Subtract => Self::Subtract,
-            tacky::BinaryOp::Multiply => Self::Multiply,
-            tacky::BinaryOp::BitAnd => Self::BitAnd,
-            tacky::BinaryOp::BitOr => Self::BitOr,
-            tacky::BinaryOp::Xor => Self::Xor,
-            tacky::BinaryOp::LShift => Self::LShift,
-            tacky::BinaryOp::RShift => Self::RShift,
+impl BinaryOp {
+    fn from_op_and_sign(op: tacky::BinaryOp, signed: bool) -> Self {
+        match (op, signed) {
+            (tacky::BinaryOp::Add, _) => Self::Add,
+            (tacky::BinaryOp::Subtract, _) => Self::Subtract,
+            (tacky::BinaryOp::Multiply, _) => Self::Multiply,
+            (tacky::BinaryOp::BitAnd, _) => Self::BitAnd,
+            (tacky::BinaryOp::BitOr, _) => Self::BitOr,
+            (tacky::BinaryOp::Xor, _) => Self::Xor,
+            (tacky::BinaryOp::LShift, _) => Self::LShift,
+            (tacky::BinaryOp::RShift, true) => Self::Sar,
+            (tacky::BinaryOp::RShift, false) => Self::Shr,
             _ => unreachable!("No instruction conversion in binary op."),
         }
     }
@@ -267,7 +269,8 @@ impl fmt::Display for BinaryOp {
             Self::BitOr => write!(f, "or"),
             Self::Xor => write!(f, "xor"),
             Self::LShift => write!(f, "sal"),
-            Self::RShift => write!(f, "sar"),
+            Self::Sar => write!(f, "sar"),
+            Self::Shr => write!(f, "shr"),
         }
     }
 }
@@ -429,6 +432,10 @@ pub enum CondCode {
     GE,
     L,
     LE,
+    A,
+    AE,
+    B,
+    BE,
 }
 
 impl fmt::Display for CondCode {
@@ -440,19 +447,47 @@ impl fmt::Display for CondCode {
             Self::GE => write!(f, "ge"),
             Self::L => write!(f, "l"),
             Self::LE => write!(f, "le"),
+            Self::A => write!(f, "a"),
+            Self::AE => write!(f, "ae"),
+            Self::B => write!(f, "b"),
+            Self::BE => write!(f, "be"),
         }
     }
 }
 
-impl From<tacky::BinaryOp> for CondCode {
-    fn from(value: tacky::BinaryOp) -> Self {
+impl CondCode {
+    fn from_signed_op(value: tacky::BinaryOp, signed: bool) -> Self {
         match value {
             tacky::BinaryOp::Equal => Self::E,
             tacky::BinaryOp::NotEqual => Self::NE,
-            tacky::BinaryOp::LessThan => Self::L,
-            tacky::BinaryOp::LessOrEqual => Self::LE,
-            tacky::BinaryOp::GreaterThan => Self::G,
-            tacky::BinaryOp::GreaterOrEqual => Self::GE,
+            tacky::BinaryOp::LessThan => {
+                if signed {
+                    Self::L
+                } else {
+                    Self::B
+                }
+            }
+            tacky::BinaryOp::LessOrEqual => {
+                if signed {
+                    Self::LE
+                } else {
+                    Self::BE
+                }
+            }
+            tacky::BinaryOp::GreaterThan => {
+                if signed {
+                    Self::G
+                } else {
+                    Self::A
+                }
+            }
+            tacky::BinaryOp::GreaterOrEqual => {
+                if signed {
+                    Self::GE
+                } else {
+                    Self::AE
+                }
+            }
             _ => unreachable!("Only relational operands can convert to CondCode"),
         }
     }
@@ -475,6 +510,10 @@ pub enum InstructionType {
         src: Operand,
         dst: Operand,
     },
+    MovZeroExtend {
+        src: Operand,
+        dst: Operand,
+    },
     Unary {
         op: UnaryOp,
         dst: Operand,
@@ -489,6 +528,7 @@ pub enum InstructionType {
         dst: Operand,
     },
     Idiv(Operand),
+    Div(Operand),
     Cdq(RegSection),
     Jmp(Rc<String>),
     JmpCC {
@@ -600,6 +640,10 @@ impl Instruction<WithStorage> {
                     src: convert_operand_offset(src),
                     dst: convert_operand_offset(dst),
                 },
+                InstructionType::MovZeroExtend { src, dst } => InstructionType::MovZeroExtend {
+                    src: convert_operand_offset(src),
+                    dst: convert_operand_offset(dst),
+                },
                 InstructionType::Unary { op, dst } => InstructionType::Unary {
                     op,
                     dst: convert_operand_offset(dst),
@@ -610,6 +654,7 @@ impl Instruction<WithStorage> {
                     dst: convert_operand_offset(dst),
                 },
                 InstructionType::Idiv(op) => InstructionType::Idiv(convert_operand_offset(op)),
+                InstructionType::Div(op) => InstructionType::Div(convert_operand_offset(op)),
                 InstructionType::Cmp { src, dst } => InstructionType::Cmp {
                     src: convert_operand_offset(src),
                     dst: convert_operand_offset(dst),
@@ -693,6 +738,33 @@ impl Instruction<WithStorage> {
 
                 instrs
             }
+            InstructionType::MovZeroExtend {
+                src,
+                dst: reg @ Operand::Reg(_),
+            } => {
+                vec![Self::from_op(InstructionType::Mov { src, dst: reg })]
+            }
+            InstructionType::MovZeroExtend {
+                src,
+                dst: dst @ Operand::StackOffset { .. },
+            } => {
+                vec![
+                    Self::from_op(InstructionType::Mov {
+                        src,
+                        dst: Operand::Reg(Reg::X64 {
+                            reg: X64Reg::R11,
+                            section: RegSection::Dword,
+                        }),
+                    }),
+                    Self::from_op(InstructionType::Mov {
+                        src: Operand::Reg(Reg::X64 {
+                            reg: X64Reg::R11,
+                            section: RegSection::Qword,
+                        }),
+                        dst,
+                    }),
+                ]
+            }
             InstructionType::Binary {
                 op,
                 src: src @ Operand::StackOffset { .. } | src @ Operand::Data { .. },
@@ -721,6 +793,19 @@ impl Instruction<WithStorage> {
                         dst: r10.clone(),
                     }),
                     Self::from_op(InstructionType::Idiv(r10)),
+                ]
+            }
+            InstructionType::Div(src @ Operand::Imm(_)) => {
+                let r10 = Operand::Reg(Reg::X64 {
+                    reg: X64Reg::R10,
+                    section: RegSection::from_size(src.size()).expect("FIXME"),
+                });
+                vec![
+                    Self::from_op(InstructionType::Mov {
+                        src,
+                        dst: r10.clone(),
+                    }),
+                    Self::from_op(InstructionType::Div(r10)),
                 ]
             }
             InstructionType::Cmp {
@@ -809,8 +894,9 @@ impl Instruction<WithStorage> {
                     Self::from_op(InstructionType::Cmp { src: r10, dst }),
                 ]
             }
-
-            InstructionType::Push(imm @ Operand::Imm(..)) if imm.size() > 4 => {
+            // Anything outside of the range of i32 needs a mov first
+            InstructionType::Push(Operand::Imm(constant)) if !constant.fits_in::<i32>() => {
+                let imm = Operand::Imm(constant);
                 let r10 = Operand::Reg(Reg::X64 {
                     reg: X64Reg::R10,
                     section: RegSection::from_size(imm.size()).expect("FIXME"),
@@ -954,13 +1040,14 @@ impl Instruction<Initial> {
                 | tacky::BinaryOp::BitAnd
                 | tacky::BinaryOp::BitOr
                 | tacky::BinaryOp::Xor => {
+                    let signed_op = is_signed(&src1, symbols);
                     vec![
                         new_instr(InstructionType::Mov {
                             src: Operand::from_tacky(src1, symbols),
                             dst: Operand::from_tacky(dst.clone(), symbols),
                         }),
                         new_instr(InstructionType::Binary {
-                            op: op.into(),
+                            op: BinaryOp::from_op_and_sign(op, signed_op),
                             src: Operand::from_tacky(src2, symbols),
                             dst: Operand::from_tacky(dst, symbols),
                         }),
@@ -989,30 +1076,55 @@ impl Instruction<Initial> {
                     ]
                 }
                 tacky::BinaryOp::Divide => {
+                    let signed_div = is_signed(&src1, symbols);
                     let src1 = Operand::from_tacky(src1, symbols);
-                    let section =
-                        RegSection::from_size(src1.size()).expect("NOT IMPLEMENTED YET :(");
+                    let op_size = src1.size();
+                    let section = RegSection::from_size(op_size).expect("NOT IMPLEMENTED YET :(");
                     let ax = Operand::Reg(Reg::X86 {
                         reg: X86Reg::Ax,
                         section,
                     });
-                    vec![
-                        new_instr(InstructionType::Mov {
-                            src: src1,
-                            dst: ax.clone(),
-                        }),
-                        new_instr(InstructionType::Cdq(section)),
-                        new_instr(InstructionType::Idiv(Operand::from_tacky(src2, symbols))),
-                        new_instr(InstructionType::Mov {
-                            src: ax,
-                            dst: Operand::from_tacky(dst, symbols),
-                        }),
-                    ]
+                    let dx = Operand::Reg(Reg::X86 {
+                        reg: X86Reg::Dx,
+                        section: RegSection::from_size(src1.size())
+                            .expect("NOT IMPLEMENTED YET :("),
+                    });
+                    if signed_div {
+                        vec![
+                            new_instr(InstructionType::Mov {
+                                src: src1,
+                                dst: ax.clone(),
+                            }),
+                            new_instr(InstructionType::Cdq(section)),
+                            new_instr(InstructionType::Idiv(Operand::from_tacky(src2, symbols))),
+                            new_instr(InstructionType::Mov {
+                                src: ax,
+                                dst: Operand::from_tacky(dst, symbols),
+                            }),
+                        ]
+                    } else {
+                        vec![
+                            new_instr(InstructionType::Mov {
+                                src: src1,
+                                dst: ax.clone(),
+                            }),
+                            new_instr(InstructionType::Mov {
+                                src: make_zero(op_size, signed_div),
+                                dst: dx.clone(),
+                            }),
+                            new_instr(InstructionType::Div(Operand::from_tacky(src2, symbols))),
+                            new_instr(InstructionType::Mov {
+                                src: ax,
+                                dst: Operand::from_tacky(dst, symbols),
+                            }),
+                        ]
+                    }
                 }
                 tacky::BinaryOp::Remainder => {
+                    let signed_rem = is_signed(&src1, symbols);
                     let src1 = Operand::from_tacky(src1, symbols);
-                    let section =
-                        RegSection::from_size(src1.size()).expect("NOT IMPLEMENTED YET :(");
+                    let op_size = src1.size();
+                    let section = RegSection::from_size(op_size).expect("NOT IMPLEMENTED YET :(");
                     let ax = Operand::Reg(Reg::X86 {
                         reg: X86Reg::Ax,
                         section,
@@ -1023,17 +1135,33 @@ impl Instruction<Initial> {
                             .expect("NOT IMPLEMENTED YET :("),
                     });
 
-                    vec![
-                        new_instr(InstructionType::Mov { src: src1, dst: ax }),
-                        new_instr(InstructionType::Cdq(section)),
-                        new_instr(InstructionType::Idiv(Operand::from_tacky(src2, symbols))),
-                        new_instr(InstructionType::Mov {
-                            src: dx,
-                            dst: Operand::from_tacky(dst, symbols),
-                        }),
-                    ]
+                    if signed_rem {
+                        vec![
+                            new_instr(InstructionType::Mov { src: src1, dst: ax }),
+                            new_instr(InstructionType::Cdq(section)),
+                            new_instr(InstructionType::Idiv(Operand::from_tacky(src2, symbols))),
+                            new_instr(InstructionType::Mov {
+                                src: dx,
+                                dst: Operand::from_tacky(dst, symbols),
+                            }),
+                        ]
+                    } else {
+                        vec![
+                            new_instr(InstructionType::Mov { src: src1, dst: ax }),
+                            new_instr(InstructionType::Mov {
+                                src: make_zero(op_size, signed_rem),
+                                dst: dx.clone(),
+                            }),
+                            new_instr(InstructionType::Div(Operand::from_tacky(src2, symbols))),
+                            new_instr(InstructionType::Mov {
+                                src: dx,
+                                dst: Operand::from_tacky(dst, symbols),
+                            }),
+                        ]
+                    }
                 }
                 op @ tacky::BinaryOp::LShift | op @ tacky::BinaryOp::RShift => {
+                    let signed_op = is_signed(&src1, symbols);
                     let mut v = vec![];
                     let src = match src2 {
                         tacky::Val::Constant(v) => Operand::Imm(v),
@@ -1054,7 +1182,7 @@ impl Instruction<Initial> {
                         dst: Operand::from_tacky(dst.clone(), symbols),
                     }));
                     v.push(new_instr(InstructionType::Binary {
-                        op: op.into(),
+                        op: BinaryOp::from_op_and_sign(op, signed_op),
                         src,
                         dst: Operand::from_tacky(dst, symbols),
                     }));
@@ -1065,28 +1193,33 @@ impl Instruction<Initial> {
                 | tacky::BinaryOp::LessThan
                 | tacky::BinaryOp::LessOrEqual
                 | tacky::BinaryOp::GreaterThan
-                | tacky::BinaryOp::GreaterOrEqual => vec![
-                    new_instr(InstructionType::Cmp {
-                        src: Operand::from_tacky(src2, symbols),
-                        dst: Operand::from_tacky(src1, symbols),
-                    }),
-                    new_instr(InstructionType::Mov {
-                        src: Operand::Imm(ast::Constant::I32(0)),
-                        dst: Operand::from_tacky(dst.clone(), symbols),
-                    }),
-                    new_instr(InstructionType::SetCC {
-                        cond_code: op.into(),
-                        dst: {
-                            // FIXME: Since SetCC takes a byte value we must manually
-                            // fixup the stack location size
-                            let dst: Operand = Operand::from_tacky(dst, symbols);
-                            match dst {
-                                Operand::Pseudo { name, .. } => Operand::Pseudo { name, size: 1 },
-                                _ => dst,
-                            }
-                        },
-                    }),
-                ],
+                | tacky::BinaryOp::GreaterOrEqual => {
+                    let use_signed_cmp = is_signed(&src1, symbols);
+                    vec![
+                        new_instr(InstructionType::Cmp {
+                            src: Operand::from_tacky(src2, symbols),
+                            dst: Operand::from_tacky(src1, symbols),
+                        }),
+                        new_instr(InstructionType::Mov {
+                            src: Operand::Imm(ast::Constant::I32(0)),
+                            dst: Operand::from_tacky(dst.clone(), symbols),
+                        }),
+                        new_instr(InstructionType::SetCC {
+                            cond_code: CondCode::from_signed_op(op, use_signed_cmp),
+                            dst: {
+                                // FIXME: Since SetCC takes a byte value we must manually
+                                // fixup the stack location size
+                                let dst = Operand::from_tacky(dst, symbols);
+                                match dst {
+                                    Operand::Pseudo { name, .. } => {
+                                        Operand::Pseudo { name, size: 1 }
+                                    }
+                                    _ => dst,
+                                }
+                            },
+                        }),
+                    ]
+                }
                 _ => unimplemented!(),
             },
             tacky::Instruction::JumpIfZero { condition, target } => vec![
@@ -1202,7 +1335,41 @@ impl Instruction<Initial> {
                 v.push(new_instr(InstructionType::Mov { src: ax, dst }));
                 v
             }
+            tacky::Instruction::ZeroExtend { src, dst } => {
+                vec![new_instr(InstructionType::MovZeroExtend {
+                    src: Operand::from_tacky(src, symbols),
+                    dst: Operand::from_tacky(dst, symbols),
+                })]
+            }
         }
+    }
+}
+
+fn is_signed(val: &tacky::Val, symbols: &tacky::SymbolTable) -> bool {
+    match val.get_type(symbols) {
+        ast::Type {
+            base: ast::BaseType::Int { signed, .. },
+            ptr: None,
+            ..
+        } => signed.is_none_or(|signed| signed),
+        _ => true,
+    }
+}
+
+fn make_zero(size_bytes: usize, signed: bool) -> Operand {
+    match (size_bytes, signed) {
+        (1, true) => Operand::Imm(ast::Constant::I8(0)),
+        (2, true) => Operand::Imm(ast::Constant::I16(0)),
+        (4, true) => Operand::Imm(ast::Constant::I32(0)),
+        (8, true) => Operand::Imm(ast::Constant::I64(0)),
+        (1, false) => Operand::Imm(ast::Constant::U8(0)),
+        (2, false) => Operand::Imm(ast::Constant::U16(0)),
+        (4, false) => Operand::Imm(ast::Constant::U32(0)),
+        (8, false) => Operand::Imm(ast::Constant::U64(0)),
+        _ => unreachable!(
+            "Unable to create a {} constant operand with {size_bytes} size",
+            if signed { "signed" } else { "unsigned" }
+        ),
     }
 }
 

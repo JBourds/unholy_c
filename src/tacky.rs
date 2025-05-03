@@ -241,6 +241,10 @@ pub enum Instruction {
         src: Val,
         dst: Val,
     },
+    ZeroExtend {
+        src: Val,
+        dst: Val,
+    },
     Truncate {
         src: Val,
         dst: Val,
@@ -1033,16 +1037,39 @@ impl Expr {
                 let dst = Function::make_tacky_temp_var(target.clone(), symbols, make_temp_var);
 
                 // FIXME: This needs to use PartialEq/Eq
-                if target.base.nbytes() > val_type.base.nbytes() {
-                    instructions.push(Instruction::SignExtend {
-                        src: val,
-                        dst: dst.clone(),
-                    });
-                } else {
-                    instructions.push(Instruction::Truncate {
-                        src: val,
-                        dst: dst.clone(),
-                    });
+                match target.base.nbytes().cmp(&val_type.base.nbytes()) {
+                    std::cmp::Ordering::Equal => {
+                        instructions.push(Instruction::Copy {
+                            src: val,
+                            dst: dst.clone(),
+                        });
+                    }
+                    std::cmp::Ordering::Less => {
+                        instructions.push(Instruction::Truncate {
+                            src: val,
+                            dst: dst.clone(),
+                        });
+                    }
+                    _ => match val_type {
+                        ast::Type {
+                            base: ast::BaseType::Int { signed, .. },
+                            ptr: None,
+                            ..
+                        } => {
+                            if signed.is_none_or(|signed| signed) {
+                                instructions.push(Instruction::SignExtend {
+                                    src: val,
+                                    dst: dst.clone(),
+                                });
+                            } else {
+                                instructions.push(Instruction::ZeroExtend {
+                                    src: val,
+                                    dst: dst.clone(),
+                                });
+                            }
+                        }
+                        _ => unimplemented!(),
+                    },
                 }
 
                 Self {
@@ -1061,7 +1088,7 @@ pub enum Val {
 }
 
 impl Val {
-    fn get_type(&self, symbols: &SymbolTable) -> ast::Type {
+    pub fn get_type(&self, symbols: &SymbolTable) -> ast::Type {
         match self {
             Self::Constant(c) => c.get_type(),
             Self::Var(name) => {

@@ -36,7 +36,14 @@ const SYSTEM_V_REGS: [Reg; 6] = [
 #[derive(Debug, PartialEq)]
 pub enum TopLevel {
     Fun(Function),
-    Static(StaticVariable),
+    StaticVariable(StaticVariable),
+    StaticConstant(StaticConstant),
+}
+
+#[derive(Debug, PartialEq)]
+pub struct StaticConstant {
+    pub identifier: Rc<String>,
+    pub init: Option<Rc<[u8]>>,
 }
 
 #[derive(Debug, PartialEq)]
@@ -75,7 +82,7 @@ impl From<tacky::Program> for Program {
                 tacky::TopLevel::Fun(f) => {
                     top_level.push(TopLevel::Fun(Function::from_with_storage(f, &prog.symbols)))
                 }
-                tacky::TopLevel::Static(s) => top_level.push(TopLevel::Static(s.into())),
+                tacky::TopLevel::Static(s) => top_level.push(TopLevel::StaticVariable(s.into())),
             }
         }
         Program {

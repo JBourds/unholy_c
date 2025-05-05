@@ -35,7 +35,8 @@ pub mod x64 {
         for entry in program.top_level.into_iter() {
             match entry {
                 codegen::TopLevel::Fun(f) => gen_function(w, f)?,
-                codegen::TopLevel::Static(v) => gen_static(w, v, &program.symbols)?,
+                codegen::TopLevel::StaticVariable(v) => gen_static_var(w, v, &program.symbols)?,
+                codegen::TopLevel::StaticConstant(v) => gen_static_const(w, v, &program.symbols)?,
             }
         }
 
@@ -43,7 +44,15 @@ pub mod x64 {
         Ok(())
     }
 
-    fn gen_static(
+    fn gen_static_const(
+        w: &mut impl Write,
+        constant: codegen::StaticConstant,
+        symbols: &tacky::SymbolTable,
+    ) -> Result<()> {
+        todo!()
+    }
+
+    fn gen_static_var(
         w: &mut impl Write,
         var: codegen::StaticVariable,
         symbols: &tacky::SymbolTable,

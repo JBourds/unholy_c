@@ -827,6 +827,7 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
                 r#type: left_t,
             } = typecheck_expr(lvalue, symbols)
                 .context("Failed to typecheck lvalue in assignment.")?;
+
             // FIXME: Lazy clone :(
             Ok(TypedExpr {
                 expr: ast::Expr::Assignment {
@@ -843,6 +844,18 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
         ast::Expr::Unary { op, expr } => {
             let TypedExpr { expr, r#type } = typecheck_expr(expr, symbols)
                 .context("Failed to typecheck nested unary expression.")?;
+            ensure!(
+                !(op.is_bitwise()
+                    && matches!(
+                        r#type,
+                        ast::Type {
+                            base: ast::BaseType::Float(_) | ast::BaseType::Double(_),
+                            ptr: None,
+                            ..
+                        }
+                    )),
+                "Cannot perform a bitwise unary operation on a floating point value."
+            );
             Ok(TypedExpr {
                 expr: ast::Expr::Unary {
                     op: *op,
@@ -879,6 +892,7 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
             let (lifted_left_t, lifted_right_t) =
                 ast::BaseType::lift(left_t.base.clone(), right_t.base.clone())
                     .context("Unable to promote {left_t:#?} and {right_t:#?} to a common type.")?;
+
             // With a binary expression, we force both operands to be of
             // the same type so the decision between left or right is
             // arbitrary
@@ -888,6 +902,21 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
                 is_const: true,
                 ..left_t
             };
+
+            ensure!(
+                !(op.is_bitwise()
+                    | matches!(op, ast::BinaryOp::Remainder | ast::BinaryOp::ModAssign)
+                    && matches!(
+                        common_t,
+                        ast::Type {
+                            base: ast::BaseType::Float(_) | ast::BaseType::Double(_),
+                            ptr: None,
+                            ..
+                        }
+                    )),
+                "Cannot perform a bitwise or reaminder binary operation on a floating point value."
+            );
+
             let left = if lifted_left_t != left_t.base {
                 ast::Expr::Cast {
                     target: common_t.clone(),

@@ -1188,7 +1188,7 @@ impl Type {
 
     pub fn size_of(&self) -> usize {
         match self.ptr {
-            Some(..) => 8, // FIXME: maybe this shouldn't be a magic constant
+            Some(..) => core::mem::size_of::<usize>(),
             None => self.base.nbytes(),
         }
     }

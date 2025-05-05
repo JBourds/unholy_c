@@ -1341,6 +1341,10 @@ impl Instruction<Initial> {
                     dst: Operand::from_tacky(dst, symbols),
                 })]
             }
+            tacky::Instruction::DoubleToInt { .. } => todo!(),
+            tacky::Instruction::IntToDouble { .. } => todo!(),
+            tacky::Instruction::DoubleToUInt { .. } => todo!(),
+            tacky::Instruction::UIntToDouble { .. } => todo!(),
         }
     }
 }

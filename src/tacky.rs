@@ -245,6 +245,22 @@ pub enum Instruction {
         src: Val,
         dst: Val,
     },
+    DoubleToInt {
+        src: Val,
+        dst: Val,
+    },
+    IntToDouble {
+        src: Val,
+        dst: Val,
+    },
+    DoubleToUInt {
+        src: Val,
+        dst: Val,
+    },
+    UIntToDouble {
+        src: Val,
+        dst: Val,
+    },
     Truncate {
         src: Val,
         dst: Val,
@@ -1036,40 +1052,125 @@ impl Expr {
                 }
                 let dst = Function::make_tacky_temp_var(target.clone(), symbols, make_temp_var);
 
-                // FIXME: This needs to use PartialEq/Eq
-                match target.base.nbytes().cmp(&val_type.base.nbytes()) {
-                    std::cmp::Ordering::Equal => {
-                        instructions.push(Instruction::Copy {
-                            src: val,
-                            dst: dst.clone(),
-                        });
-                    }
-                    std::cmp::Ordering::Less => {
-                        instructions.push(Instruction::Truncate {
-                            src: val,
-                            dst: dst.clone(),
-                        });
-                    }
-                    _ => match val_type {
+                let is_float = |t: &ast::Type| {
+                    matches!(
+                        t,
                         ast::Type {
-                            base: ast::BaseType::Int { signed, .. },
+                            base: ast::BaseType::Float(_) | ast::BaseType::Double(_),
+                            ptr: None,
+                            ..
+                        }
+                    )
+                };
+
+                // Double -> Integer
+                if is_float(&val_type) {
+                    match target {
+                        ast::Type {
+                            base:
+                                ast::BaseType::Int {
+                                    nbytes: _,
+                                    signed: Some(false),
+                                },
                             ptr: None,
                             ..
                         } => {
-                            if signed.is_none_or(|signed| signed) {
-                                instructions.push(Instruction::SignExtend {
-                                    src: val,
-                                    dst: dst.clone(),
-                                });
-                            } else {
-                                instructions.push(Instruction::ZeroExtend {
-                                    src: val,
-                                    dst: dst.clone(),
-                                });
-                            }
+                            instructions.push(Instruction::DoubleToUInt {
+                                src: val,
+                                dst: dst.clone(),
+                            });
                         }
-                        _ => unimplemented!(),
-                    },
+                        ast::Type {
+                            base:
+                                ast::BaseType::Int {
+                                    nbytes: _,
+                                    signed: _,
+                                },
+                            ptr: None,
+                            ..
+                        } => {
+                            instructions.push(Instruction::DoubleToInt {
+                                src: val,
+                                dst: dst.clone(),
+                            });
+                        }
+                        // FIXME: Add chars here
+                        // We should not ever be trying to cast a double to
+                        // anything other than an int
+                        _ => unreachable!("Casting float type to {target:?}"),
+                    }
+                } else if is_float(&target) {
+                    match val_type {
+                        ast::Type {
+                            base:
+                                ast::BaseType::Int {
+                                    nbytes: _,
+                                    signed: Some(false),
+                                },
+                            ptr: None,
+                            ..
+                        } => {
+                            instructions.push(Instruction::UIntToDouble {
+                                src: val,
+                                dst: dst.clone(),
+                            });
+                        }
+                        ast::Type {
+                            base:
+                                ast::BaseType::Int {
+                                    nbytes: _,
+                                    signed: _,
+                                },
+                            ptr: None,
+                            ..
+                        } => {
+                            instructions.push(Instruction::IntToDouble {
+                                src: val,
+                                dst: dst.clone(),
+                            });
+                        }
+                        // FIXME: Add chars here
+                        // We should not ever be trying to cast a double to
+                        // anything other than an int
+                        _ => unreachable!("Casting float type to {target:?}"),
+                    }
+                } else {
+                    // Integer ops
+                    // FIXME: This needs to use PartialEq/Eq
+                    match target.base.nbytes().cmp(&val_type.base.nbytes()) {
+                        std::cmp::Ordering::Equal => {
+                            instructions.push(Instruction::Copy {
+                                src: val,
+                                dst: dst.clone(),
+                            });
+                        }
+                        std::cmp::Ordering::Less => {
+                            instructions.push(Instruction::Truncate {
+                                src: val,
+                                dst: dst.clone(),
+                            });
+                        }
+                        _ => match val_type {
+                            ast::Type {
+                                base: ast::BaseType::Int { signed, .. },
+                                ptr: None,
+                                ..
+                            } => {
+                                if signed.is_none_or(|signed| signed) {
+                                    instructions.push(Instruction::SignExtend {
+                                        src: val,
+                                        dst: dst.clone(),
+                                    });
+                                } else {
+                                    instructions.push(Instruction::ZeroExtend {
+                                        src: val,
+                                        dst: dst.clone(),
+                                    });
+                                }
+                            }
+                            _ => unimplemented!(),
+                        },
+                    }
                 }
 
                 Self {

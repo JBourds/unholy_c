@@ -934,9 +934,9 @@ impl BaseType {
 
     pub fn float(double: bool) -> Self {
         if double {
-            Self::Float(4)
-        } else {
             Self::Double(8)
+        } else {
+            Self::Float(4)
         }
     }
 

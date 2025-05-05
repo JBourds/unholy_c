@@ -1,7 +1,7 @@
 use crate::lexer::{ConstantFlag, Token};
 
 use anyhow::{Context, Error, Result, bail, ensure};
-use num::bigint::BigUint;
+use num::{NumCast, bigint::BigUint};
 use std::str::FromStr;
 use std::{
     num::{NonZeroU8, NonZeroUsize},
@@ -1499,24 +1499,32 @@ impl std::cmp::Eq for Constant {}
 
 impl Constant {
     pub fn is_int(&self) -> bool {
-        true
+        !matches!(self, Self::F32(_) | Self::F64(_))
     }
 
     pub fn fits_in<T>(&self) -> bool
     where
-        T: Sized,
+        T: TryFrom<i8>,
+        T: TryFrom<i16>,
+        T: TryFrom<i32>,
+        T: TryFrom<i64>,
+        T: TryFrom<u8>,
+        T: TryFrom<u16>,
+        T: TryFrom<u32>,
+        T: TryFrom<u64>,
+        T: NumCast,
     {
         match &self {
-            Constant::I8(_) => core::mem::size_of::<T>() <= core::mem::size_of::<i8>(),
-            Constant::I16(_) => core::mem::size_of::<T>() <= core::mem::size_of::<i16>(),
-            Constant::I32(_) => core::mem::size_of::<T>() <= core::mem::size_of::<i32>(),
-            Constant::I64(_) => core::mem::size_of::<T>() <= core::mem::size_of::<i64>(),
-            Constant::U8(_) => core::mem::size_of::<T>() <= core::mem::size_of::<u8>(),
-            Constant::U16(_) => core::mem::size_of::<T>() <= core::mem::size_of::<u16>(),
-            Constant::U32(_) => core::mem::size_of::<T>() <= core::mem::size_of::<u32>(),
-            Constant::U64(_) => core::mem::size_of::<T>() <= core::mem::size_of::<u64>(),
-            Constant::F32(_) => core::mem::size_of::<T>() <= core::mem::size_of::<f32>(),
-            Constant::F64(_) => core::mem::size_of::<T>() <= core::mem::size_of::<f64>(),
+            Constant::I8(v) => <T as TryFrom<i8>>::try_from(*v).is_ok(),
+            Constant::I16(v) => <T as TryFrom<i16>>::try_from(*v).is_ok(),
+            Constant::I32(v) => <T as TryFrom<i32>>::try_from(*v).is_ok(),
+            Constant::I64(v) => <T as TryFrom<i64>>::try_from(*v).is_ok(),
+            Constant::U8(v) => <T as TryFrom<u8>>::try_from(*v).is_ok(),
+            Constant::U16(v) => <T as TryFrom<u16>>::try_from(*v).is_ok(),
+            Constant::U32(v) => <T as TryFrom<u32>>::try_from(*v).is_ok(),
+            Constant::U64(v) => <T as TryFrom<u64>>::try_from(*v).is_ok(),
+            Constant::F32(v) => num::cast::<f32, T>(*v).is_some(),
+            Constant::F64(v) => num::cast::<f64, T>(*v).is_some(),
         }
     }
 

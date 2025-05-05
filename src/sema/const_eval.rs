@@ -60,7 +60,7 @@ fn eval_constant(expr: ast::Expr) -> Result<Constant> {
     }
 }
 
-#[derive(Eq, PartialEq, PartialOrd, Ord)]
+#[derive(PartialEq, PartialOrd)]
 enum Constant {
     I8(i8),
     I16(i16),
@@ -70,6 +70,18 @@ enum Constant {
     U16(u16),
     U32(u32),
     U64(u64),
+    F32(f32),
+    F64(f64),
+}
+
+// Implement these traits knowing they will never get called on floats
+impl std::hash::Hash for Constant {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        match self {
+            Self::F32(_) | Self::F64(_) => unreachable!(),
+            _ => core::mem::discriminant(self).hash(state),
+        }
+    }
 }
 
 impl Constant {
@@ -81,6 +93,8 @@ impl Constant {
     pub const _U16: Self = Self::U16(0);
     pub const _U32: Self = Self::U32(0);
     pub const _U64: Self = Self::U64(0);
+    pub const _F32: Self = Self::F32(0.0);
+    pub const _F64: Self = Self::F64(0.0);
 
     pub fn size_bytes(&self) -> usize {
         match self {
@@ -92,6 +106,8 @@ impl Constant {
             Constant::U16(_) => core::mem::size_of::<u16>(),
             Constant::U32(_) => core::mem::size_of::<u32>(),
             Constant::U64(_) => core::mem::size_of::<u64>(),
+            Constant::F32(_) => core::mem::size_of::<f32>(),
+            Constant::F64(_) => core::mem::size_of::<f64>(),
         }
     }
 
@@ -106,6 +122,9 @@ impl Constant {
             Self::U16(..) => 21 * self.size_bytes(),
             Self::U32(..) => 31 * self.size_bytes(),
             Self::U64(..) => 41 * self.size_bytes(),
+            // Floats are above everything else
+            Self::F32(..) => 100 * self.size_bytes(),
+            Self::F64(..) => 200 * self.size_bytes(),
         }
     }
 
@@ -139,6 +158,8 @@ impl Constant {
             _ if (rank == Self::_U16.rank()) => Self::U16(self.cast::<u16>()),
             _ if (rank == Self::_U32.rank()) => Self::U32(self.cast::<u32>()),
             _ if (rank == Self::_U64.rank()) => Self::U64(self.cast::<u64>()),
+            _ if (rank == Self::_F32.rank()) => Self::F32(self.cast::<f32>()),
+            _ if (rank == Self::_F64.rank()) => Self::F64(self.cast::<f64>()),
             _ => unreachable!(),
         }
     }
@@ -154,6 +175,8 @@ impl Constant {
         u16: AsPrimitive<T>,
         u32: AsPrimitive<T>,
         u64: AsPrimitive<T>,
+        f32: AsPrimitive<T>,
+        f64: AsPrimitive<T>,
     {
         match self {
             Self::I8(num) => num.as_(),
@@ -164,6 +187,8 @@ impl Constant {
             Self::U16(num) => num.as_(),
             Self::U32(num) => num.as_(),
             Self::U64(num) => num.as_(),
+            Self::F32(num) => num.as_(),
+            Self::F64(num) => num.as_(),
         }
     }
 
@@ -177,6 +202,8 @@ impl Constant {
             Self::U16(n) => n != 0,
             Self::U32(n) => n != 0,
             Self::U64(n) => n != 0,
+            Self::F32(n) => n != 0.0,
+            Self::F64(n) => n != 0.0,
         }
     }
 
@@ -266,6 +293,8 @@ impl std::ops::Not for Constant {
             Constant::U16(n) => Constant::U16(n.not()),
             Constant::U32(n) => Constant::U32(n.not()),
             Constant::U64(n) => Constant::U64(n.not()),
+            Constant::F32(n) => Constant::F32((n == 0.0).into()),
+            Constant::F64(n) => Constant::F64((n == 0.0).into()),
         }
     }
 }
@@ -285,6 +314,8 @@ impl std::ops::Neg for Constant {
             Constant::U16(n) => Constant::U16(u16::MAX - n),
             Constant::U32(n) => Constant::U32(u32::MAX - n),
             Constant::U64(n) => Constant::U64(u64::MAX - n),
+            Constant::F32(n) => Constant::F32(n.neg()),
+            Constant::F64(n) => Constant::F64(n.neg()),
         }
     }
 }
@@ -366,6 +397,8 @@ impl From<&Constant> for ast::Constant {
             Constant::U16(num) => ast::Constant::U16(num),
             Constant::U32(num) => ast::Constant::U32(num),
             Constant::U64(num) => ast::Constant::U64(num),
+            Constant::F32(num) => ast::Constant::F32(num),
+            Constant::F64(num) => ast::Constant::F64(num),
         }
     }
 }
@@ -383,6 +416,8 @@ impl From<&ast::Constant> for Result<Constant> {
             ast::Constant::U16(num) => Ok(Constant::U16(num)),
             ast::Constant::U32(num) => Ok(Constant::U32(num)),
             ast::Constant::U64(num) => Ok(Constant::U64(num)),
+            ast::Constant::F32(num) => Ok(Constant::F32(num)),
+            ast::Constant::F64(num) => Ok(Constant::F64(num)),
         }
     }
 }

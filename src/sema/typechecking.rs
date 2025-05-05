@@ -166,6 +166,8 @@ impl InitialValue {
             ast::Constant::U16(val) => Ok(InitialValue::Initial(val.to_ne_bytes().to_vec().into())),
             ast::Constant::U32(val) => Ok(InitialValue::Initial(val.to_ne_bytes().to_vec().into())),
             ast::Constant::U64(val) => Ok(InitialValue::Initial(val.to_ne_bytes().to_vec().into())),
+            ast::Constant::F32(val) => Ok(InitialValue::Initial(val.to_ne_bytes().to_vec().into())),
+            ast::Constant::F64(val) => Ok(InitialValue::Initial(val.to_ne_bytes().to_vec().into())),
         }
     }
 

@@ -932,6 +932,14 @@ impl BaseType {
         Self::Int { nbytes, signed }
     }
 
+    pub fn float(double: bool) -> Self {
+        if double {
+            Self::Float(4)
+        } else {
+            Self::Double(8)
+        }
+    }
+
     // Promotion rules
 
     fn rank(&self) -> Option<usize> {
@@ -1029,6 +1037,8 @@ impl From<&Constant> for BaseType {
             Constant::U16(_) => Self::int(core::mem::size_of::<u16>(), None),
             Constant::U32(_) => Self::int(core::mem::size_of::<u32>(), None),
             Constant::U64(_) => Self::int(core::mem::size_of::<u64>(), None),
+            Constant::F32(_) => Self::int(core::mem::size_of::<f32>(), None),
+            Constant::F64(_) => Self::int(core::mem::size_of::<f64>(), None),
         }
     }
 }
@@ -1159,6 +1169,16 @@ impl Type {
     pub fn int(nbytes: usize, signed: Option<bool>) -> Self {
         Self {
             base: BaseType::int(nbytes, signed),
+            alignment: NonZeroUsize::new(nbytes).unwrap(),
+            ptr: None,
+            storage: None,
+            is_const: true,
+        }
+    }
+
+    pub fn float(nbytes: usize) -> Self {
+        Self {
+            base: BaseType::float(nbytes == BaseType::Double(0).nbytes()),
             alignment: NonZeroUsize::new(nbytes).unwrap(),
             ptr: None,
             storage: None,
@@ -1451,7 +1471,7 @@ impl std::fmt::Display for BaseType {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Constant {
     I8(i8),
     I16(i16),
@@ -1461,7 +1481,21 @@ pub enum Constant {
     U16(u16),
     U32(u32),
     U64(u64),
+    F32(f32),
+    F64(f64),
 }
+
+// Implement these traits knowing they will never get called on floats
+impl std::hash::Hash for Constant {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        match self {
+            Self::F32(_) | Self::F64(_) => unreachable!(),
+            _ => core::mem::discriminant(self).hash(state),
+        }
+    }
+}
+
+impl std::cmp::Eq for Constant {}
 
 impl Constant {
     pub fn is_int(&self) -> bool {
@@ -1470,24 +1504,19 @@ impl Constant {
 
     pub fn fits_in<T>(&self) -> bool
     where
-        T: TryFrom<i8>,
-        T: TryFrom<i16>,
-        T: TryFrom<i32>,
-        T: TryFrom<i64>,
-        T: TryFrom<u8>,
-        T: TryFrom<u16>,
-        T: TryFrom<u32>,
-        T: TryFrom<u64>,
+        T: Sized,
     {
         match &self {
-            Constant::I8(v) => <T as TryFrom<i8>>::try_from(*v).is_ok(),
-            Constant::I16(v) => <T as TryFrom<i16>>::try_from(*v).is_ok(),
-            Constant::I32(v) => <T as TryFrom<i32>>::try_from(*v).is_ok(),
-            Constant::I64(v) => <T as TryFrom<i64>>::try_from(*v).is_ok(),
-            Constant::U8(v) => <T as TryFrom<u8>>::try_from(*v).is_ok(),
-            Constant::U16(v) => <T as TryFrom<u16>>::try_from(*v).is_ok(),
-            Constant::U32(v) => <T as TryFrom<u32>>::try_from(*v).is_ok(),
-            Constant::U64(v) => <T as TryFrom<u64>>::try_from(*v).is_ok(),
+            Constant::I8(_) => core::mem::size_of::<T>() <= core::mem::size_of::<i8>(),
+            Constant::I16(_) => core::mem::size_of::<T>() <= core::mem::size_of::<i16>(),
+            Constant::I32(_) => core::mem::size_of::<T>() <= core::mem::size_of::<i32>(),
+            Constant::I64(_) => core::mem::size_of::<T>() <= core::mem::size_of::<i64>(),
+            Constant::U8(_) => core::mem::size_of::<T>() <= core::mem::size_of::<u8>(),
+            Constant::U16(_) => core::mem::size_of::<T>() <= core::mem::size_of::<u16>(),
+            Constant::U32(_) => core::mem::size_of::<T>() <= core::mem::size_of::<u32>(),
+            Constant::U64(_) => core::mem::size_of::<T>() <= core::mem::size_of::<u64>(),
+            Constant::F32(_) => core::mem::size_of::<T>() <= core::mem::size_of::<f32>(),
+            Constant::F64(_) => core::mem::size_of::<T>() <= core::mem::size_of::<f64>(),
         }
     }
 
@@ -1501,6 +1530,8 @@ impl Constant {
             Constant::U16(_) => core::mem::size_of::<u16>(),
             Constant::U32(_) => core::mem::size_of::<u32>(),
             Constant::U64(_) => core::mem::size_of::<u64>(),
+            Constant::F32(_) => core::mem::size_of::<f32>(),
+            Constant::F64(_) => core::mem::size_of::<f64>(),
         }
     }
 
@@ -1512,6 +1543,8 @@ impl Constant {
             Self::I8(_) | Self::I16(_) | Self::I32(_) | Self::I64(_) => {
                 Type::int(self.size_bytes(), Some(true))
             }
+            Self::F32(_) => Type::float(self.size_bytes()),
+            Self::F64(_) => Type::float(self.size_bytes()),
         }
     }
 }
@@ -1527,6 +1560,8 @@ impl std::fmt::Display for Constant {
             Constant::U16(v) => write!(f, "{v}"),
             Constant::U32(v) => write!(f, "{v}"),
             Constant::U64(v) => write!(f, "{v}"),
+            Constant::F32(v) => write!(f, "{v}"),
+            Constant::F64(v) => write!(f, "{v}"),
         }
     }
 }

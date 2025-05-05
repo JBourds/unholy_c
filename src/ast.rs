@@ -1719,8 +1719,20 @@ impl BinaryOp {
         matches!(*self, Self::And | Self::Or)
     }
 
-    pub fn is_valid_for(&self, expr: &Expr) -> bool {
-        !self.does_assignment() || matches!(expr, Expr::Var(_))
+    pub fn is_bitwise(&self) -> bool {
+        matches!(
+            self,
+            Self::BitAnd
+                | Self::BitOr
+                | Self::Xor
+                | Self::LShift
+                | Self::RShift
+                | Self::AndAssign
+                | Self::OrAssign
+                | Self::XorAssign
+                | Self::LShiftAssign
+                | Self::RShiftAssign
+        )
     }
 
     pub fn does_assignment(&self) -> bool {
@@ -1847,11 +1859,25 @@ impl UnaryOp {
         *self == Self::Not
     }
 
-    pub fn is_valid_for(&self, expr: &Expr) -> bool {
-        !matches!(
+    pub fn is_bitwise(&self) -> bool {
+        matches!(self, Self::Complement)
+    }
+
+    pub fn does_assignment(&self) -> bool {
+        matches!(
             self,
             UnaryOp::PreInc | UnaryOp::PreDec | UnaryOp::PostInc | UnaryOp::PostDec
-        ) || matches!(expr, Expr::Var(_))
+        )
+    }
+
+    pub fn is_valid_for(&self, expr: &Expr) -> bool {
+        match expr {
+            Expr::Constant(Constant::F32(_) | Constant::F64(_)) => {
+                !self.does_assignment() && !self.is_bitwise()
+            }
+            Expr::Constant(_) => !self.does_assignment(),
+            _ => true,
+        }
     }
 
     fn consume_prefix(tokens: &[Token]) -> Result<(Self, &[Token])> {

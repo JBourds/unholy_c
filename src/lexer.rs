@@ -1,4 +1,4 @@
-use anyhow::{Result, bail};
+use anyhow::{Result, bail, ensure};
 use regex::Regex;
 use std::rc::Rc;
 
@@ -243,7 +243,9 @@ impl Token {
     const IDENT: &'static str = r"^[a-zA-Z_]\w*\b";
     const STRING: &'static str = r#""(?:[^"\\]|\\[\s\S])*""#;
     const CHAR: &'static str = r"'[^'\\]|\\[\s\S]'";
-    const FLOAT: &'static str = r"^[0-9]+\.[0-9]+";
+    const FLOAT: &'static str =
+        r"(([0-9]*\.[0-9]+|[0-9]+\.?)[Ee][+-]?[0-9]+|[0-9]*\.[0-9]+|[0-9]+\.)[^\w.]";
+
     const INT: &'static str = r"^[0-9]+(?:[uU]|[lL]|[uU][lL]|[lL][uU])?\b";
 
     const KEYWORDS: &'static [(&'static str, Token)] = &[
@@ -371,9 +373,9 @@ impl Token {
 
     fn match_regex<'a>(stream: &'a str, pattern: &'_ str) -> Result<&'a str> {
         let re = Regex::new(pattern)?;
-        if let Some(capture) = re.captures(stream) {
-            let (full, _) = capture.extract::<0>();
-            Ok(full)
+        if let Some(capture) = re.find(stream) {
+            ensure!(capture.start() == 0, "Unable to match regex.");
+            Ok(capture.as_str())
         } else {
             bail!("No match found in stream with pattern {}", pattern)
         }
@@ -429,7 +431,7 @@ impl Token {
                         s.len(),
                     ))
                 }),
-                Some(c) if c.is_ascii_digit() => {
+                Some(_) => {
                     if let Ok(s) = Self::match_regex(stream, Self::FLOAT) {
                         Some((make_literal(s), s.len()))
                     } else if let Ok(s) = Self::match_regex(stream, Self::INT) {

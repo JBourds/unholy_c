@@ -552,6 +552,14 @@ pub enum InstructionType {
     Pop(Operand),
     Call(Rc<String>),
     Ret,
+    Cvttsd2si {
+        src: Operand,
+        dst: Operand,
+    },
+    Cvtsi2sd {
+        src: Operand,
+        dst: Operand,
+    },
 }
 
 impl InstructionType {

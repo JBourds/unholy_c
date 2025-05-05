@@ -1,4 +1,4 @@
-use crate::lexer::{ConstantSuffix, Token};
+use crate::lexer::{ConstantFlag, Token};
 
 use anyhow::{Context, Error, Result, bail, ensure};
 use num::bigint::BigUint;
@@ -1573,7 +1573,7 @@ impl AstNode for Constant {
             match token {
                 // NOTE: The text in these nodes does not include the negative
                 // sign so we don't need to worry about absolute value sign
-                Token::Constant { text, suffix: None } => {
+                Token::Constant { text, flag: None } => {
                     if let Ok(val) = text.parse::<i32>() {
                         Ok((Self::I32(val), &tokens[1..]))
                     } else if let Ok(val) = text.parse::<i64>() {
@@ -1596,8 +1596,8 @@ impl AstNode for Constant {
                         Ok((val, &tokens[1..]))
                     }
                 }
-                Token::Constant { text, suffix } => match suffix {
-                    Some(ConstantSuffix::Unsigned) => {
+                Token::Constant { text, flag } => match flag {
+                    Some(ConstantFlag::Unsigned) => {
                         let val = if let Ok(val) = text.parse::<u32>() {
                             Self::U32(val)
                         } else if let Ok(val) = text.parse::<u64>() {
@@ -1616,7 +1616,7 @@ impl AstNode for Constant {
                         };
                         Ok((val, &tokens[1..]))
                     }
-                    Some(ConstantSuffix::UnsignedLong) => {
+                    Some(ConstantFlag::UnsignedLong) => {
                         let val = if let Ok(val) = text.parse::<u64>() {
                             Self::U64(val)
                         } else {
@@ -1634,7 +1634,7 @@ impl AstNode for Constant {
 
                         Ok((val, &tokens[1..]))
                     }
-                    Some(ConstantSuffix::Long) => {
+                    Some(ConstantFlag::Long) => {
                         let val = if let Ok(val) = text.parse::<i64>() {
                             Self::I64(val)
                         } else if let Ok(val) = text.parse::<u64>() {

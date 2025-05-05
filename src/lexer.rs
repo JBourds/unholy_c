@@ -35,10 +35,11 @@ impl Lexer {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub enum ConstantSuffix {
+pub enum ConstantFlag {
     Long,
     Unsigned,
     UnsignedLong,
+    Float,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -46,7 +47,7 @@ pub enum Token {
     Ident(Rc<String>),
     Constant {
         text: Rc<String>,
-        suffix: Option<ConstantSuffix>,
+        flag: Option<ConstantFlag>,
     },
     // Reserved
     Return,
@@ -134,12 +135,13 @@ pub enum Token {
     SingleQuote,
 }
 
-impl std::fmt::Display for ConstantSuffix {
+impl std::fmt::Display for ConstantFlag {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Long => write!(f, "l"),
             Self::Unsigned => write!(f, "u"),
             Self::UnsignedLong => write!(f, "ul"),
+            Self::Float => write!(f, ""),
         }
     }
 }
@@ -148,10 +150,10 @@ impl std::fmt::Display for Token {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Ident(s) => write!(f, "Identifer: \"{}\"", s),
-            Self::Constant { text, suffix } => {
+            Self::Constant { text, flag } => {
                 write!(f, "Constant: \"{}\"", text)?;
-                if let Some(suffix) = suffix {
-                    write!(f, "{}", suffix)?;
+                if let Some(flag) = flag {
+                    write!(f, "{}", flag)?;
                 }
                 Ok(())
             }
@@ -386,38 +388,13 @@ impl Token {
         _line: &mut usize,
         character: &mut usize,
     ) -> Option<(Token, &'a str)> {
-        fn make_literal(literal: &str) -> Token {
-            let (text, suffix) = match literal.as_bytes() {
-                &[.., c1, c2] => {
-                    let c1 = c1.to_ascii_lowercase();
-                    let c2 = c2.to_ascii_lowercase();
-                    let (suffix_len, suffix) = match (c1, c2) {
-                        (b'u', b'l') | (b'l', b'u') => (2, Some(ConstantSuffix::UnsignedLong)),
-                        (_, b'l') => (1, Some(ConstantSuffix::Long)),
-                        (_, b'u') => (1, Some(ConstantSuffix::Unsigned)),
-                        _ => (0, None),
-                    };
-
-                    (
-                        literal.chars().take(literal.len() - suffix_len).collect(),
-                        suffix,
-                    )
-                }
-                _ => (literal.to_string(), None),
-            };
-            Token::Constant {
-                text: Rc::new(text),
-                suffix,
-            }
-        }
-
         if let Some((token, len)) = {
             match stream.chars().next() {
                 Some('\'') => Self::match_regex(stream, Self::CHAR).map_or(None, |s| {
                     Some((
                         Token::Constant {
                             text: Rc::new(s.to_string()),
-                            suffix: None,
+                            flag: None,
                         },
                         s.len(),
                     ))
@@ -426,7 +403,7 @@ impl Token {
                     Some((
                         Token::Constant {
                             text: Rc::new(s.to_string()),
-                            suffix: None,
+                            flag: None,
                         },
                         s.len(),
                     ))
@@ -434,9 +411,39 @@ impl Token {
                 Some(_) => {
                     if let Ok(s) = Self::match_regex(stream, Self::FLOAT) {
                         let actual_len = s.len() - 1;
-                        Some((make_literal(&s[..actual_len]), actual_len))
+                        let s = &s[..actual_len];
+                        Some((
+                            Token::Constant {
+                                text: Rc::new(s.to_string()),
+                                flag: Some(ConstantFlag::Float),
+                            },
+                            actual_len,
+                        ))
                     } else if let Ok(s) = Self::match_regex(stream, Self::INT) {
-                        Some((make_literal(s), s.len()))
+                        let (text, flag) = match s.as_bytes() {
+                            &[.., c1, c2] => {
+                                let c1 = c1.to_ascii_lowercase();
+                                let c2 = c2.to_ascii_lowercase();
+                                let (suffix_len, suffix) = match (c1, c2) {
+                                    (b'u', b'l') | (b'l', b'u') => {
+                                        (2, Some(ConstantFlag::UnsignedLong))
+                                    }
+                                    (_, b'l') => (1, Some(ConstantFlag::Long)),
+                                    (_, b'u') => (1, Some(ConstantFlag::Unsigned)),
+                                    _ => (0, None),
+                                };
+
+                                (s.chars().take(s.len() - suffix_len).collect(), suffix)
+                            }
+                            _ => (s.to_string(), None),
+                        };
+                        Some((
+                            Token::Constant {
+                                text: Rc::new(text),
+                                flag,
+                            },
+                            s.len(),
+                        ))
                     } else {
                         None
                     }

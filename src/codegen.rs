@@ -1,12 +1,12 @@
 use anyhow::{Result, bail};
 
 use crate::{ast, sema, tacky};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::marker::PhantomData;
 use std::rc::Rc;
 
-const SYSTEM_V_REGS: [Reg; 6] = [
+const SYSTEM_V_GP_REGS: [Reg; 6] = [
     Reg::X86 {
         reg: X86Reg::Di,
         section: RegSection::Dword,
@@ -29,6 +29,41 @@ const SYSTEM_V_REGS: [Reg; 6] = [
     },
     Reg::X64 {
         reg: X64Reg::R9,
+        section: RegSection::Dword,
+    },
+];
+
+const SYSTEM_V_FP_REGS: [Reg; 8] = [
+    Reg::XMM {
+        reg: XMMReg::XMM0,
+        section: RegSection::Dword,
+    },
+    Reg::XMM {
+        reg: XMMReg::XMM1,
+        section: RegSection::Dword,
+    },
+    Reg::XMM {
+        reg: XMMReg::XMM2,
+        section: RegSection::Dword,
+    },
+    Reg::XMM {
+        reg: XMMReg::XMM3,
+        section: RegSection::Dword,
+    },
+    Reg::XMM {
+        reg: XMMReg::XMM4,
+        section: RegSection::Dword,
+    },
+    Reg::XMM {
+        reg: XMMReg::XMM5,
+        section: RegSection::Dword,
+    },
+    Reg::XMM {
+        reg: XMMReg::XMM6,
+        section: RegSection::Dword,
+    },
+    Reg::XMM {
+        reg: XMMReg::XMM7,
         section: RegSection::Dword,
     },
 ];
@@ -77,10 +112,12 @@ pub struct Program {
 impl From<tacky::Program> for Program {
     fn from(prog: tacky::Program) -> Self {
         let mut top_level = vec![];
+        let mut constants = HashSet::new();
         for item in prog.top_level.into_iter() {
             match item {
                 tacky::TopLevel::Fun(f) => {
-                    top_level.push(TopLevel::Fun(Function::from_with_storage(f, &prog.symbols)))
+                    let fun = Function::from_with_storage(f, &prog.symbols, &mut constants);
+                    top_level.push(TopLevel::Fun(fun));
                 }
                 tacky::TopLevel::Static(s) => top_level.push(TopLevel::StaticVariable(s.into())),
             }
@@ -100,7 +137,11 @@ pub struct Function {
 }
 
 impl Function {
-    fn from_with_storage(node: tacky::Function, symbols: &tacky::SymbolTable) -> Self {
+    fn from_with_storage(
+        node: tacky::Function,
+        symbols: &tacky::SymbolTable,
+        constants: &mut HashSet<StaticConstant>,
+    ) -> Self {
         let tacky::Function {
             name,
             mut params,
@@ -109,7 +150,7 @@ impl Function {
         } = node;
         // Create the System V register/stack mappings here
         let (reg_args, stack_args) = {
-            let to_drain = std::cmp::min(SYSTEM_V_REGS.len(), params.len());
+            let to_drain = std::cmp::min(SYSTEM_V_GP_REGS.len(), params.len());
             let reg_args = params
                 .drain(..to_drain)
                 .collect::<Vec<Option<Rc<String>>>>();
@@ -138,7 +179,7 @@ impl Function {
         // We always start with a stack bound of 8 for RBP
         // Include register args here since we move into them
         for (src_reg, dst_arg) in
-            std::iter::zip(SYSTEM_V_REGS.into_iter(), reg_args.into_iter().flatten())
+            std::iter::zip(SYSTEM_V_GP_REGS.into_iter(), reg_args.into_iter().flatten())
         {
             let param_symbol = symbols
                 .get(&dst_arg)
@@ -174,7 +215,9 @@ impl Function {
         }
 
         for instr in fun_instructions.into_iter() {
-            instructions.extend(Instruction::<Initial>::from_tacky(instr, symbols));
+            instructions.extend(Instruction::<Initial>::from_tacky(
+                instr, symbols, constants,
+            ));
         }
 
         // Get stack offsets for each pseudoregister as we fix them up
@@ -328,6 +371,7 @@ pub enum X86Reg {
     Si,
     Di,
 }
+
 impl From<&X86Reg> for &str {
     fn from(value: &X86Reg) -> Self {
         match value {
@@ -370,9 +414,53 @@ impl From<&X64Reg> for usize {
 }
 
 #[derive(Debug, PartialEq, Clone, Copy)]
+pub enum XMMReg {
+    XMM0,
+    XMM1,
+    XMM2,
+    XMM3,
+    XMM4,
+    XMM5,
+    XMM6,
+    XMM7,
+    XMM8,
+    XMM9,
+    XMM10,
+    XMM11,
+    XMM12,
+    XMM13,
+    XMM14,
+    XMM15,
+}
+
+impl From<&XMMReg> for usize {
+    fn from(value: &XMMReg) -> Self {
+        match value {
+            XMMReg::XMM0 => 0,
+            XMMReg::XMM1 => 1,
+            XMMReg::XMM2 => 2,
+            XMMReg::XMM3 => 3,
+            XMMReg::XMM4 => 4,
+            XMMReg::XMM5 => 5,
+            XMMReg::XMM6 => 6,
+            XMMReg::XMM7 => 7,
+            XMMReg::XMM8 => 8,
+            XMMReg::XMM9 => 9,
+            XMMReg::XMM10 => 10,
+            XMMReg::XMM11 => 11,
+            XMMReg::XMM12 => 12,
+            XMMReg::XMM13 => 13,
+            XMMReg::XMM14 => 14,
+            XMMReg::XMM15 => 15,
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Clone, Copy)]
 pub enum Reg {
     X86 { reg: X86Reg, section: RegSection },
     X64 { reg: X64Reg, section: RegSection },
+    XMM { reg: XMMReg, section: RegSection },
 }
 
 impl Reg {
@@ -380,6 +468,7 @@ impl Reg {
         match self {
             Self::X86 { reg: _, section } => section.size(),
             Self::X64 { reg: _, section } => section.size(),
+            Self::XMM { reg: _, section } => section.size(),
         }
     }
 
@@ -387,6 +476,7 @@ impl Reg {
         match self {
             Self::X86 { reg, .. } => Self::X86 { reg, section },
             Self::X64 { reg, .. } => Self::X64 { reg, section },
+            Self::XMM { reg, .. } => Self::XMM { reg, section },
         }
     }
 }
@@ -418,6 +508,16 @@ impl fmt::Display for Reg {
                 write!(f, "{prefix}{reg_str}{suffix}")
             }
             Self::X64 { reg, section } => {
+                let suffix = match section {
+                    RegSection::LowByte => "b",
+                    RegSection::HighByte => "h",
+                    RegSection::Word => "w",
+                    RegSection::Dword => "d",
+                    RegSection::Qword => "",
+                };
+                write!(f, "r{}{}", usize::from(reg), suffix)
+            }
+            Self::XMM { reg, section } => {
                 let suffix = match section {
                     RegSection::LowByte => "b",
                     RegSection::HighByte => "h",
@@ -973,7 +1073,11 @@ impl From<Instruction<WithStorage>> for Vec<Instruction<Final>> {
 }
 
 impl Instruction<Initial> {
-    fn from_tacky(instruction: tacky::Instruction, symbols: &tacky::SymbolTable) -> Vec<Self> {
+    fn from_tacky(
+        instruction: tacky::Instruction,
+        symbols: &tacky::SymbolTable,
+        constants: &mut HashSet<StaticConstant>,
+    ) -> Vec<Self> {
         let new_instr = |op| Instruction::<Initial> {
             op,
             phantom: PhantomData::<Initial>,
@@ -1273,7 +1377,7 @@ impl Instruction<Initial> {
                 dst,
             } => {
                 let (reg_args, stack_args) = {
-                    let to_drain = std::cmp::min(SYSTEM_V_REGS.len(), args.len());
+                    let to_drain = std::cmp::min(SYSTEM_V_GP_REGS.len(), args.len());
                     let reg_args = args.drain(..to_drain).collect::<Vec<tacky::Val>>();
                     let stack_args = args.drain(..);
                     (reg_args, stack_args)
@@ -1286,7 +1390,8 @@ impl Instruction<Initial> {
                 if stack_padding != 0 {
                     v.push(new_instr(InstructionType::allocate_stack(stack_padding)));
                 }
-                for (dst_reg, src_arg) in std::iter::zip(SYSTEM_V_REGS.iter(), reg_args.into_iter())
+                for (dst_reg, src_arg) in
+                    std::iter::zip(SYSTEM_V_GP_REGS.iter(), reg_args.into_iter())
                 {
                     let src_arg = Operand::from_tacky(src_arg, symbols);
                     let size = src_arg.size();

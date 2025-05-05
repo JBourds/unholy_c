@@ -900,6 +900,7 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
                 base: lifted_left_t.clone(),
                 storage: None,
                 is_const: true,
+                alignment: std::cmp::max(left_t.alignment, right_t.alignment),
                 ..left_t
             };
 

@@ -787,6 +787,7 @@ fn try_implicit_cast(
         right_t.base.can_assign_to(&target.base),
         "Incompatible types. Cannot assign value of type {right_t:#?} to value of type {target:#?}"
     );
+
     if right_t != *target {
         Ok(ast::Expr::Cast {
             target: ast::Type {
@@ -966,36 +967,38 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
             let condition = Box::new(try_implicit_cast(&target, condition, symbols).context(
                 "Unable to implicitly cast ternary expression condition into a boolean value.",
             )?);
+
             let TypedExpr {
                 expr: then_expr,
                 r#type: then_type,
             } = typecheck_expr(then, symbols)
                 .context("Failed to typecheck ternay expression then branch.")?;
+
             let TypedExpr {
                 expr: else_expr,
                 r#type: else_type,
             } = typecheck_expr(r#else, symbols)
                 .context("Failed to typecheck ternay expression else branch.")?;
+
             let (then_base, _) = ast::BaseType::lift(then_type.base.clone(), else_type.base)
                 .context("Ternary expression branches evaluate to different types.")?;
             let common_type = ast::Type {
                 base: then_base,
+                alignment: std::cmp::max(then_type.alignment, else_type.alignment),
                 ..then_type.clone()
             };
-            let then = Box::new(ast::Expr::Cast {
-                target: common_type.clone(),
-                exp: Box::new(then_expr),
-            });
-            let r#else = Box::new(ast::Expr::Cast {
-                target: common_type,
-                exp: Box::new(else_expr),
-            });
+
+            let then = try_implicit_cast(&common_type, &then_expr, symbols)
+                .context("Unable to implicitly cast \"then\" branch of ternary expression to its common type {common_type:?}")?;
+            let r#else = try_implicit_cast(&common_type, &else_expr, symbols)
+                .context("Unable to implicitly cast \"else\" branch of ternary expression to its common type {common_type:?}")?;
+
             // Find common type between then and else
             Ok(TypedExpr {
                 expr: ast::Expr::Conditional {
                     condition,
-                    then,
-                    r#else,
+                    then: Box::new(then),
+                    r#else: Box::new(r#else),
                 },
                 r#type: then_type,
             })

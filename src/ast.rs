@@ -1597,6 +1597,15 @@ impl AstNode for Constant {
                     }
                 }
                 Token::Constant { text, flag } => match flag {
+                    // FIXME: More intelligent scheme to know what this value
+                    // will end up as (e.g., float instead of double) to avoid
+                    // the double roundoff error
+                    Some(ConstantFlag::Float) => {
+                        let val = text
+                            .parse::<f64>()
+                            .context("Unable to parse double from text: \"{text}\".")?;
+                        Ok((Self::F64(val), &tokens[1..]))
+                    }
                     Some(ConstantFlag::Unsigned) => {
                         let val = if let Ok(val) = text.parse::<u32>() {
                             Self::U32(val)

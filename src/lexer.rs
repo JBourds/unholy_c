@@ -433,7 +433,8 @@ impl Token {
                 }),
                 Some(_) => {
                     if let Ok(s) = Self::match_regex(stream, Self::FLOAT) {
-                        Some((make_literal(s), s.len()))
+                        let actual_len = s.len() - 1;
+                        Some((make_literal(&s[..actual_len]), actual_len))
                     } else if let Ok(s) = Self::match_regex(stream, Self::INT) {
                         Some((make_literal(s), s.len()))
                     } else {

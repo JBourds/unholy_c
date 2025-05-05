@@ -48,10 +48,10 @@ fn eval_constant(expr: ast::Expr) -> Result<Constant> {
                     (8, Some(false)) => Constant::U64(exp.cast::<u64>()),
                     _ => unreachable!(),
                 },
+                ast::BaseType::Float(_) => Constant::F32(exp.cast::<f32>()),
+                ast::BaseType::Double(_) => Constant::F64(exp.cast::<f64>()),
                 // FIXME: Should not be hardcoded whether chars are signed or not
                 ast::BaseType::Char => unimplemented!(),
-                ast::BaseType::Float(_) => unimplemented!(),
-                ast::BaseType::Double(_) => unimplemented!(),
                 _ => unreachable!(),
             };
             Ok(casted)

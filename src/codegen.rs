@@ -695,15 +695,8 @@ impl fmt::Display for Reg {
                 };
                 write!(f, "r{}{}", usize::from(reg), suffix)
             }
-            Self::Xmm { reg, section } => {
-                let suffix = match section {
-                    RegSection::LowByte => "b",
-                    RegSection::HighByte => "h",
-                    RegSection::Word => "w",
-                    RegSection::Dword => "d",
-                    RegSection::Qword => "",
-                };
-                write!(f, "r{}{}", usize::from(reg), suffix)
+            Self::Xmm { reg, .. } => {
+                write!(f, "xmm{}", usize::from(reg))
             }
         }
     }

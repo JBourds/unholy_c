@@ -977,24 +977,46 @@ impl Instruction<WithStorage> {
             phantom: PhantomData::<WithStorage>,
         }
     }
+
+    /// Function designed to streamline the process of function's which require
+    /// moving their `dst` argument to a reigster under some condition (e.g.,
+    /// constant, memory address, etc.) by automating scratch register selection
+    /// and then producing the desired op based on the closure
+    /// #strategypattern4life
+    fn rewrite_move(
+        src: Operand,
+        dst: Operand,
+        make_op: impl Fn(Operand, Operand) -> Self,
+    ) -> Vec<Self> {
+        let dst_type = AssemblyType::from(&dst);
+        let reg = if matches!(dst_type, AssemblyType::Float | AssemblyType::Double) {
+            Operand::Reg(Reg::Xmm {
+                reg: XmmReg::XMM15,
+                section: RegSection::from_size(dst_type.size_bytes()).expect("FIXME"),
+            })
+        } else {
+            Operand::Reg(Reg::X64 {
+                reg: X64Reg::R10,
+                section: RegSection::from_size(dst_type.size_bytes()).expect("FIXME"),
+            })
+        };
+        vec![
+            Self::from_op(InstructionType::Mov {
+                src,
+                dst: reg.clone(),
+            }),
+            make_op(reg, dst),
+        ]
+    }
+
     fn fixup_stack_vars(self) -> Vec<Self> {
         match self.op {
             InstructionType::Mov {
                 src: src @ Operand::StackOffset { .. } | src @ Operand::Data { .. },
                 dst: dst @ Operand::StackOffset { .. } | dst @ Operand::Data { .. },
-            } => {
-                let r10 = Operand::Reg(Reg::X64 {
-                    reg: X64Reg::R10,
-                    section: RegSection::from_size(dst.size()).expect("FIXME"),
-                });
-                vec![
-                    Self::from_op(InstructionType::Mov {
-                        src,
-                        dst: r10.clone(),
-                    }),
-                    Self::from_op(InstructionType::Mov { src: r10, dst }),
-                ]
-            }
+            } => Self::rewrite_move(src, dst, |src, dst| {
+                Self::from_op(InstructionType::Mov { src, dst })
+            }),
             InstructionType::Movsx { src, dst } => {
                 let (src, src_instrs) = match src {
                     src @ Operand::Imm(..) => {
@@ -1039,12 +1061,6 @@ impl Instruction<WithStorage> {
             }
             InstructionType::MovZeroExtend {
                 src,
-                dst: reg @ Operand::Reg(_),
-            } => {
-                vec![Self::from_op(InstructionType::Mov { src, dst: reg })]
-            }
-            InstructionType::MovZeroExtend {
-                src,
                 dst: dst @ Operand::StackOffset { .. },
             } => {
                 vec![
@@ -1068,19 +1084,13 @@ impl Instruction<WithStorage> {
                 op,
                 src: src @ Operand::StackOffset { .. } | src @ Operand::Data { .. },
                 dst: dst @ Operand::StackOffset { .. } | dst @ Operand::Data { .. },
-            } => {
-                let r10 = Operand::Reg(Reg::X64 {
-                    reg: X64Reg::R10,
-                    section: RegSection::from_size(dst.size()).expect("FIXME"),
-                });
-                vec![
-                    Self::from_op(InstructionType::Mov {
-                        src,
-                        dst: r10.clone(),
-                    }),
-                    Self::from_op(InstructionType::Binary { op, src: r10, dst }),
-                ]
-            }
+            } => Self::rewrite_move(src, dst, |src, dst| {
+                Self::from_op(InstructionType::Binary {
+                    op: op.clone(),
+                    src,
+                    dst,
+                })
+            }),
             InstructionType::Idiv(src @ Operand::Imm(_)) => {
                 let r10 = Operand::Reg(Reg::X64 {
                     reg: X64Reg::R10,
@@ -1157,19 +1167,9 @@ impl Instruction<WithStorage> {
             InstructionType::Cmp {
                 src: src @ Operand::StackOffset { .. } | src @ Operand::Data { .. },
                 dst: dst @ Operand::StackOffset { .. } | dst @ Operand::Data { .. },
-            } => {
-                let r11 = Operand::Reg(Reg::X64 {
-                    reg: X64Reg::R11,
-                    section: RegSection::from_size(dst.size()).expect("FIXME"),
-                });
-                vec![
-                    Self::from_op(InstructionType::Mov {
-                        src,
-                        dst: r11.clone(),
-                    }),
-                    Self::from_op(InstructionType::Cmp { src: r11, dst }),
-                ]
-            }
+            } => Self::rewrite_move(src, dst, |src, dst| {
+                Self::from_op(InstructionType::Cmp { src, dst })
+            }),
             InstructionType::Cmp {
                 src,
                 dst: imm @ Operand::Imm(_),

@@ -91,6 +91,14 @@ pub struct StaticConstant {
 }
 
 impl StaticConstant {
+    const LONG_MAX: LazyCell<Rc<String>> = LazyCell::new(|| {
+        Rc::new(format!(
+            "{}.0",
+            u64::try_from(i64::MAX)
+                .expect("Maximum value of i64 can always be represented in u64.")
+                + 1
+        ))
+    });
     const NEGATIVE_ZERO: LazyCell<Rc<String>> = LazyCell::new(|| Rc::new("-0.0".to_string()));
 
     fn new(id: Rc<String>, alignment: usize) -> Self {
@@ -138,6 +146,15 @@ impl From<tacky::StaticVariable> for StaticVariable {
     }
 }
 
+// Create unique identifiers (e.g., Labels in cast)
+fn make_temp(counter: &'_ mut usize) -> impl FnMut(String) -> String + use<'_> {
+    move |name| {
+        let n = *counter;
+        *counter += 1;
+        format!("codegen.{name}.{n}")
+    }
+}
+
 #[derive(Debug)]
 pub struct Program {
     pub top_level: Vec<TopLevel>,
@@ -148,10 +165,17 @@ impl From<tacky::Program> for Program {
     fn from(prog: tacky::Program) -> Self {
         let mut top_level = vec![];
         let mut constants = HashSet::new();
+        let mut counter = 0;
+        let mut make_label = make_temp(&mut counter);
         for item in prog.top_level.into_iter() {
             match item {
                 tacky::TopLevel::Fun(f) => {
-                    let fun = Function::from_with_storage(f, &prog.symbols, &mut constants);
+                    let fun = Function::from_with_storage(
+                        f,
+                        &prog.symbols,
+                        &mut constants,
+                        &mut make_label,
+                    );
                     top_level.push(TopLevel::Fun(fun));
                 }
                 tacky::TopLevel::Static(s) => top_level.push(TopLevel::StaticVariable(s.into())),
@@ -182,6 +206,7 @@ impl Function {
         node: tacky::Function,
         symbols: &tacky::SymbolTable,
         constants: &mut HashSet<StaticConstant>,
+        make_label: &mut impl FnMut(String) -> String,
     ) -> Self {
         let tacky::Function {
             name,
@@ -257,7 +282,7 @@ impl Function {
 
         for instr in fun_instructions.into_iter() {
             instructions.extend(Instruction::<Initial>::from_tacky(
-                instr, symbols, constants,
+                instr, symbols, constants, make_label,
             ));
         }
 
@@ -1122,6 +1147,7 @@ impl Instruction<Initial> {
         instruction: tacky::Instruction,
         symbols: &tacky::SymbolTable,
         float_constants: &mut HashSet<StaticConstant>,
+        make_label: &mut impl FnMut(String) -> String,
     ) -> Vec<Self> {
         let new_instr = |op| Instruction::<Initial> {
             op,
@@ -1606,7 +1632,89 @@ impl Instruction<Initial> {
                 })]
             }
             tacky::Instruction::IntToDouble { .. } => todo!(),
-            tacky::Instruction::DoubleToUInt { .. } => todo!(),
+            tacky::Instruction::DoubleToUInt { src, dst } => {
+                // Check if the double is within the maximum range of a
+                // signed long
+                //  - True: Convert directly using the cvttsd2siq instruction
+                //  - False:
+                //      1. Subtract (LONG_MAX + 1) from value to get it in range
+                //      2. Convert using cvttsd2siq instruction
+                //      3. Add (LONG_MAX + 1) back to the value
+                let long_max = LazyCell::<Rc<String>>::force(&StaticConstant::LONG_MAX).clone();
+                float_constants.insert(StaticConstant::new(
+                    Rc::clone(&long_max),
+                    core::mem::align_of::<f64>(),
+                ));
+                let long_max = Operand::Data {
+                    name: long_max,
+                    size: core::mem::align_of::<f64>(),
+                };
+
+                let rax = Operand::Reg(Reg::X86 {
+                    reg: X86Reg::Ax,
+                    section: RegSection::Qword,
+                });
+                let rdx = Operand::Reg(Reg::X86 {
+                    reg: X86Reg::Dx,
+                    section: RegSection::Qword,
+                });
+
+                let xmm0 = Operand::Reg(Reg::XMM {
+                    reg: XMMReg::XMM0,
+                    section: RegSection::Qword,
+                });
+                let xmm1 = Operand::Reg(Reg::XMM {
+                    reg: XMMReg::XMM1,
+                    section: RegSection::Qword,
+                });
+
+                let src = Operand::from_tacky(src, symbols, float_constants);
+                let dst = Operand::from_tacky(dst, symbols, float_constants);
+                let out_of_range_label = Rc::new(make_label("out_of_range".to_string()));
+                let end_label = Rc::new(make_label("end".to_string()));
+
+                vec![
+                    // Not strictly necessary
+                    new_instr(InstructionType::Mov {
+                        src: src.clone(),
+                        dst: xmm0.clone(),
+                    }),
+                    new_instr(InstructionType::Cmp {
+                        src: long_max.clone(),
+                        dst: xmm0.clone(),
+                    }),
+                    new_instr(InstructionType::JmpCC {
+                        cond_code: CondCode::AE,
+                        identifier: Rc::clone(&out_of_range_label),
+                    }),
+                    new_instr(InstructionType::Cvttsd2si {
+                        src,
+                        dst: rax.clone(),
+                    }),
+                    new_instr(InstructionType::Jmp(Rc::clone(&end_label))),
+                    new_instr(InstructionType::Label(out_of_range_label)),
+                    new_instr(InstructionType::Binary {
+                        op: BinaryOp::Subtract,
+                        src: long_max,
+                        dst: xmm1.clone(),
+                    }),
+                    new_instr(InstructionType::Cvttsd2si {
+                        src: xmm1.clone(),
+                        dst: rax.clone(),
+                    }),
+                    new_instr(InstructionType::Mov {
+                        src: Operand::Imm(ast::Constant::U64(u64::MAX)),
+                        dst: rdx.clone(),
+                    }),
+                    new_instr(InstructionType::Binary {
+                        op: BinaryOp::Add,
+                        src: rdx,
+                        dst: rax.clone(),
+                    }),
+                    new_instr(InstructionType::Label(end_label)),
+                    new_instr(InstructionType::Mov { src: rax, dst }),
+                ]
+            }
             tacky::Instruction::UIntToDouble { .. } => todo!(),
         }
     }

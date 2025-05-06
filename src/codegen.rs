@@ -1664,11 +1664,11 @@ impl Instruction<Initial> {
                     section: RegSection::Qword,
                 });
 
-                let xmm0 = Operand::Reg(Reg::XMM {
+                let xmm14 = Operand::Reg(Reg::XMM {
                     reg: XMMReg::XMM0,
                     section: RegSection::Qword,
                 });
-                let xmm1 = Operand::Reg(Reg::XMM {
+                let xmm15 = Operand::Reg(Reg::XMM {
                     reg: XMMReg::XMM1,
                     section: RegSection::Qword,
                 });
@@ -1682,11 +1682,11 @@ impl Instruction<Initial> {
                     // Not strictly necessary
                     new_instr(InstructionType::Mov {
                         src: src.clone(),
-                        dst: xmm0.clone(),
+                        dst: xmm14.clone(),
                     }),
                     new_instr(InstructionType::Cmp {
                         src: long_max.clone(),
-                        dst: xmm0.clone(),
+                        dst: xmm14.clone(),
                     }),
                     new_instr(InstructionType::JmpCC {
                         cond_code: CondCode::AE,
@@ -1701,10 +1701,10 @@ impl Instruction<Initial> {
                     new_instr(InstructionType::Binary {
                         op: BinaryOp::Subtract,
                         src: long_max,
-                        dst: xmm1.clone(),
+                        dst: xmm15.clone(),
                     }),
                     new_instr(InstructionType::Cvttsd2si {
-                        src: xmm1.clone(),
+                        src: xmm15.clone(),
                         dst: rax.clone(),
                     }),
                     new_instr(InstructionType::Mov {
@@ -1730,7 +1730,7 @@ impl Instruction<Initial> {
                     section: RegSection::Qword,
                 });
 
-                let xmm0 = Operand::Reg(Reg::XMM {
+                let xmm14 = Operand::Reg(Reg::XMM {
                     reg: XMMReg::XMM0,
                     section: RegSection::Qword,
                 });
@@ -1780,12 +1780,12 @@ impl Instruction<Initial> {
                     }),
                     new_instr(InstructionType::Cvtsi2sd {
                         src: rdx,
-                        dst: xmm0.clone(),
+                        dst: xmm14.clone(),
                     }),
                     new_instr(InstructionType::Binary {
                         op: BinaryOp::Add,
-                        src: xmm0.clone(),
-                        dst: xmm0,
+                        src: xmm14.clone(),
+                        dst: xmm14,
                     }),
                     new_instr(InstructionType::Label(end_label)),
                 ]

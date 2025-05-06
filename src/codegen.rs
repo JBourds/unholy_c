@@ -80,6 +80,37 @@ pub enum AssemblyType {
     Double,
 }
 
+impl From<&Operand> for AssemblyType {
+    fn from(value: &Operand) -> Self {
+        match value {
+            Operand::Imm(constant) => match constant {
+                ast::Constant::I8(_) | ast::Constant::U8(_) => Self::Byte,
+                ast::Constant::I16(_) | ast::Constant::U16(_) => Self::Word,
+                ast::Constant::I32(_) | ast::Constant::U32(_) => Self::Longword,
+                ast::Constant::I64(_) | ast::Constant::U64(_) => Self::Quadword,
+                ast::Constant::F32(_) => Self::Float,
+                ast::Constant::F64(_) => Self::Double,
+            },
+            Operand::Reg(reg) => match reg {
+                Reg::X86 { section, .. } | Reg::X64 { section, .. } => match section {
+                    RegSection::LowByte | RegSection::HighByte => Self::Byte,
+                    RegSection::Word => Self::Word,
+                    RegSection::Dword => Self::Longword,
+                    RegSection::Qword => Self::Quadword,
+                },
+                Reg::Xmm { section, .. } => match section {
+                    RegSection::Dword => Self::Float,
+                    RegSection::Qword => Self::Double,
+                    _ => unreachable!(),
+                },
+            },
+            Operand::Pseudo { r#type, .. } => r#type.clone(),
+            Operand::StackOffset { r#type, .. } => r#type.clone(),
+            Operand::Data { r#type, .. } => r#type.clone(),
+        }
+    }
+}
+
 impl AssemblyType {
     fn from_tacky(val: &tacky::Val, symbols: &tacky::SymbolTable) -> Self {
         Self::from_ast_type(val.get_type(symbols))

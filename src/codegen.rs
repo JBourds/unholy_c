@@ -1105,31 +1105,7 @@ impl Instruction<Initial> {
             op,
             phantom: PhantomData::<Initial>,
         };
-        // Helper function to create an operand, taking care of float constants
-        // as needed.
-        let mut make_op = |val| match val {
-            tacky::Val::Constant(c @ ast::Constant::F32(v)) => {
-                let static_const = StaticConstant::from(v);
-                if !float_constants.contains(&static_const) {
-                    float_constants.insert(static_const.clone());
-                }
-                Operand::Data {
-                    name: static_const.0,
-                    size: c.size_bytes(),
-                }
-            }
-            tacky::Val::Constant(c @ ast::Constant::F64(v)) => {
-                let static_const = StaticConstant::from(v);
-                if !float_constants.contains(&static_const) {
-                    float_constants.insert(static_const.clone());
-                }
-                Operand::Data {
-                    name: static_const.0,
-                    size: c.size_bytes(),
-                }
-            }
-            _ => Operand::from_tacky(val, symbols),
-        };
+        let mut make_op = |val| Operand::from_tacky(val, symbols, float_constants);
 
         match instruction {
             tacky::Instruction::Return(None) => {
@@ -1566,8 +1542,32 @@ impl Operand {
         }
     }
 
-    fn from_tacky(val: tacky::Val, symbols: &tacky::SymbolTable) -> Self {
+    fn from_tacky(
+        val: tacky::Val,
+        symbols: &tacky::SymbolTable,
+        float_constants: &mut HashSet<StaticConstant>,
+    ) -> Self {
         match val {
+            tacky::Val::Constant(c @ ast::Constant::F32(v)) => {
+                let static_const = StaticConstant::from(v);
+                if !float_constants.contains(&static_const) {
+                    float_constants.insert(static_const.clone());
+                }
+                Operand::Data {
+                    name: static_const.0,
+                    size: c.size_bytes(),
+                }
+            }
+            tacky::Val::Constant(c @ ast::Constant::F64(v)) => {
+                let static_const = StaticConstant::from(v);
+                if !float_constants.contains(&static_const) {
+                    float_constants.insert(static_const.clone());
+                }
+                Operand::Data {
+                    name: static_const.0,
+                    size: c.size_bytes(),
+                }
+            }
             tacky::Val::Constant(i) => Self::Imm(i),
             tacky::Val::Var(r) => {
                 let symbol = symbols

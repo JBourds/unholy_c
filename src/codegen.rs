@@ -179,6 +179,7 @@ pub struct StaticConstant {
 }
 
 impl StaticConstant {
+    #[allow(clippy::declare_interior_mutable_const)]
     const LONG_MAX: LazyCell<Rc<String>> = LazyCell::new(|| {
         Rc::new(format!(
             "{}.0",
@@ -187,6 +188,7 @@ impl StaticConstant {
                 + 1
         ))
     });
+    #[allow(clippy::declare_interior_mutable_const)]
     const NEGATIVE_ZERO: LazyCell<Rc<String>> = LazyCell::new(|| Rc::new("-0.0".to_string()));
 
     fn new(id: Rc<String>, alignment: usize) -> Self {
@@ -1411,6 +1413,7 @@ impl Instruction<Initial> {
             }
             tacky::Instruction::Unary { op, src, dst } => {
                 if is_float(&src, symbols) && matches!(op, tacky::UnaryOp::Not) {
+                    #[allow(clippy::borrow_interior_mutable_const)]
                     let neg_zero =
                         LazyCell::<Rc<String>>::force(&StaticConstant::NEGATIVE_ZERO).clone();
                     // Super special 16-byte alignemnt needed here for SSE
@@ -1900,6 +1903,7 @@ impl Instruction<Initial> {
                 //      1. Subtract (LONG_MAX + 1) from value to get it in range
                 //      2. Convert using cvttsd2siq instruction
                 //      3. Add (LONG_MAX + 1) back to the value
+                #[allow(clippy::borrow_interior_mutable_const)]
                 let long_max = LazyCell::<Rc<String>>::force(&StaticConstant::LONG_MAX).clone();
                 float_constants.insert(StaticConstant::new(
                     Rc::clone(&long_max),

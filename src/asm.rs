@@ -45,9 +45,9 @@ pub mod x64 {
     }
 
     fn gen_static_const(
-        w: &mut impl Write,
-        constant: codegen::StaticConstant,
-        symbols: &tacky::SymbolTable,
+        _w: &mut impl Write,
+        _constant: codegen::StaticConstant,
+        _symbols: &tacky::SymbolTable,
     ) -> Result<()> {
         todo!()
     }

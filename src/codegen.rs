@@ -35,36 +35,36 @@ const SYSTEM_V_GP_REGS: [Reg; 6] = [
 ];
 
 const SYSTEM_V_FP_REGS: [Reg; 8] = [
-    Reg::XMM {
-        reg: XMMReg::XMM0,
+    Reg::Xmm {
+        reg: XmmReg::XMM0,
         section: RegSection::Dword,
     },
-    Reg::XMM {
-        reg: XMMReg::XMM1,
+    Reg::Xmm {
+        reg: XmmReg::XMM1,
         section: RegSection::Dword,
     },
-    Reg::XMM {
-        reg: XMMReg::XMM2,
+    Reg::Xmm {
+        reg: XmmReg::XMM2,
         section: RegSection::Dword,
     },
-    Reg::XMM {
-        reg: XMMReg::XMM3,
+    Reg::Xmm {
+        reg: XmmReg::XMM3,
         section: RegSection::Dword,
     },
-    Reg::XMM {
-        reg: XMMReg::XMM4,
+    Reg::Xmm {
+        reg: XmmReg::XMM4,
         section: RegSection::Dword,
     },
-    Reg::XMM {
-        reg: XMMReg::XMM5,
+    Reg::Xmm {
+        reg: XmmReg::XMM5,
         section: RegSection::Dword,
     },
-    Reg::XMM {
-        reg: XMMReg::XMM6,
+    Reg::Xmm {
+        reg: XmmReg::XMM6,
         section: RegSection::Dword,
     },
-    Reg::XMM {
-        reg: XMMReg::XMM7,
+    Reg::Xmm {
+        reg: XmmReg::XMM7,
         section: RegSection::Dword,
     },
 ];
@@ -557,7 +557,7 @@ impl From<&X64Reg> for usize {
 }
 
 #[derive(Debug, PartialEq, Clone, Copy)]
-pub enum XMMReg {
+pub enum XmmReg {
     XMM0,
     XMM1,
     XMM2,
@@ -576,25 +576,25 @@ pub enum XMMReg {
     XMM15,
 }
 
-impl From<&XMMReg> for usize {
-    fn from(value: &XMMReg) -> Self {
+impl From<&XmmReg> for usize {
+    fn from(value: &XmmReg) -> Self {
         match value {
-            XMMReg::XMM0 => 0,
-            XMMReg::XMM1 => 1,
-            XMMReg::XMM2 => 2,
-            XMMReg::XMM3 => 3,
-            XMMReg::XMM4 => 4,
-            XMMReg::XMM5 => 5,
-            XMMReg::XMM6 => 6,
-            XMMReg::XMM7 => 7,
-            XMMReg::XMM8 => 8,
-            XMMReg::XMM9 => 9,
-            XMMReg::XMM10 => 10,
-            XMMReg::XMM11 => 11,
-            XMMReg::XMM12 => 12,
-            XMMReg::XMM13 => 13,
-            XMMReg::XMM14 => 14,
-            XMMReg::XMM15 => 15,
+            XmmReg::XMM0 => 0,
+            XmmReg::XMM1 => 1,
+            XmmReg::XMM2 => 2,
+            XmmReg::XMM3 => 3,
+            XmmReg::XMM4 => 4,
+            XmmReg::XMM5 => 5,
+            XmmReg::XMM6 => 6,
+            XmmReg::XMM7 => 7,
+            XmmReg::XMM8 => 8,
+            XmmReg::XMM9 => 9,
+            XmmReg::XMM10 => 10,
+            XmmReg::XMM11 => 11,
+            XmmReg::XMM12 => 12,
+            XmmReg::XMM13 => 13,
+            XmmReg::XMM14 => 14,
+            XmmReg::XMM15 => 15,
         }
     }
 }
@@ -603,7 +603,7 @@ impl From<&XMMReg> for usize {
 pub enum Reg {
     X86 { reg: X86Reg, section: RegSection },
     X64 { reg: X64Reg, section: RegSection },
-    XMM { reg: XMMReg, section: RegSection },
+    Xmm { reg: XmmReg, section: RegSection },
 }
 
 impl Reg {
@@ -611,7 +611,7 @@ impl Reg {
         match self {
             Self::X86 { reg: _, section } => section.size(),
             Self::X64 { reg: _, section } => section.size(),
-            Self::XMM { reg: _, section } => section.size(),
+            Self::Xmm { reg: _, section } => section.size(),
         }
     }
 
@@ -619,7 +619,7 @@ impl Reg {
         match self {
             Self::X86 { reg, .. } => Self::X86 { reg, section },
             Self::X64 { reg, .. } => Self::X64 { reg, section },
-            Self::XMM { reg, .. } => Self::XMM { reg, section },
+            Self::Xmm { reg, .. } => Self::Xmm { reg, section },
         }
     }
 }
@@ -660,7 +660,7 @@ impl fmt::Display for Reg {
                 };
                 write!(f, "r{}{}", usize::from(reg), suffix)
             }
-            Self::XMM { reg, section } => {
+            Self::Xmm { reg, section } => {
                 let suffix = match section {
                     RegSection::LowByte => "b",
                     RegSection::HighByte => "h",
@@ -1087,8 +1087,8 @@ impl Instruction<WithStorage> {
                     reg: X64Reg::R11,
                     section: RegSection::from_size(src.size()).expect("FIXME"),
                 });
-                let xmm15 = Operand::Reg(Reg::XMM {
-                    reg: XMMReg::XMM15,
+                let xmm15 = Operand::Reg(Reg::Xmm {
+                    reg: XmmReg::XMM15,
                     section: RegSection::from_size(src.size()).expect("FIXME"),
                 });
                 vec![
@@ -1368,8 +1368,8 @@ impl Instruction<Initial> {
                         vec![
                             new_instr(InstructionType::Mov {
                                 src: src.clone(),
-                                dst: Operand::Reg(Reg::XMM {
-                                    reg: XMMReg::XMM0,
+                                dst: Operand::Reg(Reg::Xmm {
+                                    reg: XmmReg::XMM0,
                                     section: RegSection::from_size(src.size())
                                         .expect("NOT IMPLEMENTED YET :("),
                                 }),
@@ -1683,8 +1683,8 @@ impl Instruction<Initial> {
             },
             tacky::Instruction::JumpIfZero { condition, target } => {
                 if is_float(&condition, symbols) {
-                    let xmm0 = Reg::XMM {
-                        reg: XMMReg::XMM0,
+                    let xmm0 = Reg::Xmm {
+                        reg: XmmReg::XMM0,
                         section: RegSection::Qword,
                     };
                     vec![
@@ -1829,8 +1829,8 @@ impl Instruction<Initial> {
                         ptr: None,
                         ..
                     } => {
-                        let xmm0 = Operand::Reg(Reg::XMM {
-                            reg: XMMReg::XMM0,
+                        let xmm0 = Operand::Reg(Reg::Xmm {
+                            reg: XmmReg::XMM0,
                             section: RegSection::from_size(dst.size())
                                 .expect("NOT IMPLEMENTED YET :("),
                         });
@@ -1887,12 +1887,12 @@ impl Instruction<Initial> {
                     section: RegSection::Qword,
                 });
 
-                let xmm14 = Operand::Reg(Reg::XMM {
-                    reg: XMMReg::XMM0,
+                let xmm14 = Operand::Reg(Reg::Xmm {
+                    reg: XmmReg::XMM0,
                     section: RegSection::Qword,
                 });
-                let xmm15 = Operand::Reg(Reg::XMM {
-                    reg: XMMReg::XMM1,
+                let xmm15 = Operand::Reg(Reg::Xmm {
+                    reg: XmmReg::XMM1,
                     section: RegSection::Qword,
                 });
 
@@ -1953,8 +1953,8 @@ impl Instruction<Initial> {
                     section: RegSection::Qword,
                 });
 
-                let xmm14 = Operand::Reg(Reg::XMM {
-                    reg: XMMReg::XMM0,
+                let xmm14 = Operand::Reg(Reg::Xmm {
+                    reg: XmmReg::XMM0,
                     section: RegSection::Qword,
                 });
 

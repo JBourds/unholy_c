@@ -137,7 +137,7 @@ impl From<sema::ValidAst> for Program {
 pub struct Function {
     pub name: Rc<String>,
     pub external_linkage: bool,
-    pub params: Vec<Option<Rc<String>>>,
+    pub signature: Vec<(ast::Type, Option<Rc<String>>)>,
     pub instructions: Vec<Instruction>,
 }
 
@@ -195,11 +195,6 @@ impl Function {
 
         let name = Rc::new(name.to_string());
 
-        let params = signature
-            .into_iter()
-            .map(|x| x.1)
-            .collect::<Vec<Option<Rc<String>>>>();
-
         // Check symbol table to get external linkage since the function
         // declaration could be static but the definition can elide it.
         // ```
@@ -227,7 +222,7 @@ impl Function {
 
         Some(Function {
             name,
-            params,
+            signature,
             external_linkage,
             instructions,
         })

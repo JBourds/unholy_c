@@ -197,8 +197,12 @@ pub mod x64 {
                     codegen::Operand::Reg(r) => {
                         codegen::Operand::Reg(r.as_section(codegen::RegSection::LowByte))
                     }
-                    codegen::Operand::StackOffset { offset, .. } => {
-                        codegen::Operand::StackOffset { offset, size: 1 }
+                    codegen::Operand::StackOffset { offset, r#type, .. } => {
+                        codegen::Operand::StackOffset {
+                            offset,
+                            size: 1,
+                            r#type,
+                        }
                     }
                     _ => dst,
                 };

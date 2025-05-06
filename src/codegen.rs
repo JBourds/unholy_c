@@ -69,6 +69,63 @@ const SYSTEM_V_FP_REGS: [Reg; 8] = [
     },
 ];
 
+#[derive(Clone, Debug, PartialEq)]
+pub enum AssemblyType {
+    Byte,
+    Word,
+    Longword,
+    Quadword,
+    Pointer,
+    Float,
+    Double,
+}
+
+impl AssemblyType {
+    fn from_tacky(val: &tacky::Val, symbols: &tacky::SymbolTable) -> Self {
+        Self::from_ast_type(val.get_type(symbols))
+    }
+
+    fn from_ast_type(r#type: ast::Type) -> Self {
+        match r#type {
+            ast::Type { ptr: Some(_), .. } => Self::Pointer,
+            ast::Type {
+                base: ast::BaseType::Float(_),
+                ..
+            } => Self::Float,
+            ast::Type {
+                base: ast::BaseType::Double(_),
+                ..
+            } => Self::Double,
+            ast::Type {
+                base: ast::BaseType::Char,
+                ..
+            } => Self::Byte,
+            ast::Type {
+                base: ast::BaseType::Int { nbytes, .. },
+                ..
+            } => match nbytes {
+                2 => Self::Word,
+                4 => Self::Longword,
+                8 => Self::Quadword,
+                _ => unreachable!(),
+            },
+            _ => unimplemented!(),
+        }
+    }
+
+    fn size_bytes(&self) -> usize {
+        match self {
+            AssemblyType::Byte => core::mem::size_of::<u8>(),
+            AssemblyType::Word => core::mem::size_of::<u16>(),
+            AssemblyType::Longword => core::mem::size_of::<u32>(),
+            AssemblyType::Quadword => core::mem::size_of::<u64>(),
+            AssemblyType::Pointer => core::mem::size_of::<usize>(),
+            AssemblyType::Float => core::mem::size_of::<f32>(),
+            AssemblyType::Double => core::mem::size_of::<f64>(),
+        }
+    }
+}
+
 #[derive(Debug, PartialEq)]
 pub enum TopLevel {
     Fun(Function),
@@ -210,19 +267,12 @@ impl Function {
     ) -> Self {
         let tacky::Function {
             name,
-            mut params,
+            signature,
             external_linkage: global,
             instructions: fun_instructions,
         } = node;
-        // Create the System V register/stack mappings here
-        let (reg_args, stack_args) = {
-            let to_drain = std::cmp::min(SYSTEM_V_GP_REGS.len(), params.len());
-            let reg_args = params
-                .drain(..to_drain)
-                .collect::<Vec<Option<Rc<String>>>>();
-            let stack_args: Vec<Option<Rc<String>>> = std::mem::take(&mut params);
-            (reg_args, stack_args)
-        };
+
+        // Prologue
         let mut instructions = vec![
             Instruction::<Initial>::new(InstructionType::Push(Operand::Reg(Reg::X86 {
                 reg: X86Reg::Bp,
@@ -241,41 +291,68 @@ impl Function {
             Instruction::<Initial>::new(InstructionType::allocate_stack(0)),
         ];
 
+        let mut gpr_args = vec![];
+        let mut fpr_args = vec![];
+        let mut stack_args = vec![];
+        for (r#type, name) in signature.into_iter() {
+            let param_type = AssemblyType::from_ast_type(r#type);
+            match param_type {
+                AssemblyType::Float | AssemblyType::Double
+                    if fpr_args.len() < SYSTEM_V_FP_REGS.len() =>
+                {
+                    fpr_args.push((param_type, name));
+                }
+                // FIXME: Pointer types will also want to be pushed here (probably)
+                // since they are essentially just word-sized unsigned ints
+                AssemblyType::Byte
+                | AssemblyType::Word
+                | AssemblyType::Longword
+                | AssemblyType::Quadword
+                    if gpr_args.len() < SYSTEM_V_GP_REGS.len() =>
+                {
+                    gpr_args.push((param_type, name));
+                }
+                _ => {
+                    stack_args.push((param_type, name));
+                }
+            }
+        }
+
         let mut mappings = HashMap::new();
         // We always start with a stack bound of 8 for RBP
         // Include register args here since we move into them
-        for (src_reg, dst_arg) in
-            std::iter::zip(SYSTEM_V_GP_REGS.into_iter(), reg_args.into_iter().flatten())
+        for (src_reg, (dst_type, dst)) in
+            std::iter::zip(SYSTEM_V_GP_REGS.into_iter(), gpr_args.into_iter()).chain(
+                std::iter::zip(SYSTEM_V_FP_REGS.into_iter(), fpr_args.into_iter()),
+            )
         {
-            let param_symbol = symbols
-                .get(&dst_arg)
-                .expect("function param should already be in symbol table");
             instructions.push(Instruction::<Initial>::new(InstructionType::Mov {
-                src: Operand::Reg(src_reg.as_section(
-                    RegSection::from_size(param_symbol.r#type.size_of()).expect("FIXME"),
-                )),
+                src: Operand::Reg(
+                    src_reg
+                        .as_section(RegSection::from_size(dst_type.size_bytes()).expect("FIXME")),
+                ),
                 dst: Operand::Pseudo {
-                    name: dst_arg,
-                    size: param_symbol.r#type.size_of(),
+                    name: dst.expect("FIXME: Is this always not null?"),
+                    size: dst_type.size_bytes(),
+                    r#type: dst_type,
                 },
             }));
         }
 
         // Hardcoded 8 here due to pushing RBP
         let mut stack_bound = 8;
-        for arg in stack_args.into_iter().flatten() {
+        for (arg_type, arg) in stack_args.into_iter() {
             stack_bound += 8;
-            let arg_symbol = symbols
-                .get(&arg)
-                .expect("function param should already be in symbol table");
             instructions.push(Instruction::<Initial>::new(InstructionType::Mov {
                 src: Operand::StackOffset {
                     offset: stack_bound,
-                    size: arg_symbol.r#type.size_of(),
+                    size: arg_type.size_bytes(),
+                    r#type: arg_type.clone(),
                 },
                 dst: Operand::Pseudo {
-                    name: arg,
-                    size: arg_symbol.r#type.size_of(),
+                    name: arg.expect("FIXME: Is this always not null?"),
+                    size: arg_type.size_bytes(),
+                    r#type: arg_type,
                 },
             }));
         }
@@ -787,7 +864,11 @@ impl Instruction<WithStorage> {
             }
         };
         let mut convert_operand_offset = |op| match op {
-            Operand::Pseudo { ref name, size } => {
+            Operand::Pseudo {
+                ref name,
+                size,
+                r#type,
+            } => {
                 match symbols.get(name) {
                     // 1. Check for static storage
                     Some(entry)
@@ -796,6 +877,7 @@ impl Instruction<WithStorage> {
                         Operand::Data {
                             name: Rc::clone(name),
                             size: entry.r#type.size_of(),
+                            r#type,
                         }
                     }
                     // 2. If it is not static, put it on the stack
@@ -807,6 +889,7 @@ impl Instruction<WithStorage> {
                             Operand::StackOffset {
                                 offset: -(*stack_bound as isize),
                                 size,
+                                r#type,
                             }
                         })
                         .clone(),
@@ -1196,31 +1279,30 @@ impl From<Instruction<WithStorage>> for Vec<Instruction<Final>> {
 fn classify_function_args(
     args: Vec<tacky::Val>,
     symbols: &tacky::SymbolTable,
-    float_constants: &mut HashSet<StaticConstant>,
-) -> (Vec<Operand>, Vec<Operand>, Vec<Operand>) {
+) -> (Vec<tacky::Val>, Vec<tacky::Val>, Vec<tacky::Val>) {
     let mut gpr_args = vec![];
     let mut fpr_args = vec![];
     let mut stack_args = vec![];
     for arg in args.into_iter() {
-        match arg.get_type(symbols) {
-            ast::Type {
-                base: ast::BaseType::Float(_) | ast::BaseType::Double(_),
-                ptr: None,
-                ..
-            } if fpr_args.len() < SYSTEM_V_FP_REGS.len() => {
-                fpr_args.push(Operand::from_tacky(arg, symbols, float_constants));
+        let arg_type = AssemblyType::from_tacky(&arg, symbols);
+        match arg_type {
+            AssemblyType::Float | AssemblyType::Double
+                if fpr_args.len() < SYSTEM_V_FP_REGS.len() =>
+            {
+                fpr_args.push(arg);
             }
             // FIXME: Pointer types will also want to be pushed here (probably)
             // since they are essentially just word-sized unsigned ints
-            ast::Type {
-                base: ast::BaseType::Int { .. },
-                ptr: None,
-                ..
-            } if gpr_args.len() < SYSTEM_V_GP_REGS.len() => {
-                gpr_args.push(Operand::from_tacky(arg, symbols, float_constants));
+            AssemblyType::Byte
+            | AssemblyType::Word
+            | AssemblyType::Longword
+            | AssemblyType::Quadword
+                if gpr_args.len() < SYSTEM_V_GP_REGS.len() =>
+            {
+                gpr_args.push(arg);
             }
             _ => {
-                stack_args.push(Operand::from_tacky(arg, symbols, float_constants));
+                stack_args.push(arg);
             }
         }
     }
@@ -1315,6 +1397,7 @@ impl Instruction<Initial> {
                             src: Operand::Data {
                                 name: neg_zero,
                                 size: 16,
+                                r#type: AssemblyType::Double,
                             },
                             dst,
                         }),
@@ -1340,9 +1423,11 @@ impl Instruction<Initial> {
                                 let dst: Operand =
                                     Operand::from_tacky(dst, symbols, float_constants);
                                 match dst {
-                                    Operand::Pseudo { name, .. } => {
-                                        Operand::Pseudo { name, size: 1 }
-                                    }
+                                    Operand::Pseudo { name, .. } => Operand::Pseudo {
+                                        name,
+                                        size: 1,
+                                        r#type: AssemblyType::Byte,
+                                    },
                                     _ => dst,
                                 }
                             },
@@ -1583,9 +1668,11 @@ impl Instruction<Initial> {
                                 // fixup the stack location size
                                 let dst = Operand::from_tacky(dst, symbols, float_constants);
                                 match dst {
-                                    Operand::Pseudo { name, .. } => {
-                                        Operand::Pseudo { name, size: 1 }
-                                    }
+                                    Operand::Pseudo { name, .. } => Operand::Pseudo {
+                                        name,
+                                        size: 1,
+                                        r#type: AssemblyType::Byte,
+                                    },
                                     _ => dst,
                                 }
                             },
@@ -1649,8 +1736,7 @@ impl Instruction<Initial> {
                 vec![new_instr(InstructionType::Label(label))]
             }
             tacky::Instruction::FunCall { name, args, dst } => {
-                let (gpr_args, fpr_args, stack_args) =
-                    classify_function_args(args, symbols, float_constants);
+                let (gpr_args, fpr_args, stack_args) = classify_function_args(args, symbols);
 
                 let num_stack_args = stack_args.len();
                 let stack_padding = if num_stack_args % 2 == 1 { 8 } else { 0 };
@@ -1666,6 +1752,7 @@ impl Instruction<Initial> {
                         std::iter::zip(SYSTEM_V_FP_REGS.iter(), fpr_args.into_iter()),
                     )
                 {
+                    let src_arg = Operand::from_tacky(src_arg, symbols, float_constants);
                     let size = src_arg.size();
                     v.push(new_instr(InstructionType::Mov {
                         src: src_arg,
@@ -1676,6 +1763,7 @@ impl Instruction<Initial> {
                 }
 
                 for arg in stack_args.into_iter().rev() {
+                    let arg = Operand::from_tacky(arg, symbols, float_constants);
                     match arg {
                         Operand::Imm(i) => {
                             v.push(new_instr(InstructionType::Push(Operand::Imm(i))))
@@ -1787,6 +1875,7 @@ impl Instruction<Initial> {
                 let long_max = Operand::Data {
                     name: long_max,
                     size: core::mem::align_of::<f64>(),
+                    r#type: AssemblyType::Double,
                 };
 
                 let rax = Operand::Reg(Reg::X86 {
@@ -1976,9 +2065,21 @@ fn make_zero(size_bytes: usize, signed: bool) -> Operand {
 pub enum Operand {
     Imm(ast::Constant),
     Reg(Reg),
-    Pseudo { name: Rc<String>, size: usize },
-    StackOffset { offset: isize, size: usize },
-    Data { name: Rc<String>, size: usize },
+    Pseudo {
+        name: Rc<String>,
+        size: usize,
+        r#type: AssemblyType,
+    },
+    StackOffset {
+        offset: isize,
+        size: usize,
+        r#type: AssemblyType,
+    },
+    Data {
+        name: Rc<String>,
+        size: usize,
+        r#type: AssemblyType,
+    },
 }
 
 impl Operand {
@@ -1998,34 +2099,37 @@ impl Operand {
         float_constants: &mut HashSet<StaticConstant>,
     ) -> Self {
         match val {
-            tacky::Val::Constant(c @ ast::Constant::F32(v)) => {
+            tacky::Val::Constant(ast::Constant::F32(v)) => {
                 let static_const = StaticConstant::from(v);
                 if !float_constants.contains(&static_const) {
                     float_constants.insert(static_const.clone());
                 }
+                let val_type = AssemblyType::from_tacky(&val, symbols);
                 Operand::Data {
                     name: static_const.id,
-                    size: c.size_bytes(),
+                    size: val_type.size_bytes(),
+                    r#type: val_type,
                 }
             }
-            tacky::Val::Constant(c @ ast::Constant::F64(v)) => {
+            tacky::Val::Constant(ast::Constant::F64(v)) => {
                 let static_const = StaticConstant::from(v);
                 if !float_constants.contains(&static_const) {
                     float_constants.insert(static_const.clone());
                 }
+                let val_type = AssemblyType::from_tacky(&val, symbols);
                 Operand::Data {
                     name: static_const.id,
-                    size: c.size_bytes(),
+                    size: val_type.size_bytes(),
+                    r#type: val_type,
                 }
             }
             tacky::Val::Constant(i) => Self::Imm(i),
-            tacky::Val::Var(r) => {
-                let symbol = symbols
-                    .get(&r)
-                    .expect("every tacky val is already in the symbol table");
+            tacky::Val::Var(ref name) => {
+                let val_type = AssemblyType::from_tacky(&val, symbols);
                 Self::Pseudo {
-                    name: r,
-                    size: symbol.r#type.size_of(),
+                    name: Rc::clone(name),
+                    size: val_type.size_bytes(),
+                    r#type: val_type,
                 }
             }
         }

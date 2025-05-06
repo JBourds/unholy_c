@@ -1178,7 +1178,7 @@ impl Type {
 
     pub fn float(nbytes: usize) -> Self {
         Self {
-            base: BaseType::float(nbytes == BaseType::Double(0).nbytes()),
+            base: BaseType::float(nbytes == core::mem::size_of::<f64>()),
             alignment: NonZeroUsize::new(nbytes).unwrap(),
             ptr: None,
             storage: None,

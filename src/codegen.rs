@@ -712,30 +712,30 @@ impl CondCode {
             tacky::BinaryOp::NotEqual => Self::NE,
             tacky::BinaryOp::LessThan => {
                 if uses_cf_zf {
-                    Self::L
-                } else {
                     Self::B
+                } else {
+                    Self::L
                 }
             }
             tacky::BinaryOp::LessOrEqual => {
                 if uses_cf_zf {
-                    Self::LE
-                } else {
                     Self::BE
+                } else {
+                    Self::LE
                 }
             }
             tacky::BinaryOp::GreaterThan => {
                 if uses_cf_zf {
-                    Self::G
-                } else {
                     Self::A
+                } else {
+                    Self::G
                 }
             }
             tacky::BinaryOp::GreaterOrEqual => {
                 if uses_cf_zf {
-                    Self::GE
-                } else {
                     Self::AE
+                } else {
+                    Self::GE
                 }
             }
             _ => unreachable!("Only relational operands can convert to CondCode"),

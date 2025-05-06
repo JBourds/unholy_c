@@ -993,6 +993,41 @@ impl Instruction<WithStorage> {
                     Self::from_op(InstructionType::Div(r10)),
                 ]
             }
+            InstructionType::Cvtsi2sd {
+                src:
+                    src @ Operand::Imm(_)
+                    | src @ Operand::StackOffset { .. }
+                    | src @ Operand::Data { .. },
+                dst: dst @ Operand::StackOffset { .. } | dst @ Operand::Data { .. },
+            } => {
+                let r11 = Operand::Reg(Reg::X64 {
+                    reg: X64Reg::R11,
+                    section: RegSection::from_size(src.size()).expect("FIXME"),
+                });
+                let xmm15 = Operand::Reg(Reg::XMM {
+                    reg: XMMReg::XMM15,
+                    section: RegSection::from_size(src.size()).expect("FIXME"),
+                });
+                vec![
+                    Self::from_op(InstructionType::Mov {
+                        src,
+                        dst: r11.clone(),
+                    }),
+                    Self::from_op(InstructionType::Cvtsi2sd {
+                        src: r11,
+                        dst: xmm15.clone(),
+                    }),
+                    Self::from_op(InstructionType::Mov { src: xmm15, dst }),
+                ]
+            }
+            InstructionType::Cvttsd2si {
+                src: src @ Operand::StackOffset { .. } | src @ Operand::Data { .. },
+                dst: dst @ Operand::StackOffset { .. } | dst @ Operand::Data { .. },
+            } => unimplemented!(),
+            InstructionType::DivDouble {
+                src: src @ Operand::StackOffset { .. } | src @ Operand::Data { .. },
+                dst: dst @ Operand::StackOffset { .. } | dst @ Operand::Data { .. },
+            } => unimplemented!(),
             InstructionType::Cmp {
                 src: src @ Operand::StackOffset { .. } | src @ Operand::Data { .. },
                 dst: dst @ Operand::StackOffset { .. } | dst @ Operand::Data { .. },
@@ -1025,7 +1060,6 @@ impl Instruction<WithStorage> {
                     Self::from_op(InstructionType::Cmp { src, dst: r11 }),
                 ]
             }
-
             instr => vec![Self::from_op(instr)],
         }
     }

@@ -242,6 +242,7 @@ pub mod x64 {
             }
             codegen::InstructionType::Cvttsd2si { .. } => todo!(),
             codegen::InstructionType::Cvtsi2sd { .. } => todo!(),
+            codegen::InstructionType::DivDouble { .. } => todo!(),
             codegen::InstructionType::MovZeroExtend { .. } => unreachable!(),
         }
         Ok(())

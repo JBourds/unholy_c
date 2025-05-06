@@ -683,6 +683,10 @@ pub enum InstructionType {
         src: Operand,
         dst: Operand,
     },
+    DivDouble {
+        src: Operand,
+        dst: Operand,
+    },
 }
 
 impl InstructionType {
@@ -1220,6 +1224,21 @@ impl Instruction<Initial> {
                     ]
                 }
                 tacky::BinaryOp::Divide => {
+                    // Check for double division
+                    if is_float(&src1, symbols) || is_float(&src2, symbols) {
+                        let src1 = make_op(src1);
+                        let src2 = make_op(src2);
+                        let dst = make_op(dst);
+                        return vec![
+                            new_instr(InstructionType::Mov {
+                                src: src1,
+                                dst: dst.clone(),
+                            }),
+                            new_instr(InstructionType::DivDouble { src: src2, dst }),
+                        ];
+                    }
+
+                    // No doubles, process integer division
                     let signed_div = is_signed(&src1, symbols);
                     let src1 = make_op(src1);
                     let op_size = src1.size();
@@ -1492,6 +1511,17 @@ impl Instruction<Initial> {
             tacky::Instruction::UIntToDouble { .. } => todo!(),
         }
     }
+}
+
+fn is_float(val: &tacky::Val, symbols: &tacky::SymbolTable) -> bool {
+    matches!(
+        val.get_type(symbols),
+        ast::Type {
+            base: ast::BaseType::Float(_) | ast::BaseType::Double(_),
+            ptr: None,
+            ..
+        }
+    )
 }
 
 fn is_signed(val: &tacky::Val, symbols: &tacky::SymbolTable) -> bool {

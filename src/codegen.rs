@@ -1592,7 +1592,12 @@ impl Instruction<Initial> {
                     dst: Operand::from_tacky(dst, symbols, float_constants),
                 })]
             }
-            tacky::Instruction::DoubleToInt { .. } => todo!(),
+            tacky::Instruction::DoubleToInt { src, dst } => {
+                vec![new_instr(InstructionType::Cvttsd2si {
+                    src: Operand::from_tacky(src, symbols, float_constants),
+                    dst: Operand::from_tacky(dst, symbols, float_constants),
+                })]
+            }
             tacky::Instruction::IntToDouble { .. } => todo!(),
             tacky::Instruction::DoubleToUInt { .. } => todo!(),
             tacky::Instruction::UIntToDouble { .. } => todo!(),

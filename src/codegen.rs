@@ -1023,7 +1023,19 @@ impl Instruction<WithStorage> {
             InstructionType::Cvttsd2si {
                 src: src @ Operand::StackOffset { .. } | src @ Operand::Data { .. },
                 dst: dst @ Operand::StackOffset { .. } | dst @ Operand::Data { .. },
-            } => unimplemented!(),
+            } => {
+                let r11 = Operand::Reg(Reg::X64 {
+                    reg: X64Reg::R11,
+                    section: RegSection::from_size(src.size()).expect("FIXME"),
+                });
+                vec![
+                    Self::from_op(InstructionType::Cvttsd2si {
+                        src,
+                        dst: r11.clone(),
+                    }),
+                    Self::from_op(InstructionType::Mov { src: r11, dst }),
+                ]
+            }
             InstructionType::DivDouble {
                 src: src @ Operand::StackOffset { .. } | src @ Operand::Data { .. },
                 dst: dst @ Operand::StackOffset { .. } | dst @ Operand::Data { .. },

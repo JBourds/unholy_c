@@ -1749,8 +1749,13 @@ impl Instruction<Initial> {
                         cond_code: CondCode::L,
                         identifier: Rc::clone(&out_of_range_label),
                     }),
-                    new_instr(InstructionType::Cvtsi2sd {
+                    // Explicitly zero out bytes here
+                    new_instr(InstructionType::MovZeroExtend {
                         src: src.clone(),
+                        dst: rax.clone(),
+                    }),
+                    new_instr(InstructionType::Cvtsi2sd {
+                        src: rax.clone(),
                         dst: dst.clone(),
                     }),
                     new_instr(InstructionType::Jmp(Rc::clone(&end_label))),

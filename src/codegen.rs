@@ -1211,18 +1211,46 @@ impl Instruction<Initial> {
                 })]
             }
             tacky::Instruction::Return(Some(val)) => {
+                let val_type = val.get_type(symbols);
                 let src = Operand::from_tacky(val, symbols, float_constants);
-                vec![
-                    new_instr(InstructionType::Mov {
-                        src: src.clone(),
-                        dst: Operand::Reg(Reg::X86 {
-                            reg: X86Reg::Ax,
-                            section: RegSection::from_size(src.size())
-                                .expect("NOT IMPLEMENTED YET :("),
-                        }),
-                    }),
-                    new_instr(InstructionType::Ret),
-                ]
+
+                match val_type {
+                    ast::Type {
+                        base: ast::BaseType::Int { .. },
+                        ptr: None,
+                        ..
+                    } => {
+                        vec![
+                            new_instr(InstructionType::Mov {
+                                src: src.clone(),
+                                dst: Operand::Reg(Reg::X86 {
+                                    reg: X86Reg::Ax,
+                                    section: RegSection::from_size(src.size())
+                                        .expect("NOT IMPLEMENTED YET :("),
+                                }),
+                            }),
+                            new_instr(InstructionType::Ret),
+                        ]
+                    }
+                    ast::Type {
+                        base: ast::BaseType::Float(_) | ast::BaseType::Double(_),
+                        ptr: None,
+                        ..
+                    } => {
+                        vec![
+                            new_instr(InstructionType::Mov {
+                                src: src.clone(),
+                                dst: Operand::Reg(Reg::XMM {
+                                    reg: XMMReg::XMM0,
+                                    section: RegSection::from_size(src.size())
+                                        .expect("NOT IMPLEMENTED YET :("),
+                                }),
+                            }),
+                            new_instr(InstructionType::Ret),
+                        ]
+                    }
+                    _ => unimplemented!(),
+                }
             }
             tacky::Instruction::Unary { op, src, dst } => {
                 if is_float(&src, symbols) && matches!(op, tacky::UnaryOp::Not) {

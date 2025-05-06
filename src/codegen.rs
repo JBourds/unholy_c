@@ -458,6 +458,7 @@ pub enum BinaryOp {
     Add,
     Subtract,
     Multiply,
+    DivDouble,
     BitAnd,
     BitOr,
     Xor,
@@ -489,6 +490,7 @@ impl fmt::Display for BinaryOp {
             Self::Add => write!(f, "add"),
             Self::Subtract => write!(f, "sub"),
             Self::Multiply => write!(f, "imul"),
+            Self::DivDouble => write!(f, "div"),
             Self::BitAnd => write!(f, "and"),
             Self::BitOr => write!(f, "or"),
             Self::Xor => write!(f, "xor"),
@@ -1160,10 +1162,6 @@ impl Instruction<WithStorage> {
                     Self::from_op(InstructionType::Mov { src: r11, dst }),
                 ]
             }
-            InstructionType::DivDouble {
-                src: src @ Operand::StackOffset { .. } | src @ Operand::Data { .. },
-                dst: dst @ Operand::StackOffset { .. } | dst @ Operand::Data { .. },
-            } => unimplemented!(),
             InstructionType::Cmp {
                 src: src @ Operand::StackOffset { .. } | src @ Operand::Data { .. },
                 dst: dst @ Operand::StackOffset { .. } | dst @ Operand::Data { .. },
@@ -1537,7 +1535,11 @@ impl Instruction<Initial> {
                                 src: src1,
                                 dst: dst.clone(),
                             }),
-                            new_instr(InstructionType::DivDouble { src: src2, dst }),
+                            new_instr(InstructionType::Binary {
+                                op: BinaryOp::DivDouble,
+                                src: src2,
+                                dst,
+                            }),
                         ];
                     }
 

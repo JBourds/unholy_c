@@ -36,7 +36,7 @@ pub mod x64 {
             match entry {
                 codegen::TopLevel::Fun(f) => gen_function(w, f)?,
                 codegen::TopLevel::StaticVariable(v) => gen_static_var(w, v, &program.symbols)?,
-                codegen::TopLevel::StaticConstant(v) => gen_static_const(w, v, &program.symbols)?,
+                codegen::TopLevel::StaticConstant(v) => gen_static_const(w, v)?,
             }
         }
 
@@ -44,12 +44,12 @@ pub mod x64 {
         Ok(())
     }
 
-    fn gen_static_const(
-        _w: &mut impl Write,
-        _constant: codegen::StaticConstant,
-        _symbols: &tacky::SymbolTable,
-    ) -> Result<()> {
-        todo!()
+    fn gen_static_const(w: &mut impl Write, constant: codegen::StaticConstant) -> Result<()> {
+        w.write_str("\t.section .rodata\n")?;
+        w.write_fmt(format_args!("\t.align {}\n", constant.alignment))?;
+        w.write_fmt(format_args!(".L_{}:\n", constant.id))?;
+        w.write_fmt(format_args!("\t.double {}\n\n", constant.id))?;
+        Ok(())
     }
 
     fn gen_static_var(

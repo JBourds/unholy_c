@@ -174,8 +174,8 @@ pub enum TopLevel {
 // RC so we feel less bad about cloning this bad puppy
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct StaticConstant {
-    id: Rc<String>,
-    alignment: usize,
+    pub id: Rc<String>,
+    pub alignment: usize,
 }
 
 impl StaticConstant {
@@ -2187,8 +2187,12 @@ impl fmt::Display for Operand {
             Self::StackOffset { offset, .. } => {
                 write!(f, "[rbp{offset:+}]")
             }
-            Self::Data { name, .. } => {
-                write!(f, "{name}[rip]")
+            Self::Data { name, is_const, .. } => {
+                if *is_const {
+                    write!(f, "\".L_{name}\"[rip]")
+                } else {
+                    write!(f, "\"{name}\"[rip]")
+                }
             }
             Self::Pseudo { .. } => {
                 unreachable!("Cannot create asm representation for a pseudioregister.")

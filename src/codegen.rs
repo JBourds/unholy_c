@@ -1631,7 +1631,12 @@ impl Instruction<Initial> {
                     dst: Operand::from_tacky(dst, symbols, float_constants),
                 })]
             }
-            tacky::Instruction::IntToDouble { .. } => todo!(),
+            tacky::Instruction::IntToDouble { src, dst } => {
+                vec![new_instr(InstructionType::Cvtsi2sd {
+                    src: Operand::from_tacky(src, symbols, float_constants),
+                    dst: Operand::from_tacky(dst, symbols, float_constants),
+                })]
+            }
             tacky::Instruction::DoubleToUInt { src, dst } => {
                 // Check if the double is within the maximum range of a
                 // signed long

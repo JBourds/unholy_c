@@ -1720,7 +1720,76 @@ impl Instruction<Initial> {
                     new_instr(InstructionType::Mov { src: rax, dst }),
                 ]
             }
-            tacky::Instruction::UIntToDouble { .. } => todo!(),
+            tacky::Instruction::UIntToDouble { src, dst } => {
+                let rax = Operand::Reg(Reg::X86 {
+                    reg: X86Reg::Ax,
+                    section: RegSection::Qword,
+                });
+                let rdx = Operand::Reg(Reg::X86 {
+                    reg: X86Reg::Dx,
+                    section: RegSection::Qword,
+                });
+
+                let xmm0 = Operand::Reg(Reg::XMM {
+                    reg: XMMReg::XMM0,
+                    section: RegSection::Qword,
+                });
+
+                let src = Operand::from_tacky(src, symbols, float_constants);
+                let dst = Operand::from_tacky(dst, symbols, float_constants);
+                let out_of_range_label = Rc::new(make_label("out_of_range".to_string()));
+                let end_label = Rc::new(make_label("end".to_string()));
+
+                vec![
+                    new_instr(InstructionType::Cmp {
+                        src: make_zero(dst.size(), false),
+                        dst: dst.clone(),
+                    }),
+                    new_instr(InstructionType::JmpCC {
+                        cond_code: CondCode::L,
+                        identifier: Rc::clone(&out_of_range_label),
+                    }),
+                    new_instr(InstructionType::Cvtsi2sd {
+                        src: src.clone(),
+                        dst: dst.clone(),
+                    }),
+                    new_instr(InstructionType::Jmp(Rc::clone(&end_label))),
+                    new_instr(InstructionType::Label(out_of_range_label)),
+                    new_instr(InstructionType::Mov {
+                        src: src.clone(),
+                        dst: rax.clone(),
+                    }),
+                    new_instr(InstructionType::Mov {
+                        src: rax.clone(),
+                        dst: rdx.clone(),
+                    }),
+                    new_instr(InstructionType::Binary {
+                        op: BinaryOp::Shr,
+                        src: Operand::Imm(ast::Constant::U64(1)),
+                        dst: rdx.clone(),
+                    }),
+                    new_instr(InstructionType::Binary {
+                        op: BinaryOp::BitAnd,
+                        src: Operand::Imm(ast::Constant::U64(1)),
+                        dst: rax.clone(),
+                    }),
+                    new_instr(InstructionType::Binary {
+                        op: BinaryOp::BitOr,
+                        src: rax,
+                        dst: rdx.clone(),
+                    }),
+                    new_instr(InstructionType::Cvtsi2sd {
+                        src: rdx,
+                        dst: xmm0.clone(),
+                    }),
+                    new_instr(InstructionType::Binary {
+                        op: BinaryOp::Add,
+                        src: xmm0.clone(),
+                        dst: xmm0,
+                    }),
+                    new_instr(InstructionType::Label(end_label)),
+                ]
+            }
         }
     }
 }

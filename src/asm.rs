@@ -107,36 +107,44 @@ pub mod x64 {
         Ok(())
     }
 
-    fn gen_instruction(w: &mut impl Write, instr: codegen::InstructionType) -> Result<()> {
-        let get_specifier = |src: Option<&Operand>, dst: &Operand| {
-            let size = match (src, dst) {
-                (None, Operand::StackOffset { size, .. } | Operand::Data { size, .. })
-                | (
-                    Some(Operand::Imm(_)),
-                    Operand::StackOffset { size, .. } | Operand::Data { size, .. },
-                ) => Some(*size),
-                (
-                    Some(Operand::StackOffset { size, .. } | Operand::Data { size, .. }),
-                    Operand::Imm(_),
-                ) => Some(*size),
-                _ => None,
-            };
-            match size {
-                None => "",
-                Some(1) => "byte ptr ",
-                Some(2) => "word ptr ",
-                Some(4) => "dword ptr ",
-                Some(8) => "qword ptr ",
-                _ => unreachable!("Cannot have a destination size other than 1, 2, 4, or 8."),
-            }
-        };
+    fn instr_suffix(r#type: codegen::AssemblyType) -> String {
+        match r#type {
+            codegen::AssemblyType::Float => "ss",
+            codegen::AssemblyType::Double => "sd",
+            _ => "",
+        }
+        .to_string()
+    }
 
+    fn get_specifier<'a>(src: Option<&Operand>, dst: &Operand) -> &'a str {
+        let size = match (src, dst) {
+            (None, Operand::StackOffset { size, .. } | Operand::Data { size, .. })
+            | (
+                Some(Operand::Imm(_)),
+                Operand::StackOffset { size, .. } | Operand::Data { size, .. },
+            ) => Some(*size),
+            (
+                Some(Operand::StackOffset { size, .. } | Operand::Data { size, .. }),
+                Operand::Imm(_),
+            ) => Some(*size),
+            _ => None,
+        };
+        match size {
+            None => "",
+            Some(1) => "byte ptr ",
+            Some(2) => "word ptr ",
+            Some(4) => "dword ptr ",
+            Some(8) => "qword ptr ",
+            _ => unreachable!("Cannot have a destination size other than 1, 2, 4, or 8."),
+        }
+    }
+
+    fn gen_instruction(w: &mut impl Write, instr: codegen::InstructionType) -> Result<()> {
         match instr {
             codegen::InstructionType::Mov { src, dst } => {
-                w.write_fmt(format_args!(
-                    "\tmov {}{dst}, {src}\n",
-                    get_specifier(Some(&src), &dst)
-                ))?;
+                let suffix = instr_suffix(codegen::AssemblyType::from(&src));
+                let specifier = get_specifier(Some(&src), &dst);
+                w.write_fmt(format_args!("\tmov{suffix} {specifier}{dst}, {src}\n",))?;
             }
             codegen::InstructionType::Movsx { src, dst } => {
                 w.write_fmt(format_args!(
@@ -162,26 +170,26 @@ pub mod x64 {
                     }
                     _ => get_specifier(Some(&src), &dst),
                 };
-                w.write_fmt(format_args!("\t{op} {specifier}{dst}, {src}\n",))?
+                let suffix = instr_suffix(codegen::AssemblyType::from(&src));
+                w.write_fmt(format_args!("\t{op}{suffix} {specifier}{dst}, {src}\n",))?
             }
             codegen::InstructionType::Cdq(section) => match section {
                 codegen::RegSection::Dword => w.write_str("\tcdq\n")?,
                 codegen::RegSection::Qword => w.write_str("\tcqo\n")?,
                 _ => unreachable!(),
             },
-            codegen::InstructionType::Idiv(operand) => w.write_fmt(format_args!(
-                "\tidiv {}{operand}\n",
-                get_specifier(None, &operand)
-            ))?,
-            codegen::InstructionType::Div(operand) => w.write_fmt(format_args!(
-                "\tdiv {}{operand}\n",
-                get_specifier(None, &operand)
-            ))?,
+            codegen::InstructionType::Idiv(operand) => {
+                let specifier = get_specifier(None, &operand);
+                w.write_fmt(format_args!("\tidiv {specifier}{operand}\n",))?
+            }
+            codegen::InstructionType::Div(operand) => {
+                let specifier = get_specifier(None, &operand);
+                w.write_fmt(format_args!("\tdiv {specifier}{operand}\n",))?
+            }
             codegen::InstructionType::Cmp { src, dst } => {
-                w.write_fmt(format_args!(
-                    "\tcmp {}{dst}, {src}\n",
-                    get_specifier(Some(&src), &dst)
-                ))?;
+                let specifier = get_specifier(Some(&src), &dst);
+                let suffix = instr_suffix(codegen::AssemblyType::from(&src));
+                w.write_fmt(format_args!("\tcmp{suffix} {specifier}{dst}, {src}\n",))?;
             }
             codegen::InstructionType::Jmp(label) => {
                 w.write_fmt(format_args!("\tjmp .L{label}\n",))?;
@@ -206,10 +214,8 @@ pub mod x64 {
                     }
                     _ => dst,
                 };
-                w.write_fmt(format_args!(
-                    "\tset{cond_code} {}{dst}\n",
-                    get_specifier(None, &dst)
-                ))?;
+                let specifier = get_specifier(None, &dst);
+                w.write_fmt(format_args!("\tset{cond_code} {specifier}{dst}\n",))?;
             }
             codegen::InstructionType::Label(label) => {
                 w.write_fmt(format_args!(".L{label}:\n",))?;
@@ -225,7 +231,8 @@ pub mod x64 {
                 } else {
                     op
                 };
-                w.write_fmt(format_args!("\tpush {}{op}\n", get_specifier(None, &op)))?;
+                let specifier = get_specifier(None, &op);
+                w.write_fmt(format_args!("\tpush {specifier}{op}\n",))?;
             }
             codegen::InstructionType::Pop(op) => match op {
                 codegen::Operand::Reg(_) | codegen::Operand::StackOffset { .. } => {
@@ -234,7 +241,8 @@ pub mod x64 {
                     } else {
                         op
                     };
-                    w.write_fmt(format_args!("\tpop {}{op}\n", get_specifier(None, &op)))?;
+                    let specifier = get_specifier(None, &op);
+                    w.write_fmt(format_args!("\tpop {specifier}{op}\n",))?;
                 }
                 _ => bail!(
                     "Cannot push stack to argument {} which is neither a register nor a memory location.",

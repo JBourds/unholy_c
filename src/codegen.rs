@@ -913,6 +913,7 @@ impl Instruction<WithStorage> {
                             name: Rc::clone(name),
                             size: entry.r#type.size_of(),
                             r#type,
+                            is_const: false,
                         }
                     }
                     // 2. If it is not static, put it on the stack
@@ -1430,6 +1431,7 @@ impl Instruction<Initial> {
                                 name: neg_zero,
                                 size: 16,
                                 r#type: AssemblyType::Double,
+                                is_const: true,
                             },
                             dst,
                         }),
@@ -1913,6 +1915,7 @@ impl Instruction<Initial> {
                     name: long_max,
                     size: core::mem::align_of::<f64>(),
                     r#type: AssemblyType::Double,
+                    is_const: true,
                 };
 
                 let rax = Operand::Reg(Reg::X86 {
@@ -2116,6 +2119,7 @@ pub enum Operand {
         name: Rc<String>,
         size: usize,
         r#type: AssemblyType,
+        is_const: bool,
     },
 }
 
@@ -2146,6 +2150,7 @@ impl Operand {
                     name: static_const.id,
                     size: val_type.size_bytes(),
                     r#type: val_type,
+                    is_const: true,
                 }
             }
             tacky::Val::Constant(ast::Constant::F64(v)) => {
@@ -2158,6 +2163,7 @@ impl Operand {
                     name: static_const.id,
                     size: val_type.size_bytes(),
                     r#type: val_type,
+                    is_const: true,
                 }
             }
             tacky::Val::Constant(i) => Self::Imm(i),

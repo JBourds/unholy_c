@@ -1,4 +1,5 @@
 use anyhow::{Result, bail};
+use std::cell::LazyCell;
 
 use crate::{ast, sema, tacky};
 use std::collections::{HashMap, HashSet};
@@ -90,6 +91,8 @@ pub struct StaticConstant {
 }
 
 impl StaticConstant {
+    const NEGATIVE_ZERO: LazyCell<Rc<String>> = LazyCell::new(|| Rc::new("-0.0".to_string()));
+
     fn new(id: Rc<String>, alignment: usize) -> Self {
         Self { id, alignment }
     }
@@ -1158,9 +1161,10 @@ impl Instruction<Initial> {
             }
             tacky::Instruction::Unary { op, src, dst } => {
                 if is_float(&src, symbols) && matches!(op, tacky::UnaryOp::Not) {
+                    let neg_zero =
+                        LazyCell::<Rc<String>>::force(&StaticConstant::NEGATIVE_ZERO).clone();
                     // Super special 16-byte alignemnt needed here for SSE
-                    let s = Rc::new("-0.0".to_string());
-                    float_constants.insert(StaticConstant::new(Rc::clone(&s), 16));
+                    float_constants.insert(StaticConstant::new(neg_zero.clone(), 16));
                     let dst = Operand::from_tacky(dst, symbols, float_constants);
                     return vec![
                         new_instr(InstructionType::Mov {
@@ -1169,7 +1173,10 @@ impl Instruction<Initial> {
                         }),
                         new_instr(InstructionType::Binary {
                             op: BinaryOp::Xor,
-                            src: Operand::Data { name: s, size: 16 },
+                            src: Operand::Data {
+                                name: neg_zero,
+                                size: 16,
+                            },
                             dst,
                         }),
                     ];

@@ -1142,6 +1142,45 @@ impl From<Instruction<WithStorage>> for Vec<Instruction<Final>> {
     }
 }
 
+/// Classify a vector of tacky arguments into three lists:
+///     1. Args passed via general purpose registers
+///     2. Args passed via floating-point registers
+///     3. Args passed via the stack
+/// Returns: (GPR args, FPR args, Stack args)
+fn classify_function_args(
+    args: Vec<tacky::Val>,
+    symbols: &tacky::SymbolTable,
+    float_constants: &mut HashSet<StaticConstant>,
+) -> (Vec<Operand>, Vec<Operand>, Vec<Operand>) {
+    let mut gpr_args = vec![];
+    let mut fpr_args = vec![];
+    let mut stack_args = vec![];
+    for arg in args.into_iter() {
+        match arg.get_type(symbols) {
+            ast::Type {
+                base: ast::BaseType::Float(_) | ast::BaseType::Double(_),
+                ptr: None,
+                ..
+            } if fpr_args.len() < SYSTEM_V_FP_REGS.len() => {
+                fpr_args.push(Operand::from_tacky(arg, symbols, float_constants));
+            }
+            // FIXME: Pointer types will also want to be pushed here (probably)
+            // since they are essentially just word-sized unsigned ints
+            ast::Type {
+                base: ast::BaseType::Int { .. },
+                ptr: None,
+                ..
+            } if gpr_args.len() < SYSTEM_V_GP_REGS.len() => {
+                gpr_args.push(Operand::from_tacky(arg, symbols, float_constants));
+            }
+            _ => {
+                stack_args.push(Operand::from_tacky(arg, symbols, float_constants));
+            }
+        }
+    }
+    (gpr_args, fpr_args, stack_args)
+}
+
 impl Instruction<Initial> {
     fn from_tacky(
         instruction: tacky::Instruction,
@@ -1535,17 +1574,9 @@ impl Instruction<Initial> {
             tacky::Instruction::Label(label) => {
                 vec![new_instr(InstructionType::Label(label))]
             }
-            tacky::Instruction::FunCall {
-                name,
-                mut args,
-                dst,
-            } => {
-                let (reg_args, stack_args) = {
-                    let to_drain = std::cmp::min(SYSTEM_V_GP_REGS.len(), args.len());
-                    let reg_args = args.drain(..to_drain).collect::<Vec<tacky::Val>>();
-                    let stack_args = args.drain(..);
-                    (reg_args, stack_args)
-                };
+            tacky::Instruction::FunCall { name, args, dst } => {
+                let (gpr_args, fpr_args, stack_args) =
+                    classify_function_args(args, symbols, float_constants);
 
                 let num_stack_args = stack_args.len();
                 let stack_padding = if num_stack_args % 2 == 1 { 8 } else { 0 };
@@ -1554,10 +1585,13 @@ impl Instruction<Initial> {
                 if stack_padding != 0 {
                     v.push(new_instr(InstructionType::allocate_stack(stack_padding)));
                 }
+
+                // Setup all the GP and FP regs with arguments
                 for (dst_reg, src_arg) in
-                    std::iter::zip(SYSTEM_V_GP_REGS.iter(), reg_args.into_iter())
+                    std::iter::zip(SYSTEM_V_GP_REGS.iter(), gpr_args.into_iter()).chain(
+                        std::iter::zip(SYSTEM_V_FP_REGS.iter(), fpr_args.into_iter()),
+                    )
                 {
-                    let src_arg = Operand::from_tacky(src_arg, symbols, float_constants);
                     let size = src_arg.size();
                     v.push(new_instr(InstructionType::Mov {
                         src: src_arg,
@@ -1568,7 +1602,7 @@ impl Instruction<Initial> {
                 }
 
                 for arg in stack_args.into_iter().rev() {
-                    match Operand::from_tacky(arg, symbols, float_constants) {
+                    match arg {
                         Operand::Imm(i) => {
                             v.push(new_instr(InstructionType::Push(Operand::Imm(i))))
                         }
@@ -1611,12 +1645,38 @@ impl Instruction<Initial> {
                         bytes_to_remove,
                     )));
                 }
+                let dst_type = dst.get_type(symbols);
                 let dst = Operand::from_tacky(dst, symbols, float_constants);
-                let ax = Operand::Reg(Reg::X86 {
-                    reg: X86Reg::Ax,
-                    section: RegSection::from_size(dst.size()).expect("NOT IMPLEMENTED YET :("),
-                });
-                v.push(new_instr(InstructionType::Mov { src: ax, dst }));
+
+                // Determine how to get the return value into the destination
+                match dst_type {
+                    ast::Type {
+                        base: ast::BaseType::Int { .. },
+                        ptr: None,
+                        ..
+                    } => {
+                        let ax = Operand::Reg(Reg::X86 {
+                            reg: X86Reg::Ax,
+                            section: RegSection::from_size(dst.size())
+                                .expect("NOT IMPLEMENTED YET :("),
+                        });
+                        v.push(new_instr(InstructionType::Mov { src: ax, dst }));
+                    }
+                    ast::Type {
+                        base: ast::BaseType::Float(_) | ast::BaseType::Double(_),
+                        ptr: None,
+                        ..
+                    } => {
+                        let xmm0 = Operand::Reg(Reg::XMM {
+                            reg: XMMReg::XMM0,
+                            section: RegSection::from_size(dst.size())
+                                .expect("NOT IMPLEMENTED YET :("),
+                        });
+                        v.push(new_instr(InstructionType::Mov { src: xmm0, dst }));
+                    }
+                    _ => unimplemented!(),
+                }
+
                 v
             }
             tacky::Instruction::ZeroExtend { src, dst } => {

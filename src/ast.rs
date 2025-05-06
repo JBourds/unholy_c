@@ -1871,13 +1871,10 @@ impl UnaryOp {
     }
 
     pub fn is_valid_for(&self, expr: &Expr) -> bool {
-        match expr {
-            Expr::Constant(Constant::F32(_) | Constant::F64(_)) => {
-                !self.does_assignment() && !self.is_bitwise()
-            }
-            Expr::Constant(_) => !self.does_assignment(),
-            _ => true,
-        }
+        !matches!(
+            self,
+            UnaryOp::PreInc | UnaryOp::PreDec | UnaryOp::PostInc | UnaryOp::PostDec
+        ) || matches!(expr, Expr::Var(_))
     }
 
     fn consume_prefix(tokens: &[Token]) -> Result<(Self, &[Token])> {

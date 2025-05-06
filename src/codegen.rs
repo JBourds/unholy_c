@@ -601,33 +601,33 @@ impl fmt::Display for CondCode {
 }
 
 impl CondCode {
-    fn from_signed_op(value: tacky::BinaryOp, signed: bool) -> Self {
+    fn from_uses_cf_zf_op(value: tacky::BinaryOp, uses_cf_zf: bool) -> Self {
         match value {
             tacky::BinaryOp::Equal => Self::E,
             tacky::BinaryOp::NotEqual => Self::NE,
             tacky::BinaryOp::LessThan => {
-                if signed {
+                if uses_cf_zf {
                     Self::L
                 } else {
                     Self::B
                 }
             }
             tacky::BinaryOp::LessOrEqual => {
-                if signed {
+                if uses_cf_zf {
                     Self::LE
                 } else {
                     Self::BE
                 }
             }
             tacky::BinaryOp::GreaterThan => {
-                if signed {
+                if uses_cf_zf {
                     Self::G
                 } else {
                     Self::A
                 }
             }
             tacky::BinaryOp::GreaterOrEqual => {
-                if signed {
+                if uses_cf_zf {
                     Self::GE
                 } else {
                     Self::AE
@@ -1262,7 +1262,11 @@ impl Instruction<Initial> {
                 }
                 tacky::BinaryOp::Divide => {
                     // Check for double division
-                    if is_float(&src1, symbols) || is_float(&src2, symbols) {
+                    assert!(
+                        is_float(&src1, symbols) == is_float(&src2, symbols),
+                        "Either both operators should be floats or neither should be floats."
+                    );
+                    if is_float(&src1, symbols) {
                         let src1 = Operand::from_tacky(src1, symbols, float_constants);
                         let src2 = Operand::from_tacky(src2, symbols, float_constants);
                         let dst = Operand::from_tacky(dst, symbols, float_constants);
@@ -1410,7 +1414,13 @@ impl Instruction<Initial> {
                 | tacky::BinaryOp::LessOrEqual
                 | tacky::BinaryOp::GreaterThan
                 | tacky::BinaryOp::GreaterOrEqual => {
-                    let use_signed_cmp = is_signed(&src1, symbols);
+                    // Unsigned integers and doubles both set the CF and ZF
+                    // when doing comparisons
+                    assert!(
+                        is_float(&src1, symbols) == is_float(&src2, symbols),
+                        "Either both operators should be floats or neither should be floats."
+                    );
+                    let use_cf_zf_cmp = !is_signed(&src1, symbols) || is_float(&src2, symbols);
                     vec![
                         new_instr(InstructionType::Cmp {
                             src: Operand::from_tacky(src2, symbols, float_constants),
@@ -1421,7 +1431,7 @@ impl Instruction<Initial> {
                             dst: Operand::from_tacky(dst.clone(), symbols, float_constants),
                         }),
                         new_instr(InstructionType::SetCC {
-                            cond_code: CondCode::from_signed_op(op, use_signed_cmp),
+                            cond_code: CondCode::from_uses_cf_zf_op(op, use_cf_zf_cmp),
                             dst: {
                                 // FIXME: Since SetCC takes a byte value we must manually
                                 // fixup the stack location size

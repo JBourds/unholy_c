@@ -1293,7 +1293,7 @@ impl Instruction<WithStorage> {
                 src,
                 dst,
                 RewriteRule::new(ImmRewrite::Require, MemRewrite::Ignore, false),
-                RewriteRule::new(ImmRewrite::Error, MemRewrite::Require, true),
+                RewriteRule::new(ImmRewrite::Error, MemRewrite::Require, false),
                 |src, dst| Self::from_op(InstructionType::Cvttsd2si { src, dst }),
             ),
             InstructionType::Cmp { src, dst } => Self::rewrite_move(

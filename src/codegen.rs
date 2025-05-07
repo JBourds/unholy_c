@@ -2133,7 +2133,7 @@ impl Instruction<Initial> {
                 });
 
                 let xmm14 = Operand::Reg(Reg::Xmm {
-                    reg: XmmReg::XMM0,
+                    reg: XmmReg::XMM14,
                     section: RegSection::Qword,
                 });
 

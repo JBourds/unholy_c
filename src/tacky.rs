@@ -896,12 +896,14 @@ impl Expr {
                     } = Self::parse_with(*right, symbols, make_temp_var);
                     instructions.extend(right_instructions);
 
+                    let dst_type = if op.is_relational() {
+                        ast::Type::bool()
+                    } else {
+                        left_val.get_type(symbols)
+                    };
+
                     // FIXME: Same as above, not exactly sure where the type casting happens
-                    let dst = Function::make_tacky_temp_var(
-                        left_val.get_type(symbols),
-                        symbols,
-                        make_temp_var,
-                    );
+                    let dst = Function::make_tacky_temp_var(dst_type, symbols, make_temp_var);
 
                     instructions.push(Instruction::Binary {
                         op: op.into(),
@@ -1203,7 +1205,7 @@ impl From<ast::Constant> for Val {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum UnaryOp {
     Negate,
     Complement,

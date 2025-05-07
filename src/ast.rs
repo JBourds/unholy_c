@@ -1719,6 +1719,14 @@ impl BinaryOp {
         matches!(*self, Self::And | Self::Or)
     }
 
+    pub fn is_relational(&self) -> bool {
+        matches!(*self, |Self::Equal| Self::NotEqual
+            | Self::LessThan
+            | Self::LessOrEqual
+            | Self::GreaterThan
+            | Self::GreaterOrEqual)
+    }
+
     pub fn is_bitwise(&self) -> bool {
         matches!(
             self,

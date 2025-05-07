@@ -1039,10 +1039,28 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
             }
             _ => bail!("Could not find symbol with name {name}."),
         },
-        expr @ ast::Expr::Cast { target, .. } => Ok(TypedExpr {
-            expr: expr.clone(),
-            r#type: target.clone(),
-        }),
+        ast::Expr::Cast { target, exp } => {
+            let TypedExpr { expr, r#type } =
+                typecheck_expr(exp, symbols).context("Failed to typecheck casted expression.")?;
+            ensure!(
+                r#type.base.can_assign_to(&target.base) && r#type.ptr == target.ptr,
+                "Unable to cast from {type:?} to {target:?}"
+            );
+
+            let expr = if *target != r#type {
+                ast::Expr::Cast {
+                    target: target.clone(),
+                    exp: Box::new(expr),
+                }
+            } else {
+                expr
+            };
+
+            Ok(TypedExpr {
+                expr,
+                r#type: target.clone(),
+            })
+        }
         expr @ ast::Expr::Constant(constant) => Ok(TypedExpr {
             expr: expr.clone(),
             r#type: ast::Type {

@@ -965,7 +965,25 @@ impl Instruction<WithStorage> {
                     dst: convert_operand_offset(dst),
                 },
                 InstructionType::Push(op) => InstructionType::Push(convert_operand_offset(op)),
-                instr => instr,
+                InstructionType::Cvtsi2sd { src, dst } => InstructionType::Cvtsi2sd {
+                    src: convert_operand_offset(src),
+                    dst: convert_operand_offset(dst),
+                },
+                InstructionType::Cvttsd2si { src, dst } => InstructionType::Cvttsd2si {
+                    src: convert_operand_offset(src),
+                    dst: convert_operand_offset(dst),
+                },
+                InstructionType::DivDouble { src, dst } => InstructionType::DivDouble {
+                    src: convert_operand_offset(src),
+                    dst: convert_operand_offset(dst),
+                },
+                instr @ InstructionType::Cdq(_) => instr,
+                instr @ InstructionType::Jmp(_) => instr,
+                instr @ InstructionType::JmpCC { .. } => instr,
+                instr @ InstructionType::Label(_) => instr,
+                instr @ InstructionType::Pop(_) => instr,
+                instr @ InstructionType::Call(_) => instr,
+                instr @ InstructionType::Ret => instr,
             },
             phantom: PhantomData::<WithStorage>,
         }
@@ -2295,7 +2313,7 @@ impl fmt::Display for Operand {
                 }
             }
             Self::Pseudo { .. } => {
-                unreachable!("Cannot create asm representation for a pseudioregister.")
+                unreachable!("Cannot create asm representation for a pseudoregister.")
             }
         }
     }

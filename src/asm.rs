@@ -47,7 +47,7 @@ pub mod x64 {
     fn gen_static_const(w: &mut impl Write, constant: codegen::StaticConstant) -> Result<()> {
         w.write_str("\t.section .rodata\n")?;
         w.write_fmt(format_args!("\t.align {}\n", constant.alignment))?;
-        w.write_fmt(format_args!(".L_{}:\n", constant.id))?;
+        w.write_fmt(format_args!("\".L_{}\":\n", constant.id))?;
         w.write_fmt(format_args!("\t.double {}\n\n", constant.id))?;
         Ok(())
     }

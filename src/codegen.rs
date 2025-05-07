@@ -2067,11 +2067,11 @@ impl Instruction<Initial> {
                 });
 
                 let xmm14 = Operand::Reg(Reg::Xmm {
-                    reg: XmmReg::XMM0,
+                    reg: XmmReg::XMM14,
                     section: RegSection::Qword,
                 });
                 let xmm15 = Operand::Reg(Reg::Xmm {
-                    reg: XmmReg::XMM1,
+                    reg: XmmReg::XMM15,
                     section: RegSection::Qword,
                 });
 

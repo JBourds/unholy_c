@@ -919,40 +919,38 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
                 "Cannot perform a bitwise or reaminder binary operation on a floating point value."
             );
 
-            let left = if lifted_left_t != left_t.base {
-                ast::Expr::Cast {
-                    target: common_t.clone(),
-                    exp: Box::new(left),
-                }
-            } else {
-                left
-            };
-            let right = if lifted_right_t != right_t.base {
-                ast::Expr::Cast {
-                    target: common_t.clone(),
-                    exp: Box::new(right),
-                }
-            } else {
-                right
-            };
-            let exp = ast::Expr::Binary {
-                op: *op,
-                left: Box::new(left),
-                right: Box::new(right),
-            };
             if op.is_logical() {
-                // Booleans are always represented as integers
-                let target = ast::Type::bool();
                 Ok(TypedExpr {
-                    expr: ast::Expr::Cast {
-                        target: target.clone(),
-                        exp: Box::new(exp),
+                    expr: ast::Expr::Binary {
+                        op: *op,
+                        left: Box::new(left),
+                        right: Box::new(right),
                     },
-                    r#type: target,
+                    r#type: ast::Type::bool(),
                 })
             } else {
+                let left = if lifted_left_t != left_t.base {
+                    ast::Expr::Cast {
+                        target: common_t.clone(),
+                        exp: Box::new(left),
+                    }
+                } else {
+                    left
+                };
+                let right = if lifted_right_t != right_t.base {
+                    ast::Expr::Cast {
+                        target: common_t.clone(),
+                        exp: Box::new(right),
+                    }
+                } else {
+                    right
+                };
                 Ok(TypedExpr {
-                    expr: exp,
+                    expr: ast::Expr::Binary {
+                        op: *op,
+                        left: Box::new(left),
+                        right: Box::new(right),
+                    },
                     r#type: common_t,
                 })
             }

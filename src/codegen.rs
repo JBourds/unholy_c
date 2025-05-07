@@ -1691,6 +1691,10 @@ impl Instruction<Initial> {
                     }
                 }
                 tacky::BinaryOp::Remainder => {
+                    assert!(
+                        !(is_float(&src1, symbols) || is_float(&src2, symbols)),
+                        "Remainder is not allowed on floats"
+                    );
                     let signed_rem = is_signed(&src1, symbols);
                     let src1 = Operand::from_tacky(src1, symbols, float_constants);
                     let op_size = src1.size();

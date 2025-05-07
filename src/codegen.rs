@@ -2070,6 +2070,10 @@ impl Instruction<Initial> {
                     reg: X86Reg::Ax,
                     section: RegSection::Qword,
                 });
+                let eax = Operand::Reg(Reg::X86 {
+                    reg: X86Reg::Ax,
+                    section: RegSection::Dword,
+                });
                 let rdx = Operand::Reg(Reg::X86 {
                     reg: X86Reg::Dx,
                     section: RegSection::Qword,
@@ -2086,6 +2090,19 @@ impl Instruction<Initial> {
 
                 let src = Operand::from_tacky(src, symbols, float_constants);
                 let dst = Operand::from_tacky(dst, symbols, float_constants);
+
+                // Fast path when we are just dealing with unsigned ints
+                let src_type = AssemblyType::from(&src);
+                if matches!(src_type, AssemblyType::Longword) {
+                    return vec![
+                        new_instr(InstructionType::Cvttsd2si {
+                            src: src.clone(),
+                            dst: rax.clone(),
+                        }),
+                        new_instr(InstructionType::Mov { src: eax, dst }),
+                    ];
+                }
+
                 let out_of_range_label = Rc::new(make_label("out_of_range".to_string()));
                 let end_label = Rc::new(make_label("end".to_string()));
 
@@ -2148,6 +2165,19 @@ impl Instruction<Initial> {
 
                 let src = Operand::from_tacky(src, symbols, float_constants);
                 let dst = Operand::from_tacky(dst, symbols, float_constants);
+
+                // Fast path when we are just dealing with unsigned ints
+                let src_type = AssemblyType::from(&src);
+                if matches!(src_type, AssemblyType::Longword) {
+                    return vec![
+                        new_instr(InstructionType::MovZeroExtend {
+                            src: src.clone(),
+                            dst: rax.clone(),
+                        }),
+                        new_instr(InstructionType::Cvtsi2sd { src: rax, dst }),
+                    ];
+                }
+
                 let out_of_range_label = Rc::new(make_label("out_of_range".to_string()));
                 let end_label = Rc::new(make_label("end".to_string()));
 

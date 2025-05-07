@@ -1071,17 +1071,19 @@ impl Instruction<WithStorage> {
         } else {
             dst_type.size_bytes()
         };
+
         let float_src_rewrite = Operand::Reg(Reg::Xmm {
             reg: XmmReg::XMM14,
             section: RegSection::from_size(src_rewrite_size).expect("FIXME"),
         });
-        let float_dst_rewrite = Operand::Reg(Reg::Xmm {
-            reg: XmmReg::XMM15,
-            section: RegSection::from_size(dst_rewrite_size).expect("FIXME"),
-        });
         let int_src_rewrite = Operand::Reg(Reg::X64 {
             reg: X64Reg::R10,
             section: RegSection::from_size(src_rewrite_size).expect("FIXME"),
+        });
+
+        let float_dst_rewrite = Operand::Reg(Reg::Xmm {
+            reg: XmmReg::XMM15,
+            section: RegSection::from_size(dst_rewrite_size).expect("FIXME"),
         });
         let int_dst_rewrite = Operand::Reg(Reg::X64 {
             reg: X64Reg::R11,

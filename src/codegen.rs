@@ -112,7 +112,7 @@ impl From<&Operand> for AssemblyType {
 }
 
 impl AssemblyType {
-    fn uses_xmm_regs(&self) -> bool {
+    pub fn uses_xmm_regs(&self) -> bool {
         matches!(self, Self::Float | Self::Double)
     }
 

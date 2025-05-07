@@ -142,7 +142,7 @@ pub mod x64 {
     fn gen_instruction(w: &mut impl Write, instr: codegen::InstructionType) -> Result<()> {
         match instr {
             codegen::InstructionType::Mov { src, dst } => {
-                let suffix = instr_suffix(codegen::AssemblyType::from(&src));
+                let suffix = instr_suffix(codegen::AssemblyType::from(&dst));
                 let specifier = get_specifier(Some(&src), &dst);
                 w.write_fmt(format_args!("\tmov{suffix} {specifier}{dst}, {src}\n",))?;
             }
@@ -170,7 +170,11 @@ pub mod x64 {
                     }
                     _ => get_specifier(Some(&src), &dst),
                 };
-                let suffix = instr_suffix(codegen::AssemblyType::from(&src));
+                let suffix = match (codegen::AssemblyType::from(&dst), &op) {
+                    (codegen::AssemblyType::Double, codegen::BinaryOp::Xor) => "pd".to_string(),
+                    (codegen::AssemblyType::Float, codegen::BinaryOp::Xor) => "ps".to_string(),
+                    (asm_type, _) => instr_suffix(asm_type),
+                };
                 w.write_fmt(format_args!("\t{op}{suffix} {specifier}{dst}, {src}\n",))?
             }
             codegen::InstructionType::Cdq(section) => match section {
@@ -188,8 +192,13 @@ pub mod x64 {
             }
             codegen::InstructionType::Cmp { src, dst } => {
                 let specifier = get_specifier(Some(&src), &dst);
-                let suffix = instr_suffix(codegen::AssemblyType::from(&src));
-                w.write_fmt(format_args!("\tcmp{suffix} {specifier}{dst}, {src}\n",))?;
+                let asm_type = codegen::AssemblyType::from(&dst);
+                let suffix = instr_suffix(asm_type.clone());
+                if asm_type.uses_xmm_regs() {
+                    w.write_fmt(format_args!("\tcomi{suffix} {specifier}{dst}, {src}\n",))?;
+                } else {
+                    w.write_fmt(format_args!("\tcmp{suffix} {specifier}{dst}, {src}\n",))?;
+                }
             }
             codegen::InstructionType::Jmp(label) => {
                 w.write_fmt(format_args!("\tjmp .L{label}\n",))?;
@@ -252,9 +261,19 @@ pub mod x64 {
             codegen::InstructionType::Call(name) => {
                 w.write_fmt(format_args!("\tcall \"{name}\"@PLT\n"))?;
             }
-            codegen::InstructionType::Cvttsd2si { .. } => todo!(),
-            codegen::InstructionType::Cvtsi2sd { .. } => todo!(),
-            codegen::InstructionType::DivDouble { .. } => todo!(),
+            codegen::InstructionType::Cvttsd2si { src, dst } => {
+                let specifier = get_specifier(None, &src);
+                w.write_fmt(format_args!("\tcvttsd2si {dst}, {specifier}{src}\n"))?;
+            }
+            codegen::InstructionType::Cvtsi2sd { src, dst } => {
+                let specifier = get_specifier(None, &src);
+                w.write_fmt(format_args!("\tcvtsi2sd {dst}, {specifier}{src}\n"))?;
+            }
+            codegen::InstructionType::DivDouble { src, dst } => {
+                let specifier = get_specifier(None, &src);
+                let suffix = instr_suffix(codegen::AssemblyType::from(&dst));
+                w.write_fmt(format_args!("\tdiv{suffix} {specifier}{dst}, {src}\n"))?;
+            }
             codegen::InstructionType::MovZeroExtend { .. } => unreachable!(),
         }
         Ok(())

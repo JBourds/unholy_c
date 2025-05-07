@@ -1009,6 +1009,7 @@ impl ImmRewrite {
 enum MemRewrite {
     Ignore,
     Require,
+    #[allow(dead_code)]
     Error,
 }
 

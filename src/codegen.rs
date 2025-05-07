@@ -1615,26 +1615,35 @@ impl Instruction<Initial> {
                     ]
                 }
                 tacky::BinaryOp::Multiply => {
-                    let src1 = Operand::from_tacky(src1, symbols, float_constants);
-                    let r11 = Operand::Reg(Reg::X64 {
-                        reg: X64Reg::R11,
-                        section: RegSection::from_size(src1.size()).expect("FIXME"),
-                    });
-                    vec![
-                        new_instr(InstructionType::Mov {
-                            src: Operand::from_tacky(src2, symbols, float_constants),
-                            dst: r11.clone(),
-                        }),
-                        new_instr(InstructionType::Binary {
+                    if is_float(&src1, symbols) {
+                        // Gets rewritten later
+                        vec![new_instr(InstructionType::Binary {
                             op: BinaryOp::Multiply,
-                            src: src1,
-                            dst: r11.clone(),
-                        }),
-                        new_instr(InstructionType::Mov {
-                            src: r11,
-                            dst: Operand::from_tacky(dst, symbols, float_constants),
-                        }),
-                    ]
+                            src: Operand::from_tacky(src1, symbols, float_constants),
+                            dst: Operand::from_tacky(src2, symbols, float_constants),
+                        })]
+                    } else {
+                        let src1 = Operand::from_tacky(src1, symbols, float_constants);
+                        let r11 = Operand::Reg(Reg::X64 {
+                            reg: X64Reg::R11,
+                            section: RegSection::from_size(src1.size()).expect("FIXME"),
+                        });
+                        vec![
+                            new_instr(InstructionType::Mov {
+                                src: Operand::from_tacky(src2, symbols, float_constants),
+                                dst: r11.clone(),
+                            }),
+                            new_instr(InstructionType::Binary {
+                                op: BinaryOp::Multiply,
+                                src: src1,
+                                dst: r11.clone(),
+                            }),
+                            new_instr(InstructionType::Mov {
+                                src: r11,
+                                dst: Operand::from_tacky(dst, symbols, float_constants),
+                            }),
+                        ]
+                    }
                 }
                 tacky::BinaryOp::Divide => {
                     // Check for double division

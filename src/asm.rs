@@ -170,12 +170,19 @@ pub mod x64 {
                     }
                     _ => get_specifier(Some(&src), &dst),
                 };
-                let suffix = match (codegen::AssemblyType::from(&dst), &op) {
+                let dst_type = codegen::AssemblyType::from(&dst);
+                let suffix = match (dst_type.clone(), &op) {
                     (codegen::AssemblyType::Double, codegen::BinaryOp::Xor) => "pd".to_string(),
                     (codegen::AssemblyType::Float, codegen::BinaryOp::Xor) => "ps".to_string(),
                     (asm_type, _) => instr_suffix(asm_type),
                 };
-                w.write_fmt(format_args!("\t{op}{suffix} {specifier}{dst}, {src}\n",))?
+                // Multiply has different variants depending on if it is for
+                // floating point numbers or not
+                if matches!(op, codegen::BinaryOp::Multiply) && dst_type.uses_xmm_regs() {
+                    w.write_fmt(format_args!("\tmul{suffix} {specifier}{dst}, {src}\n",))?
+                } else {
+                    w.write_fmt(format_args!("\t{op}{suffix} {specifier}{dst}, {src}\n",))?
+                }
             }
             codegen::InstructionType::Cdq(section) => match section {
                 codegen::RegSection::Dword => w.write_str("\tcdq\n")?,

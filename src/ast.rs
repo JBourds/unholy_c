@@ -1555,6 +1555,38 @@ impl Constant {
             Self::F64(_) => Type::float(self.size_bytes()),
         }
     }
+
+    pub fn const_from_type(r#type: &Type, value: u8) -> Result<Self> {
+        match r#type {
+            _ if *r#type == Constant::I8(value as i8).get_type() => Ok(Constant::I8(value as i8)),
+            _ if *r#type == Constant::I16(value as i16).get_type() => {
+                Ok(Constant::I16(value as i16))
+            }
+            _ if *r#type == Constant::I32(value as i32).get_type() => {
+                Ok(Constant::I32(value as i32))
+            }
+            _ if *r#type == Constant::I64(value as i64).get_type() => {
+                Ok(Constant::I64(value as i64))
+            }
+            _ if *r#type == Constant::U8(value).get_type() => Ok(Constant::U8(value)),
+            _ if *r#type == Constant::U16(value as u16).get_type() => {
+                Ok(Constant::U16(value as u16))
+            }
+            _ if *r#type == Constant::U32(value as u32).get_type() => {
+                Ok(Constant::U32(value as u32))
+            }
+            _ if *r#type == Constant::U64(value as u64).get_type() => {
+                Ok(Constant::U64(value as u64))
+            }
+            _ if *r#type == Constant::F32(value as f32).get_type() => {
+                Ok(Constant::F32(value as f32))
+            }
+            _ if *r#type == Constant::F64(value as f64).get_type() => {
+                Ok(Constant::F64(value as f64))
+            }
+            _ => bail!("Could not create a constant with type {type} and value {value}"),
+        }
+    }
 }
 
 impl std::fmt::Display for Constant {

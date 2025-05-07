@@ -2107,22 +2107,20 @@ impl Instruction<Initial> {
                 let end_label = Rc::new(make_label("end".to_string()));
 
                 vec![
-                    // Not strictly necessary
-                    new_instr(InstructionType::Mov {
-                        src: src.clone(),
-                        dst: xmm14.clone(),
-                    }),
+                    // Let rewrites take care of this later and make sure
+                    // the `dst` is in a register
                     new_instr(InstructionType::Cmp {
                         src: long_max.clone(),
-                        dst: xmm14.clone(),
+                        dst: src.clone(),
                     }),
                     new_instr(InstructionType::JmpCC {
                         cond_code: CondCode::AE,
                         identifier: Rc::clone(&out_of_range_label),
                     }),
+                    // Happy path: No truncation required
                     new_instr(InstructionType::Cvttsd2si {
                         src,
-                        dst: rax.clone(),
+                        dst: dst.clone(),
                     }),
                     new_instr(InstructionType::Jmp(Rc::clone(&end_label))),
                     new_instr(InstructionType::Label(out_of_range_label)),

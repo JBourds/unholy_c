@@ -1162,10 +1162,14 @@ impl Instruction<WithStorage> {
                     dst: float_dst_rewrite.clone(),
                 }));
                 instrs.push(make_op(src, float_dst_rewrite.clone()));
-                instrs.push(Self::from_op(InstructionType::Mov {
-                    src: float_dst_rewrite,
-                    dst,
-                }));
+                // Only move back into the destionation if it is something
+                // which is a viable target (not a constant).
+                if !matches!(dst, Operand::Data { is_const: true, .. }) {
+                    instrs.push(Self::from_op(InstructionType::Mov {
+                        src: float_dst_rewrite,
+                        dst,
+                    }));
+                }
             }
             return instrs;
         }

@@ -1290,38 +1290,13 @@ impl Instruction<WithStorage> {
                     Self::from_op(InstructionType::Mov { src: r11, dst }),
                 ]
             }
-            InstructionType::Cmp {
-                src: src @ Operand::StackOffset { .. } | src @ Operand::Data { .. },
-                dst: dst @ Operand::StackOffset { .. } | dst @ Operand::Data { .. },
-            } => {
-                let r11 = Operand::Reg(Reg::X64 {
-                    reg: X64Reg::R11,
-                    section: RegSection::from_size(dst.size()).expect("FIXME"),
-                });
-                vec![
-                    Self::from_op(InstructionType::Mov {
-                        src,
-                        dst: r11.clone(),
-                    }),
-                    Self::from_op(InstructionType::Cmp { src: r11, dst }),
-                ]
-            }
-            InstructionType::Cmp {
+            InstructionType::Cmp { src, dst } => Self::rewrite_move(
                 src,
-                dst: imm @ Operand::Imm(_),
-            } => {
-                let r11 = Operand::Reg(Reg::X64 {
-                    reg: X64Reg::R11,
-                    section: RegSection::from_size(imm.size()).expect("FIXME"),
-                });
-                vec![
-                    Self::from_op(InstructionType::Mov {
-                        src: imm,
-                        dst: r11.clone(),
-                    }),
-                    Self::from_op(InstructionType::Cmp { src, dst: r11 }),
-                ]
-            }
+                dst,
+                (ImmRewrite::Ignore, MemRewrite::Ignore),
+                (ImmRewrite::Require, MemRewrite::Ignore),
+                |src, dst| Self::from_op(InstructionType::Cmp { src, dst }),
+            ),
             instr => vec![Self::from_op(instr)],
         }
     }

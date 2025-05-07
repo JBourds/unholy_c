@@ -1035,8 +1035,8 @@ impl From<&Constant> for BaseType {
             Constant::I64(_) => Self::int(core::mem::size_of::<i64>(), None),
             Constant::U8(_) => Self::int(core::mem::size_of::<u8>(), None),
             Constant::U16(_) => Self::int(core::mem::size_of::<u16>(), None),
-            Constant::U32(_) => Self::int(core::mem::size_of::<u32>(), None),
-            Constant::U64(_) => Self::int(core::mem::size_of::<u64>(), None),
+            Constant::U32(_) => Self::int(core::mem::size_of::<u32>(), Some(false)),
+            Constant::U64(_) => Self::int(core::mem::size_of::<u64>(), Some(false)),
             Constant::F32(_) => Self::float(false),
             Constant::F64(_) => Self::float(true),
         }

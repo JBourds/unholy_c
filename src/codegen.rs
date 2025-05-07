@@ -1630,12 +1630,26 @@ impl Instruction<Initial> {
                 }
                 tacky::BinaryOp::Multiply => {
                     if is_float(&src1, symbols) {
-                        // Gets rewritten later
-                        vec![new_instr(InstructionType::Binary {
-                            op: BinaryOp::Multiply,
-                            src: Operand::from_tacky(src1, symbols, float_constants),
-                            dst: Operand::from_tacky(src2, symbols, float_constants),
-                        })]
+                        let src1 = Operand::from_tacky(src1, symbols, float_constants);
+                        let xmm14 = Operand::Reg(Reg::Xmm {
+                            reg: XmmReg::XMM14,
+                            section: RegSection::from_size(src1.size()).expect("FIXME"),
+                        });
+                        vec![
+                            new_instr(InstructionType::Mov {
+                                src: Operand::from_tacky(src2, symbols, float_constants),
+                                dst: xmm14.clone(),
+                            }),
+                            new_instr(InstructionType::Binary {
+                                op: BinaryOp::Multiply,
+                                src: src1,
+                                dst: xmm14.clone(),
+                            }),
+                            new_instr(InstructionType::Mov {
+                                src: xmm14,
+                                dst: Operand::from_tacky(dst, symbols, float_constants),
+                            }),
+                        ]
                     } else {
                         let src1 = Operand::from_tacky(src1, symbols, float_constants);
                         let r11 = Operand::Reg(Reg::X64 {

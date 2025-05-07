@@ -1846,16 +1846,40 @@ impl Instruction<Initial> {
                     ]
                 }
             }
-            tacky::Instruction::JumpIfNotZero { condition, target } => vec![
-                new_instr(InstructionType::Cmp {
-                    src: Operand::Imm(ast::Constant::I32(0)),
-                    dst: Operand::from_tacky(condition, symbols, float_constants),
-                }),
-                new_instr(InstructionType::JmpCC {
-                    cond_code: CondCode::NE,
-                    identifier: target,
-                }),
-            ],
+            tacky::Instruction::JumpIfNotZero { condition, target } => {
+                if is_float(&condition, symbols) {
+                    let xmm0 = Reg::Xmm {
+                        reg: XmmReg::XMM0,
+                        section: RegSection::Qword,
+                    };
+                    vec![
+                        new_instr(InstructionType::Binary {
+                            op: BinaryOp::Xor,
+                            src: Operand::Reg(xmm0),
+                            dst: Operand::Reg(xmm0),
+                        }),
+                        new_instr(InstructionType::Cmp {
+                            src: Operand::from_tacky(condition, symbols, float_constants),
+                            dst: Operand::Reg(xmm0),
+                        }),
+                        new_instr(InstructionType::JmpCC {
+                            cond_code: CondCode::NE,
+                            identifier: target,
+                        }),
+                    ]
+                } else {
+                    vec![
+                        new_instr(InstructionType::Cmp {
+                            src: Operand::Imm(ast::Constant::I32(0)),
+                            dst: Operand::from_tacky(condition, symbols, float_constants),
+                        }),
+                        new_instr(InstructionType::JmpCC {
+                            cond_code: CondCode::NE,
+                            identifier: target,
+                        }),
+                    ]
+                }
+            }
             tacky::Instruction::Jump(label) => {
                 vec![new_instr(InstructionType::Jmp(label))]
             }

@@ -704,7 +704,10 @@ impl Expr {
                         instructions.push(Instruction::Binary {
                             op: BinaryOp::Add,
                             src1: val.clone(),
-                            src2: Val::Constant(ast::Constant::I32(1)),
+                            src2: Val::Constant(
+                                ast::Constant::const_from_type(&val.get_type(symbols), 1)
+                                    .expect("UnaryOp type has an ast::Constant equivilent"),
+                            ),
                             dst: val.clone(),
                         });
                         val.clone()
@@ -722,7 +725,10 @@ impl Expr {
                         instructions.push(Instruction::Binary {
                             op: BinaryOp::Add,
                             src1: val.clone(),
-                            src2: Val::Constant(ast::Constant::I32(1)),
+                            src2: Val::Constant(
+                                ast::Constant::const_from_type(&val.get_type(symbols), 1)
+                                    .expect("UnaryOp type has an ast::Constant equivilent"),
+                            ),
                             dst: val.clone(),
                         });
                         dst
@@ -731,7 +737,10 @@ impl Expr {
                         instructions.push(Instruction::Binary {
                             op: BinaryOp::Subtract,
                             src1: val.clone(),
-                            src2: Val::Constant(ast::Constant::I32(1)),
+                            src2: Val::Constant(
+                                ast::Constant::const_from_type(&val.get_type(symbols), 1)
+                                    .expect("UnaryOp type has an ast::Constant equivilent"),
+                            ),
                             dst: val.clone(),
                         });
                         val.clone()
@@ -749,7 +758,10 @@ impl Expr {
                         instructions.push(Instruction::Binary {
                             op: BinaryOp::Subtract,
                             src1: val.clone(),
-                            src2: Val::Constant(ast::Constant::I32(1)),
+                            src2: Val::Constant(
+                                ast::Constant::const_from_type(&val.get_type(symbols), 1)
+                                    .expect("UnaryOp type has an ast::Constant equivilent"),
+                            ),
                             dst: val.clone(),
                         });
                         dst

@@ -1208,23 +1208,19 @@ impl Instruction<WithStorage> {
                     }),
                 ]
             }
-            InstructionType::Binary {
-                op,
-                src: src @ Operand::StackOffset { .. } | src @ Operand::Data { .. },
-                dst: dst @ Operand::StackOffset { .. } | dst @ Operand::Data { .. },
-            } => {
-                let r10 = Operand::Reg(Reg::X64 {
-                    reg: X64Reg::R10,
-                    section: RegSection::from_size(dst.size()).expect("FIXME"),
-                });
-                vec![
-                    Self::from_op(InstructionType::Mov {
+            InstructionType::Binary { op, src, dst } => Self::rewrite_move(
+                src,
+                dst,
+                (ImmRewrite::Ignore, MemRewrite::Ignore),
+                (ImmRewrite::Error, MemRewrite::Ignore),
+                |src, dst| {
+                    Self::from_op(InstructionType::Binary {
+                        op: op.clone(),
                         src,
-                        dst: r10.clone(),
-                    }),
-                    Self::from_op(InstructionType::Binary { op, src: r10, dst }),
-                ]
-            }
+                        dst,
+                    })
+                },
+            ),
             InstructionType::Idiv(src @ Operand::Imm(_)) => {
                 let r10 = Operand::Reg(Reg::X64 {
                     reg: X64Reg::R10,

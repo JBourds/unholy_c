@@ -1213,6 +1213,12 @@ impl Instruction<WithStorage> {
             ),
             InstructionType::MovZeroExtend {
                 src,
+                dst: reg @ Operand::Reg(_),
+            } => {
+                vec![Self::from_op(InstructionType::Mov { src, dst: reg })]
+            }
+            InstructionType::MovZeroExtend {
+                src,
                 dst: dst @ Operand::StackOffset { .. },
             } => {
                 vec![
@@ -1232,7 +1238,6 @@ impl Instruction<WithStorage> {
                     }),
                 ]
             }
-
             InstructionType::Binary { op, src, dst } => Self::rewrite_move(
                 src,
                 dst,

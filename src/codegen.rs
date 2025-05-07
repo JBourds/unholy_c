@@ -112,6 +112,10 @@ impl From<&Operand> for AssemblyType {
 }
 
 impl AssemblyType {
+    fn uses_xmm_regs(&self) -> bool {
+        matches!(self, Self::Float | Self::Double)
+    }
+
     fn from_tacky(val: &tacky::Val, symbols: &tacky::SymbolTable) -> Self {
         Self::from_ast_type(val.get_type(symbols))
     }
@@ -968,6 +972,38 @@ impl Instruction<WithStorage> {
     }
 }
 
+enum ImmRewrite {
+    Ignore,
+    Require,
+    Error,
+}
+
+impl ImmRewrite {
+    fn requires_rewrite(&self, arg: &Operand) -> bool {
+        assert!(
+            !(matches!(self, Self::Error) && arg.is_imm()),
+            "Rewrite rule prohibits the use of an immediate for argument, but found {arg:?}."
+        );
+        matches!(self, Self::Require) && arg.is_imm()
+    }
+}
+
+enum MemRewrite {
+    Ignore,
+    Require,
+    Error,
+}
+
+impl MemRewrite {
+    fn requires_rewrite(&self, arg: &Operand) -> bool {
+        assert!(
+            !(matches!(self, Self::Error) && arg.is_mem()),
+            "Rewrite rule prohibits the use of a memory argument, but found {arg:?}."
+        );
+        matches!(self, Self::Require) && arg.is_mem()
+    }
+}
+
 impl Instruction<WithStorage> {
     fn from_op(op: InstructionType) -> Self {
         Self {
@@ -976,45 +1012,139 @@ impl Instruction<WithStorage> {
         }
     }
 
-    /// Function designed to streamline the process of function's which require
-    /// moving their `dst` argument to a reigster under some condition (e.g.,
-    /// constant, memory address, etc.) by automating scratch register selection
-    /// and then producing the desired op based on the closure
-    /// #strategypattern4life
+    /// General-purpose function designed to streamline all the invariants an
+    /// instruction can have in a declarative way.
+    /// NOTE: Does not have a register rewrite rule since, so far, there are
+    /// no instructions which are not allowed to have register args but can
+    /// have a memory or immediate.
+    ///
+    /// # Arguments
+    ///
+    /// * `src` -  Source operand.
+    /// * `dst` -  Destination operand.
+    /// * `src_rewrites` - Tuple with two enums that dictate what is allowed
+    ///   for an instruction:
+    ///     - Whether an immediate `src` operand is required, can be safely
+    ///       ignored, or if it should signal an error (bug earlier in code)
+    ///     - Same thing but for a memory address `src` operand.
+    /// * `dst_rewrites` - Identical behavior as `src_rewrites` but with the
+    ///   `dst` arg.
+    ///
+    /// # Returns
+    ///
+    /// Vec<Self> - Vector of instructions which uphold desired semantics for
+    /// a given function.
     fn rewrite_move(
         src: Operand,
         dst: Operand,
+        src_rewrites: (ImmRewrite, MemRewrite),
+        dst_rewrites: (ImmRewrite, MemRewrite),
         make_op: impl Fn(Operand, Operand) -> Self,
     ) -> Vec<Self> {
+        // Rewrite registers
+        let src_type = AssemblyType::from(&src);
         let dst_type = AssemblyType::from(&dst);
-        let reg = if matches!(dst_type, AssemblyType::Float | AssemblyType::Double) {
-            Operand::Reg(Reg::Xmm {
-                reg: XmmReg::XMM15,
-                section: RegSection::from_size(dst_type.size_bytes()).expect("FIXME"),
-            })
-        } else {
-            Operand::Reg(Reg::X64 {
-                reg: X64Reg::R10,
-                section: RegSection::from_size(dst_type.size_bytes()).expect("FIXME"),
-            })
-        };
-        vec![
-            Self::from_op(InstructionType::Mov {
+        let float_src_rewrite = Operand::Reg(Reg::Xmm {
+            reg: XmmReg::XMM14,
+            section: RegSection::from_size(dst_type.size_bytes()).expect("FIXME"),
+        });
+        let float_dst_rewrite = Operand::Reg(Reg::Xmm {
+            reg: XmmReg::XMM15,
+            section: RegSection::from_size(dst_type.size_bytes()).expect("FIXME"),
+        });
+        let int_src_rewrite = Operand::Reg(Reg::X64 {
+            reg: X64Reg::R10,
+            section: RegSection::from_size(dst_type.size_bytes()).expect("FIXME"),
+        });
+        let int_dst_rewrite = Operand::Reg(Reg::X64 {
+            reg: X64Reg::R11,
+            section: RegSection::from_size(dst_type.size_bytes()).expect("FIXME"),
+        });
+
+        let mut instrs = vec![];
+
+        // Step 1. Rewrite immediate values which are not allowed to be immediates
+
+        // Rewrite the `src` and `dst` operands if they cannot be immediates
+        // but are by using the designated rewrite registers
+        let src = if src_rewrites.0.requires_rewrite(&src) {
+            let rewrite_reg = if src_type.uses_xmm_regs() {
+                float_src_rewrite
+            } else {
+                int_src_rewrite.clone()
+            };
+            instrs.push(Self::from_op(InstructionType::Mov {
                 src,
-                dst: reg.clone(),
-            }),
-            make_op(reg, dst),
-        ]
+                dst: rewrite_reg.clone(),
+            }));
+            rewrite_reg
+        } else {
+            src
+        };
+
+        let dst = if dst_rewrites.0.requires_rewrite(&dst) {
+            let rewrite_reg = if dst_type.uses_xmm_regs() {
+                float_dst_rewrite.clone()
+            } else {
+                int_dst_rewrite
+            };
+            instrs.push(Self::from_op(InstructionType::Mov {
+                src: dst,
+                dst: rewrite_reg.clone(),
+            }));
+            rewrite_reg
+        } else {
+            dst
+        };
+
+        // Step 2. Rewrite memory address values where they are not allowed
+        //  - SSE instructions cannot have memory address destinations, don't
+        //      even check the `MemRewrite` rule for it.
+        //  - Integer instructions cannot use two memory address locations.
+        //      - Certain instructions (e.g., `movsx` cannot have memory
+        //      locations for destinations, check rewrite rule for those.
+
+        if dst_type.uses_xmm_regs() {
+            if dst.is_reg() {
+                instrs.push(make_op(src, dst));
+            } else {
+                instrs.push(Self::from_op(InstructionType::Mov {
+                    src: dst.clone(),
+                    dst: float_dst_rewrite.clone(),
+                }));
+                instrs.push(make_op(src, float_dst_rewrite.clone()));
+                instrs.push(Self::from_op(InstructionType::Mov {
+                    src: float_dst_rewrite,
+                    dst,
+                }));
+            }
+        } else {
+            let rewrite_required =
+                dst_rewrites.1.requires_rewrite(&dst) || (src.is_mem() && dst.is_mem());
+
+            let src = if rewrite_required {
+                instrs.push(Self::from_op(InstructionType::Mov {
+                    src,
+                    dst: int_src_rewrite.clone(),
+                }));
+                int_src_rewrite
+            } else {
+                src
+            };
+            instrs.push(make_op(src, dst));
+        }
+        instrs
     }
 
     fn fixup_stack_vars(self) -> Vec<Self> {
         match self.op {
-            InstructionType::Mov {
-                src: src @ Operand::StackOffset { .. } | src @ Operand::Data { .. },
-                dst: dst @ Operand::StackOffset { .. } | dst @ Operand::Data { .. },
-            } => Self::rewrite_move(src, dst, |src, dst| {
-                Self::from_op(InstructionType::Mov { src, dst })
-            }),
+            InstructionType::Mov { src, dst } => Self::rewrite_move(
+                src,
+                dst,
+                (ImmRewrite::Ignore, MemRewrite::Ignore),
+                (ImmRewrite::Error, MemRewrite::Ignore),
+                |src, dst| Self::from_op(InstructionType::Mov { src, dst }),
+            ),
             InstructionType::Movsx { src, dst } => {
                 let (src, src_instrs) = match src {
                     src @ Operand::Imm(..) => {
@@ -1082,13 +1212,19 @@ impl Instruction<WithStorage> {
                 op,
                 src: src @ Operand::StackOffset { .. } | src @ Operand::Data { .. },
                 dst: dst @ Operand::StackOffset { .. } | dst @ Operand::Data { .. },
-            } => Self::rewrite_move(src, dst, |src, dst| {
-                Self::from_op(InstructionType::Binary {
-                    op: op.clone(),
-                    src,
-                    dst,
-                })
-            }),
+            } => {
+                let r10 = Operand::Reg(Reg::X64 {
+                    reg: X64Reg::R10,
+                    section: RegSection::from_size(dst.size()).expect("FIXME"),
+                });
+                vec![
+                    Self::from_op(InstructionType::Mov {
+                        src,
+                        dst: r10.clone(),
+                    }),
+                    Self::from_op(InstructionType::Binary { op, src: r10, dst }),
+                ]
+            }
             InstructionType::Idiv(src @ Operand::Imm(_)) => {
                 let r10 = Operand::Reg(Reg::X64 {
                     reg: X64Reg::R10,
@@ -1161,9 +1297,19 @@ impl Instruction<WithStorage> {
             InstructionType::Cmp {
                 src: src @ Operand::StackOffset { .. } | src @ Operand::Data { .. },
                 dst: dst @ Operand::StackOffset { .. } | dst @ Operand::Data { .. },
-            } => Self::rewrite_move(src, dst, |src, dst| {
-                Self::from_op(InstructionType::Cmp { src, dst })
-            }),
+            } => {
+                let r11 = Operand::Reg(Reg::X64 {
+                    reg: X64Reg::R11,
+                    section: RegSection::from_size(dst.size()).expect("FIXME"),
+                });
+                vec![
+                    Self::from_op(InstructionType::Mov {
+                        src,
+                        dst: r11.clone(),
+                    }),
+                    Self::from_op(InstructionType::Cmp { src: r11, dst }),
+                ]
+            }
             InstructionType::Cmp {
                 src,
                 dst: imm @ Operand::Imm(_),
@@ -1198,7 +1344,7 @@ impl Instruction<WithStorage> {
                 dst,
             } if src.size() > 4 => {
                 assert!(
-                    !matches!(dst, Operand::Imm(..)),
+                    !dst.is_imm(),
                     "The destination of an immediate in addition should have already been resolved"
                 );
                 let r10 = Operand::Reg(Reg::X64 {
@@ -1218,7 +1364,7 @@ impl Instruction<WithStorage> {
                 dst,
             } if src.size() > 4 => {
                 assert!(
-                    !matches!(dst, Operand::Imm(..)),
+                    !dst.is_imm(),
                     "The destination of an immediate in addition should have already been resolved"
                 );
                 let r10 = Operand::Reg(Reg::X64 {
@@ -2125,6 +2271,18 @@ impl Operand {
             Self::StackOffset { size, .. } => *size,
             Self::Data { size, .. } => *size,
         }
+    }
+
+    fn is_reg(&self) -> bool {
+        matches!(self, Self::Reg(_))
+    }
+
+    fn is_imm(&self) -> bool {
+        matches!(self, Self::Imm(_))
+    }
+
+    fn is_mem(&self) -> bool {
+        !(self.is_reg() || self.is_imm())
     }
 
     fn from_tacky(

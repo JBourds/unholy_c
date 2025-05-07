@@ -2074,17 +2074,9 @@ impl Instruction<Initial> {
                     reg: X86Reg::Ax,
                     section: RegSection::Dword,
                 });
-                let rdx = Operand::Reg(Reg::X86 {
-                    reg: X86Reg::Dx,
-                    section: RegSection::Qword,
-                });
 
                 let xmm14 = Operand::Reg(Reg::Xmm {
                     reg: XmmReg::XMM14,
-                    section: RegSection::Qword,
-                });
-                let xmm15 = Operand::Reg(Reg::Xmm {
-                    reg: XmmReg::XMM15,
                     section: RegSection::Qword,
                 });
 
@@ -2119,31 +2111,34 @@ impl Instruction<Initial> {
                     }),
                     // Happy path: No truncation required
                     new_instr(InstructionType::Cvttsd2si {
-                        src,
+                        src: src.clone(),
                         dst: dst.clone(),
                     }),
                     new_instr(InstructionType::Jmp(Rc::clone(&end_label))),
                     new_instr(InstructionType::Label(out_of_range_label)),
+                    new_instr(InstructionType::Mov {
+                        src,
+                        dst: xmm14.clone(),
+                    }),
                     new_instr(InstructionType::Binary {
                         op: BinaryOp::Subtract,
                         src: long_max,
-                        dst: xmm15.clone(),
+                        dst: xmm14.clone(),
                     }),
                     new_instr(InstructionType::Cvttsd2si {
-                        src: xmm15.clone(),
-                        dst: rax.clone(),
+                        src: xmm14.clone(),
+                        dst: dst.clone(),
                     }),
                     new_instr(InstructionType::Mov {
                         src: Operand::Imm(ast::Constant::U64(u64::MAX)),
-                        dst: rdx.clone(),
+                        dst: rax.clone(),
                     }),
                     new_instr(InstructionType::Binary {
                         op: BinaryOp::Add,
-                        src: rdx,
-                        dst: rax.clone(),
+                        src: rax.clone(),
+                        dst: dst.clone(),
                     }),
                     new_instr(InstructionType::Label(end_label)),
-                    new_instr(InstructionType::Mov { src: rax, dst }),
                 ]
             }
             tacky::Instruction::UIntToDouble { src, dst } => {
@@ -2153,11 +2148,6 @@ impl Instruction<Initial> {
                 });
                 let rdx = Operand::Reg(Reg::X86 {
                     reg: X86Reg::Dx,
-                    section: RegSection::Qword,
-                });
-
-                let xmm14 = Operand::Reg(Reg::Xmm {
-                    reg: XmmReg::XMM14,
                     section: RegSection::Qword,
                 });
 
@@ -2182,19 +2172,15 @@ impl Instruction<Initial> {
                 vec![
                     new_instr(InstructionType::Cmp {
                         src: make_zero(dst.size(), false),
-                        dst: dst.clone(),
+                        dst: src.clone(),
                     }),
                     new_instr(InstructionType::JmpCC {
                         cond_code: CondCode::L,
                         identifier: Rc::clone(&out_of_range_label),
                     }),
                     // Explicitly zero out bytes here
-                    new_instr(InstructionType::MovZeroExtend {
-                        src: src.clone(),
-                        dst: rax.clone(),
-                    }),
                     new_instr(InstructionType::Cvtsi2sd {
-                        src: rax.clone(),
+                        src: src.clone(),
                         dst: dst.clone(),
                     }),
                     new_instr(InstructionType::Jmp(Rc::clone(&end_label))),
@@ -2224,12 +2210,12 @@ impl Instruction<Initial> {
                     }),
                     new_instr(InstructionType::Cvtsi2sd {
                         src: rdx,
-                        dst: xmm14.clone(),
+                        dst: dst.clone(),
                     }),
                     new_instr(InstructionType::Binary {
                         op: BinaryOp::Add,
-                        src: xmm14.clone(),
-                        dst: xmm14,
+                        src: dst.clone(),
+                        dst: dst.clone(),
                     }),
                     new_instr(InstructionType::Label(end_label)),
                 ]

@@ -1115,7 +1115,7 @@ impl Instruction<WithStorage> {
             let rewrite_reg = if dst_type.uses_xmm_regs() {
                 float_dst_rewrite.clone()
             } else {
-                int_dst_rewrite
+                int_dst_rewrite.clone()
             };
             instrs.push(Self::from_op(InstructionType::Mov {
                 src: dst,
@@ -1133,6 +1133,7 @@ impl Instruction<WithStorage> {
         //      - Certain instructions (e.g., `movsx` cannot have memory
         //      locations for destinations, check rewrite rule for those.
 
+        // Case 1: Floating point values
         if dst_type.uses_xmm_regs() {
             if dst.is_reg() {
                 instrs.push(make_op(src, dst));
@@ -1147,21 +1148,32 @@ impl Instruction<WithStorage> {
                     dst,
                 }));
             }
-        } else {
-            let rewrite_required =
-                dst_rewrites.mem_rule.requires_rewrite(&dst) || (src.is_mem() && dst.is_mem());
+            return instrs;
+        }
 
-            let src = if rewrite_required {
-                instrs.push(Self::from_op(InstructionType::Mov {
-                    src,
-                    dst: int_src_rewrite.clone(),
-                }));
-                int_src_rewrite
-            } else {
-                src
-            };
+        // Case 2: Integers
+        if dst_rewrites.mem_rule.requires_rewrite(&dst) {
+            // Case 1: The operation needs to happen on a register, so we
+            // do the operation on said register then move it into place
+            instrs.push(make_op(src, int_dst_rewrite.clone()));
+            instrs.push(Self::from_op(InstructionType::Mov {
+                src: int_dst_rewrite.clone(),
+                dst,
+            }));
+        } else if src.is_mem() && dst.is_mem() {
+            // Case 2: Both operands are memory addresses. This is never
+            // okay, so we move into the rewrite register then make the op
+            // on the destination
+            instrs.push(Self::from_op(InstructionType::Mov {
+                src,
+                dst: int_src_rewrite.clone(),
+            }));
+            instrs.push(make_op(int_src_rewrite.clone(), dst));
+        } else {
+            // Case 3: Happy path. Nothing more needs to be done.
             instrs.push(make_op(src, dst));
         }
+
         instrs
     }
 
@@ -1174,48 +1186,13 @@ impl Instruction<WithStorage> {
                 RewriteRule::new(ImmRewrite::Error, MemRewrite::Ignore, false),
                 |src, dst| Self::from_op(InstructionType::Mov { src, dst }),
             ),
-            InstructionType::Movsx { src, dst } => {
-                let (src, src_instrs) = match src {
-                    src @ Operand::Imm(..) => {
-                        let r10 = Operand::Reg(Reg::X64 {
-                            reg: X64Reg::R10,
-                            section: RegSection::from_size(src.size()).expect("FIXME"),
-                        });
-
-                        let instrs = vec![Self::from_op(InstructionType::Mov {
-                            src,
-                            dst: r10.clone(),
-                        })];
-                        (r10, instrs)
-                    }
-                    src => (src, vec![]),
-                };
-
-                let (dst, dst_instrs) = match dst {
-                    dst @ Operand::StackOffset { .. } | dst @ Operand::Data { .. } => {
-                        let r11 = Operand::Reg(Reg::X64 {
-                            reg: X64Reg::R11,
-                            section: RegSection::from_size(dst.size()).expect("FIXME"),
-                        });
-
-                        let instrs = vec![Self::from_op(InstructionType::Mov {
-                            src: r11.clone(),
-                            dst,
-                        })];
-                        (r11, instrs)
-                    }
-                    dst => (dst, vec![]),
-                };
-
-                let mut instrs = vec![];
-                instrs.extend(src_instrs);
-
-                instrs.push(Self::from_op(InstructionType::Movsx { src, dst }));
-
-                instrs.extend(dst_instrs);
-
-                instrs
-            }
+            InstructionType::Movsx { src, dst } => Self::rewrite_move(
+                src,
+                dst,
+                RewriteRule::new(ImmRewrite::Require, MemRewrite::Ignore, false),
+                RewriteRule::new(ImmRewrite::Error, MemRewrite::Require, false),
+                |src, dst| Self::from_op(InstructionType::Movsx { src, dst }),
+            ),
             InstructionType::MovZeroExtend {
                 src,
                 dst: dst @ Operand::StackOffset { .. },
@@ -1237,6 +1214,7 @@ impl Instruction<WithStorage> {
                     }),
                 ]
             }
+
             InstructionType::Binary { op, src, dst } => Self::rewrite_move(
                 src,
                 dst,

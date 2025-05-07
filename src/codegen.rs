@@ -1004,6 +1004,28 @@ impl MemRewrite {
     }
 }
 
+/// Struct encapsulating the rules for performing rewrites
+/// * `imm_rule` - Rule for when the operand is an immedate.
+/// * `mem_rule` - Rule for when the operand is a memory address.
+/// * `use_other_op_size` - Flag for whether the rewrite register should use
+///   its respective size or the other operand's size. (e.g., `Mov` will only
+///   use the `dst` size, but `Movsx` each uses their own.
+struct RewriteRule {
+    imm_rule: ImmRewrite,
+    mem_rule: MemRewrite,
+    use_other_op_size: bool,
+}
+
+impl RewriteRule {
+    fn new(imm_rule: ImmRewrite, mem_rule: MemRewrite, use_other_op_size: bool) -> Self {
+        Self {
+            imm_rule,
+            mem_rule,
+            use_other_op_size,
+        }
+    }
+}
+
 impl Instruction<WithStorage> {
     fn from_op(op: InstructionType) -> Self {
         Self {
@@ -1022,13 +1044,8 @@ impl Instruction<WithStorage> {
     ///
     /// * `src` -  Source operand.
     /// * `dst` -  Destination operand.
-    /// * `src_rewrites` - Tuple with two enums that dictate what is allowed
-    ///   for an instruction:
-    ///     - Whether an immediate `src` operand is required, can be safely
-    ///       ignored, or if it should signal an error (bug earlier in code)
-    ///     - Same thing but for a memory address `src` operand.
-    /// * `dst_rewrites` - Identical behavior as `src_rewrites` but with the
-    ///   `dst` arg.
+    /// * `src_rewrites` - Struct containing information on how to rewrite ops.
+    /// * `dst_rewrites` - Struct containing information on how to rewrite ops.
     ///
     /// # Returns
     ///
@@ -1037,28 +1054,38 @@ impl Instruction<WithStorage> {
     fn rewrite_move(
         src: Operand,
         dst: Operand,
-        src_rewrites: (ImmRewrite, MemRewrite),
-        dst_rewrites: (ImmRewrite, MemRewrite),
+        src_rewrites: RewriteRule,
+        dst_rewrites: RewriteRule,
         make_op: impl Fn(Operand, Operand) -> Self,
     ) -> Vec<Self> {
         // Rewrite registers
         let src_type = AssemblyType::from(&src);
         let dst_type = AssemblyType::from(&dst);
+        let src_rewrite_size = if src_rewrites.use_other_op_size {
+            dst_type.size_bytes()
+        } else {
+            src_type.size_bytes()
+        };
+        let dst_rewrite_size = if dst_rewrites.use_other_op_size {
+            src_type.size_bytes()
+        } else {
+            dst_type.size_bytes()
+        };
         let float_src_rewrite = Operand::Reg(Reg::Xmm {
             reg: XmmReg::XMM14,
-            section: RegSection::from_size(dst_type.size_bytes()).expect("FIXME"),
+            section: RegSection::from_size(src_rewrite_size).expect("FIXME"),
         });
         let float_dst_rewrite = Operand::Reg(Reg::Xmm {
             reg: XmmReg::XMM15,
-            section: RegSection::from_size(dst_type.size_bytes()).expect("FIXME"),
+            section: RegSection::from_size(dst_rewrite_size).expect("FIXME"),
         });
         let int_src_rewrite = Operand::Reg(Reg::X64 {
             reg: X64Reg::R10,
-            section: RegSection::from_size(dst_type.size_bytes()).expect("FIXME"),
+            section: RegSection::from_size(src_rewrite_size).expect("FIXME"),
         });
         let int_dst_rewrite = Operand::Reg(Reg::X64 {
             reg: X64Reg::R11,
-            section: RegSection::from_size(dst_type.size_bytes()).expect("FIXME"),
+            section: RegSection::from_size(dst_rewrite_size).expect("FIXME"),
         });
 
         let mut instrs = vec![];
@@ -1067,7 +1094,7 @@ impl Instruction<WithStorage> {
 
         // Rewrite the `src` and `dst` operands if they cannot be immediates
         // but are by using the designated rewrite registers
-        let src = if src_rewrites.0.requires_rewrite(&src) {
+        let src = if src_rewrites.imm_rule.requires_rewrite(&src) {
             let rewrite_reg = if src_type.uses_xmm_regs() {
                 float_src_rewrite
             } else {
@@ -1082,7 +1109,7 @@ impl Instruction<WithStorage> {
             src
         };
 
-        let dst = if dst_rewrites.0.requires_rewrite(&dst) {
+        let dst = if dst_rewrites.imm_rule.requires_rewrite(&dst) {
             let rewrite_reg = if dst_type.uses_xmm_regs() {
                 float_dst_rewrite.clone()
             } else {
@@ -1120,7 +1147,7 @@ impl Instruction<WithStorage> {
             }
         } else {
             let rewrite_required =
-                dst_rewrites.1.requires_rewrite(&dst) || (src.is_mem() && dst.is_mem());
+                dst_rewrites.mem_rule.requires_rewrite(&dst) || (src.is_mem() && dst.is_mem());
 
             let src = if rewrite_required {
                 instrs.push(Self::from_op(InstructionType::Mov {
@@ -1141,8 +1168,8 @@ impl Instruction<WithStorage> {
             InstructionType::Mov { src, dst } => Self::rewrite_move(
                 src,
                 dst,
-                (ImmRewrite::Ignore, MemRewrite::Ignore),
-                (ImmRewrite::Error, MemRewrite::Ignore),
+                RewriteRule::new(ImmRewrite::Ignore, MemRewrite::Ignore, true),
+                RewriteRule::new(ImmRewrite::Error, MemRewrite::Ignore, false),
                 |src, dst| Self::from_op(InstructionType::Mov { src, dst }),
             ),
             InstructionType::Movsx { src, dst } => {
@@ -1211,8 +1238,8 @@ impl Instruction<WithStorage> {
             InstructionType::Binary { op, src, dst } => Self::rewrite_move(
                 src,
                 dst,
-                (ImmRewrite::Ignore, MemRewrite::Ignore),
-                (ImmRewrite::Error, MemRewrite::Ignore),
+                RewriteRule::new(ImmRewrite::Ignore, MemRewrite::Ignore, true),
+                RewriteRule::new(ImmRewrite::Error, MemRewrite::Ignore, false),
                 |src, dst| {
                     Self::from_op(InstructionType::Binary {
                         op: op.clone(),
@@ -1293,8 +1320,8 @@ impl Instruction<WithStorage> {
             InstructionType::Cmp { src, dst } => Self::rewrite_move(
                 src,
                 dst,
-                (ImmRewrite::Ignore, MemRewrite::Ignore),
-                (ImmRewrite::Require, MemRewrite::Ignore),
+                RewriteRule::new(ImmRewrite::Ignore, MemRewrite::Ignore, true),
+                RewriteRule::new(ImmRewrite::Require, MemRewrite::Ignore, false),
                 |src, dst| Self::from_op(InstructionType::Cmp { src, dst }),
             ),
             instr => vec![Self::from_op(instr)],

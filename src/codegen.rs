@@ -1254,49 +1254,20 @@ impl Instruction<WithStorage> {
                     Self::from_op(InstructionType::Div(r10)),
                 ]
             }
-            InstructionType::Cvtsi2sd {
-                src:
-                    src @ Operand::Imm(_)
-                    | src @ Operand::StackOffset { .. }
-                    | src @ Operand::Data { .. },
-                dst: dst @ Operand::StackOffset { .. } | dst @ Operand::Data { .. },
-            } => {
-                let r11 = Operand::Reg(Reg::X64 {
-                    reg: X64Reg::R11,
-                    section: RegSection::from_size(src.size()).expect("FIXME"),
-                });
-                let xmm15 = Operand::Reg(Reg::Xmm {
-                    reg: XmmReg::XMM15,
-                    section: RegSection::from_size(src.size()).expect("FIXME"),
-                });
-                vec![
-                    Self::from_op(InstructionType::Mov {
-                        src,
-                        dst: r11.clone(),
-                    }),
-                    Self::from_op(InstructionType::Cvtsi2sd {
-                        src: r11,
-                        dst: xmm15.clone(),
-                    }),
-                    Self::from_op(InstructionType::Mov { src: xmm15, dst }),
-                ]
-            }
-            InstructionType::Cvttsd2si {
-                src: src @ Operand::StackOffset { .. } | src @ Operand::Data { .. },
-                dst: dst @ Operand::StackOffset { .. } | dst @ Operand::Data { .. },
-            } => {
-                let r11 = Operand::Reg(Reg::X64 {
-                    reg: X64Reg::R11,
-                    section: RegSection::from_size(src.size()).expect("FIXME"),
-                });
-                vec![
-                    Self::from_op(InstructionType::Cvttsd2si {
-                        src,
-                        dst: r11.clone(),
-                    }),
-                    Self::from_op(InstructionType::Mov { src: r11, dst }),
-                ]
-            }
+            InstructionType::Cvtsi2sd { src, dst } => Self::rewrite_move(
+                src,
+                dst,
+                RewriteRule::new(ImmRewrite::Require, MemRewrite::Ignore, false),
+                RewriteRule::new(ImmRewrite::Error, MemRewrite::Require, true),
+                |src, dst| Self::from_op(InstructionType::Cvtsi2sd { src, dst }),
+            ),
+            InstructionType::Cvttsd2si { src, dst } => Self::rewrite_move(
+                src,
+                dst,
+                RewriteRule::new(ImmRewrite::Require, MemRewrite::Ignore, false),
+                RewriteRule::new(ImmRewrite::Error, MemRewrite::Require, true),
+                |src, dst| Self::from_op(InstructionType::Cvttsd2si { src, dst }),
+            ),
             InstructionType::Cmp { src, dst } => Self::rewrite_move(
                 src,
                 dst,

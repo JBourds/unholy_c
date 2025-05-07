@@ -1007,6 +1007,7 @@ impl ImmRewrite {
 }
 
 enum MemRewrite {
+    Ignore,
     Default,
     UseAndStore,
     UseNoStore,
@@ -1150,6 +1151,7 @@ impl Instruction<WithStorage> {
         //  - int: Make sure there aren't two memory operands, perform `src`
         //    rewrite as needed.
         let dst_rewrite_rule =
+            // `Default` for XMM regs is to require a register in the operand
             if dst_type.uses_xmm_regs() && matches!(dst_rewrites.mem_rule, MemRewrite::Default) {
                 MemRewrite::UseAndStore
             } else {
@@ -1187,7 +1189,7 @@ impl Instruction<WithStorage> {
                     dst: dst.clone(),
                 }));
             }
-            MemRewrite::Default => {
+            MemRewrite::Default | MemRewrite::Ignore => {
                 // No instruction can use two memory addresses.
                 // This case means a memory address is valid in the second
                 // argument, but that we just can't have both.
@@ -1213,7 +1215,7 @@ impl Instruction<WithStorage> {
                 src,
                 dst,
                 RewriteRule::new(ImmRewrite::Ignore, MemRewrite::Default, true),
-                RewriteRule::new(ImmRewrite::Error, MemRewrite::Default, false),
+                RewriteRule::new(ImmRewrite::Error, MemRewrite::Ignore, false),
                 |src, dst| Self::from_op(InstructionType::Mov { src, dst }),
             ),
             InstructionType::Movsx { src, dst } => Self::rewrite_move(

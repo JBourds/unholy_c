@@ -1007,20 +1007,12 @@ impl ImmRewrite {
 }
 
 enum MemRewrite {
-    Ignore,
-    Require,
+    Default,
+    UseAndStore,
+    UseNoStore,
+    StoreNoUse,
     #[allow(dead_code)]
     Error,
-}
-
-impl MemRewrite {
-    fn requires_rewrite(&self, arg: &Operand) -> bool {
-        assert!(
-            !(matches!(self, Self::Error) && arg.is_mem()),
-            "Rewrite rule prohibits the use of a memory argument, but found {arg:?}."
-        );
-        matches!(self, Self::Require) && arg.is_mem()
-    }
 }
 
 /// Struct encapsulating the rules for performing rewrites
@@ -1146,55 +1138,70 @@ impl Instruction<WithStorage> {
         };
 
         // Step 2. Rewrite memory address values where they are not allowed
-        //  - SSE instructions cannot have memory address destinations, don't
-        //      even check the `MemRewrite` rule for it.
-        //  - Integer instructions cannot use two memory address locations.
-        //      - Certain instructions (e.g., `movsx` cannot have memory
-        //      locations for destinations, check rewrite rule for those.
 
-        // Case 1: Floating point values
-        if dst_type.uses_xmm_regs() {
-            if dst.is_reg() {
-                instrs.push(make_op(src, dst));
+        // Happy path: Always good
+        if dst.is_reg() {
+            instrs.push(make_op(src, dst));
+            return instrs;
+        }
+        // Ignore dispatches differently based on float vs. int
+        //  - float: Behaves like `UseAndStore` (needs a register in the `dst`
+        //    but will also use the value again.
+        //  - int: Make sure there aren't two memory operands, perform `src`
+        //    rewrite as needed.
+        let dst_rewrite_rule =
+            if dst_type.uses_xmm_regs() && matches!(dst_rewrites.mem_rule, MemRewrite::Default) {
+                MemRewrite::UseAndStore
             } else {
+                dst_rewrites.mem_rule
+            };
+
+        // Check for necessary rewrites
+        match dst_rewrite_rule {
+            MemRewrite::UseNoStore => {
+                // E.g., When doing a `cmp` the `dst` won't be touched but it
+                // needs to be put into a register
                 instrs.push(Self::from_op(InstructionType::Mov {
                     src: dst.clone(),
                     dst: dst_rewrite_reg.clone(),
                 }));
-                instrs.push(make_op(src, dst_rewrite_reg.clone()));
-                // Only move back into the destionation if it is something
-                // which is a viable target (not a constant).
-                if !matches!(dst, Operand::Data { is_const: true, .. }) {
+                instrs.push(make_op(src.clone(), dst_rewrite_reg.clone()));
+            }
+            MemRewrite::StoreNoUse => {
+                // E.g., When converting int to double the `dst` operand is just
+                // where result needs to end up
+                instrs.push(make_op(src.clone(), dst_rewrite_reg.clone()));
+                instrs.push(Self::from_op(InstructionType::Mov {
+                    src: dst_rewrite_reg.clone(),
+                    dst: dst.clone(),
+                }));
+            }
+            MemRewrite::UseAndStore => {
+                instrs.push(Self::from_op(InstructionType::Mov {
+                    src: dst.clone(),
+                    dst: dst_rewrite_reg.clone(),
+                }));
+                instrs.push(make_op(src.clone(), dst_rewrite_reg.clone()));
+                instrs.push(Self::from_op(InstructionType::Mov {
+                    src: dst_rewrite_reg.clone(),
+                    dst: dst.clone(),
+                }));
+            }
+            MemRewrite::Default => {
+                // No instruction can use two memory addresses.
+                // This case means a memory address is valid in the second
+                // argument, but that we just can't have both.
+                if src.is_mem() && dst.is_mem() {
                     instrs.push(Self::from_op(InstructionType::Mov {
-                        src: dst_rewrite_reg,
-                        dst,
+                        src,
+                        dst: src_rewrite_reg.clone(),
                     }));
+                    instrs.push(make_op(src_rewrite_reg.clone(), dst));
+                } else {
+                    instrs.push(make_op(src, dst));
                 }
             }
-            return instrs;
-        }
-
-        // Case 2: Integers
-        if dst_rewrites.mem_rule.requires_rewrite(&dst) {
-            // Case 1: The operation needs to happen on a register, so we
-            // do the operation on said register then move it into place
-            instrs.push(make_op(src, dst_rewrite_reg.clone()));
-            instrs.push(Self::from_op(InstructionType::Mov {
-                src: dst_rewrite_reg.clone(),
-                dst,
-            }));
-        } else if src.is_mem() && dst.is_mem() {
-            // Case 2: Both operands are memory addresses. This is never
-            // okay, so we move into the rewrite register then make the op
-            // on the destination
-            instrs.push(Self::from_op(InstructionType::Mov {
-                src,
-                dst: src_rewrite_reg.clone(),
-            }));
-            instrs.push(make_op(src_rewrite_reg.clone(), dst));
-        } else {
-            // Case 3: Happy path. Nothing more needs to be done.
-            instrs.push(make_op(src, dst));
+            MemRewrite::Error => unreachable!(),
         }
 
         instrs
@@ -1205,15 +1212,15 @@ impl Instruction<WithStorage> {
             InstructionType::Mov { src, dst } => Self::rewrite_move(
                 src,
                 dst,
-                RewriteRule::new(ImmRewrite::Ignore, MemRewrite::Ignore, true),
-                RewriteRule::new(ImmRewrite::Error, MemRewrite::Ignore, false),
+                RewriteRule::new(ImmRewrite::Ignore, MemRewrite::Default, true),
+                RewriteRule::new(ImmRewrite::Error, MemRewrite::Default, false),
                 |src, dst| Self::from_op(InstructionType::Mov { src, dst }),
             ),
             InstructionType::Movsx { src, dst } => Self::rewrite_move(
                 src,
                 dst,
-                RewriteRule::new(ImmRewrite::Require, MemRewrite::Ignore, false),
-                RewriteRule::new(ImmRewrite::Error, MemRewrite::Require, false),
+                RewriteRule::new(ImmRewrite::Require, MemRewrite::Default, false),
+                RewriteRule::new(ImmRewrite::Error, MemRewrite::StoreNoUse, false),
                 |src, dst| Self::from_op(InstructionType::Movsx { src, dst }),
             ),
             InstructionType::MovZeroExtend {
@@ -1246,8 +1253,8 @@ impl Instruction<WithStorage> {
             InstructionType::Binary { op, src, dst } => Self::rewrite_move(
                 src,
                 dst,
-                RewriteRule::new(ImmRewrite::Ignore, MemRewrite::Ignore, true),
-                RewriteRule::new(ImmRewrite::Error, MemRewrite::Ignore, false),
+                RewriteRule::new(ImmRewrite::Ignore, MemRewrite::Default, true),
+                RewriteRule::new(ImmRewrite::Error, MemRewrite::Default, false),
                 |src, dst| {
                     Self::from_op(InstructionType::Binary {
                         op: op.clone(),
@@ -1285,22 +1292,22 @@ impl Instruction<WithStorage> {
             InstructionType::Cvtsi2sd { src, dst } => Self::rewrite_move(
                 src,
                 dst,
-                RewriteRule::new(ImmRewrite::Require, MemRewrite::Ignore, false),
-                RewriteRule::new(ImmRewrite::Error, MemRewrite::Require, true),
+                RewriteRule::new(ImmRewrite::Require, MemRewrite::Default, false),
+                RewriteRule::new(ImmRewrite::Error, MemRewrite::StoreNoUse, true),
                 |src, dst| Self::from_op(InstructionType::Cvtsi2sd { src, dst }),
             ),
             InstructionType::Cvttsd2si { src, dst } => Self::rewrite_move(
                 src,
                 dst,
-                RewriteRule::new(ImmRewrite::Require, MemRewrite::Ignore, false),
-                RewriteRule::new(ImmRewrite::Error, MemRewrite::Require, false),
+                RewriteRule::new(ImmRewrite::Require, MemRewrite::Default, false),
+                RewriteRule::new(ImmRewrite::Error, MemRewrite::StoreNoUse, false),
                 |src, dst| Self::from_op(InstructionType::Cvttsd2si { src, dst }),
             ),
             InstructionType::Cmp { src, dst } => Self::rewrite_move(
                 src,
                 dst,
-                RewriteRule::new(ImmRewrite::Ignore, MemRewrite::Ignore, true),
-                RewriteRule::new(ImmRewrite::Require, MemRewrite::Ignore, false),
+                RewriteRule::new(ImmRewrite::Ignore, MemRewrite::Default, true),
+                RewriteRule::new(ImmRewrite::Require, MemRewrite::UseNoStore, false),
                 |src, dst| Self::from_op(InstructionType::Cmp { src, dst }),
             ),
             instr => vec![Self::from_op(instr)],

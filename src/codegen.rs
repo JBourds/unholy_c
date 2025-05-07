@@ -1091,23 +1091,33 @@ impl Instruction<WithStorage> {
             dst_type.size_bytes()
         };
 
-        let float_src_rewrite = Operand::Reg(Reg::Xmm {
-            reg: XmmReg::XMM14,
-            section: RegSection::from_size(src_rewrite_size).expect("FIXME"),
-        });
-        let int_src_rewrite = Operand::Reg(Reg::X64 {
-            reg: X64Reg::R10,
-            section: RegSection::from_size(src_rewrite_size).expect("FIXME"),
-        });
+        // Step 1. Rewrite immediate values which are not allowed to be immediates
 
-        let float_dst_rewrite = Operand::Reg(Reg::Xmm {
-            reg: XmmReg::XMM15,
-            section: RegSection::from_size(dst_rewrite_size).expect("FIXME"),
-        });
-        let int_dst_rewrite = Operand::Reg(Reg::X64 {
-            reg: X64Reg::R11,
-            section: RegSection::from_size(dst_rewrite_size).expect("FIXME"),
-        });
+        // Rewrite the `src` and `dst` operands if they cannot be immediates
+        // but are by using the designated rewrite registers
+        let src_rewrite_reg = if src_type.uses_xmm_regs() {
+            Operand::Reg(Reg::Xmm {
+                reg: XmmReg::XMM14,
+                section: RegSection::from_size(src_rewrite_size).expect("FIXME"),
+            })
+        } else {
+            Operand::Reg(Reg::X64 {
+                reg: X64Reg::R10,
+                section: RegSection::from_size(src_rewrite_size).expect("FIXME"),
+            })
+        };
+
+        let dst_rewrite_reg = if dst_type.uses_xmm_regs() {
+            Operand::Reg(Reg::Xmm {
+                reg: XmmReg::XMM15,
+                section: RegSection::from_size(dst_rewrite_size).expect("FIXME"),
+            })
+        } else {
+            Operand::Reg(Reg::X64 {
+                reg: X64Reg::R11,
+                section: RegSection::from_size(dst_rewrite_size).expect("FIXME"),
+            })
+        };
 
         let mut instrs = vec![];
 
@@ -1116,31 +1126,21 @@ impl Instruction<WithStorage> {
         // Rewrite the `src` and `dst` operands if they cannot be immediates
         // but are by using the designated rewrite registers
         let src = if src_rewrites.imm_rule.requires_rewrite(&src) {
-            let rewrite_reg = if src_type.uses_xmm_regs() {
-                float_src_rewrite
-            } else {
-                int_src_rewrite.clone()
-            };
             instrs.push(Self::from_op(InstructionType::Mov {
                 src,
-                dst: rewrite_reg.clone(),
+                dst: src_rewrite_reg.clone(),
             }));
-            rewrite_reg
+            src_rewrite_reg.clone()
         } else {
             src
         };
 
         let dst = if dst_rewrites.imm_rule.requires_rewrite(&dst) {
-            let rewrite_reg = if dst_type.uses_xmm_regs() {
-                float_dst_rewrite.clone()
-            } else {
-                int_dst_rewrite.clone()
-            };
             instrs.push(Self::from_op(InstructionType::Mov {
                 src: dst,
-                dst: rewrite_reg.clone(),
+                dst: dst_rewrite_reg.clone(),
             }));
-            rewrite_reg
+            dst_rewrite_reg.clone()
         } else {
             dst
         };
@@ -1159,14 +1159,14 @@ impl Instruction<WithStorage> {
             } else {
                 instrs.push(Self::from_op(InstructionType::Mov {
                     src: dst.clone(),
-                    dst: float_dst_rewrite.clone(),
+                    dst: dst_rewrite_reg.clone(),
                 }));
-                instrs.push(make_op(src, float_dst_rewrite.clone()));
+                instrs.push(make_op(src, dst_rewrite_reg.clone()));
                 // Only move back into the destionation if it is something
                 // which is a viable target (not a constant).
                 if !matches!(dst, Operand::Data { is_const: true, .. }) {
                     instrs.push(Self::from_op(InstructionType::Mov {
-                        src: float_dst_rewrite,
+                        src: dst_rewrite_reg,
                         dst,
                     }));
                 }
@@ -1178,9 +1178,9 @@ impl Instruction<WithStorage> {
         if dst_rewrites.mem_rule.requires_rewrite(&dst) {
             // Case 1: The operation needs to happen on a register, so we
             // do the operation on said register then move it into place
-            instrs.push(make_op(src, int_dst_rewrite.clone()));
+            instrs.push(make_op(src, dst_rewrite_reg.clone()));
             instrs.push(Self::from_op(InstructionType::Mov {
-                src: int_dst_rewrite.clone(),
+                src: dst_rewrite_reg.clone(),
                 dst,
             }));
         } else if src.is_mem() && dst.is_mem() {
@@ -1189,9 +1189,9 @@ impl Instruction<WithStorage> {
             // on the destination
             instrs.push(Self::from_op(InstructionType::Mov {
                 src,
-                dst: int_src_rewrite.clone(),
+                dst: src_rewrite_reg.clone(),
             }));
-            instrs.push(make_op(int_src_rewrite.clone(), dst));
+            instrs.push(make_op(src_rewrite_reg.clone(), dst));
         } else {
             // Case 3: Happy path. Nothing more needs to be done.
             instrs.push(make_op(src, dst));

@@ -1538,7 +1538,7 @@ impl Instruction<Initial> {
                 }
             }
             tacky::Instruction::Unary { op, src, dst } => {
-                if is_float(&src, symbols) && matches!(op, tacky::UnaryOp::Not) {
+                if is_float(&src, symbols) && matches!(op, tacky::UnaryOp::Negate) {
                     #[allow(clippy::borrow_interior_mutable_const)]
                     let neg_zero =
                         LazyCell::<Rc<String>>::force(&StaticConstant::NEGATIVE_ZERO).clone();

@@ -1562,6 +1562,32 @@ impl Instruction<Initial> {
                         }),
                     ];
                 }
+                if is_float(&src, symbols) && matches!(op, tacky::UnaryOp::Not) {
+                    let dst = Operand::from_tacky(dst, symbols, float_constants);
+                    let xmm14 = Operand::Reg(Reg::Xmm {
+                        reg: XmmReg::XMM14,
+                        section: RegSection::Qword,
+                    });
+                    return vec![
+                        new_instr(InstructionType::Binary {
+                            op: BinaryOp::Xor,
+                            src: xmm14.clone(),
+                            dst: xmm14.clone(),
+                        }),
+                        new_instr(InstructionType::Cmp {
+                            src: Operand::from_tacky(src, symbols, float_constants),
+                            dst: xmm14,
+                        }),
+                        new_instr(InstructionType::Mov {
+                            src: make_zero(dst.size(), false),
+                            dst: dst.clone(),
+                        }),
+                        new_instr(InstructionType::SetCC {
+                            cond_code: CondCode::E,
+                            dst,
+                        }),
+                    ];
+                }
 
                 match op {
                     tacky::UnaryOp::Not => vec![

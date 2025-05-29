@@ -2214,9 +2214,15 @@ impl Instruction<Initial> {
                     return vec![
                         new_instr(InstructionType::MovZeroExtend {
                             src: src.clone(),
-                            dst: rax.clone(),
+                            dst: Operand::Reg(Reg::X86 {
+                                reg: X86Reg::Ax,
+                                section: RegSection::Dword,
+                            }),
                         }),
-                        new_instr(InstructionType::Cvtsi2sd { src: rax, dst }),
+                        new_instr(InstructionType::Cvtsi2sd {
+                            src: rax.clone(),
+                            dst,
+                        }),
                     ];
                 }
 

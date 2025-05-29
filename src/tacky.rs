@@ -766,10 +766,21 @@ impl Expr {
                         });
                         dst
                     }
+                    ast::UnaryOp::Not => {
+                        let dst = Function::make_tacky_temp_var(
+                            ast::Type::int(4, None),
+                            symbols,
+                            make_temp_var,
+                        );
+                        instructions.push(Instruction::Unary {
+                            op: UnaryOp::from(op),
+                            src: val,
+                            dst: dst.clone(),
+                        });
+                        dst
+                    }
                     // Other operations have tacky unary op equivalents
                     _ => {
-                        // FIXME: This may not be the correct type.
-                        // Does type promotion happen explicitly in ast/sema?
                         let dst = Function::make_tacky_temp_var(
                             val.get_type(symbols),
                             symbols,

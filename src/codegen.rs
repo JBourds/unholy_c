@@ -179,6 +179,7 @@ pub enum TopLevel {
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct StaticConstant {
     pub id: Rc<String>,
+    pub val: FpNumber,
     pub alignment: usize,
 }
 
@@ -192,18 +193,32 @@ impl StaticConstant {
                 + 1
         ))
     });
+    const LONG_MAX_VAL: f64 = 9223372036854776000f64;
+
     #[allow(clippy::declare_interior_mutable_const)]
     const NEGATIVE_ZERO: LazyCell<Rc<String>> = LazyCell::new(|| Rc::new("-0.0".to_string()));
 
-    fn new(id: Rc<String>, alignment: usize) -> Self {
-        Self { id, alignment }
+    fn new(id: Rc<String>, val: FpNumber, alignment: usize) -> Self {
+        Self { id, val, alignment }
     }
+
+    fn with_alignment(self, alignment: usize) -> Self {
+        Self { alignment, ..self }
+    }
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+pub enum FpNumber {
+    F32(u32),
+    F64(u64),
 }
 
 impl From<f32> for StaticConstant {
     fn from(value: f32) -> Self {
+        let val = u32::from_ne_bytes(value.to_ne_bytes());
         Self::new(
-            Rc::new(format!("{value:.32}")),
+            Rc::new(ryu::Buffer::new().format(value).to_string()),
+            FpNumber::F32(val),
             core::mem::align_of::<f32>(),
         )
     }
@@ -211,8 +226,10 @@ impl From<f32> for StaticConstant {
 
 impl From<f64> for StaticConstant {
     fn from(value: f64) -> Self {
+        let val = u64::from_ne_bytes(value.to_ne_bytes());
         Self::new(
-            Rc::new(format!("{value:.64}")),
+            Rc::new(ryu::Buffer::new().format(value).to_string()),
+            FpNumber::F64(val),
             core::mem::align_of::<f64>(),
         )
     }
@@ -1543,7 +1560,7 @@ impl Instruction<Initial> {
                     let neg_zero =
                         LazyCell::<Rc<String>>::force(&StaticConstant::NEGATIVE_ZERO).clone();
                     // Super special 16-byte alignemnt needed here for SSE
-                    float_constants.insert(StaticConstant::new(neg_zero.clone(), 16));
+                    float_constants.insert(StaticConstant::from(-0.0).with_alignment(16));
                     let dst = Operand::from_tacky(dst, symbols, float_constants);
                     return vec![
                         new_instr(InstructionType::Mov {
@@ -2109,10 +2126,7 @@ impl Instruction<Initial> {
                 //      3. Add (LONG_MAX + 1) back to the value
                 #[allow(clippy::borrow_interior_mutable_const)]
                 let long_max = LazyCell::<Rc<String>>::force(&StaticConstant::LONG_MAX).clone();
-                float_constants.insert(StaticConstant::new(
-                    Rc::clone(&long_max),
-                    core::mem::align_of::<f64>(),
-                ));
+                float_constants.insert(StaticConstant::from(StaticConstant::LONG_MAX_VAL));
                 let long_max = Operand::Data {
                     name: long_max,
                     size: core::mem::align_of::<f64>(),

@@ -48,7 +48,10 @@ pub mod x64 {
         w.write_str("\t.section .rodata\n")?;
         w.write_fmt(format_args!("\t.align {}\n", constant.alignment))?;
         w.write_fmt(format_args!("\".L_{}\":\n", constant.id))?;
-        w.write_fmt(format_args!("\t.double {}\n\n", constant.id))?;
+        match constant.val {
+            codegen::FpNumber::F32(val) => w.write_fmt(format_args!("\t.long {}\n\n", val))?,
+            codegen::FpNumber::F64(val) => w.write_fmt(format_args!("\t.quad {}\n\n", val))?,
+        }
         Ok(())
     }
 

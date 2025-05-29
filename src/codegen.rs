@@ -726,6 +726,7 @@ pub enum CondCode {
     AE,
     B,
     BE,
+    P,
 }
 
 impl fmt::Display for CondCode {
@@ -741,6 +742,7 @@ impl fmt::Display for CondCode {
             Self::AE => write!(f, "ae"),
             Self::B => write!(f, "b"),
             Self::BE => write!(f, "be"),
+            Self::P => write!(f, "p"),
         }
     }
 }
@@ -1862,20 +1864,21 @@ impl Instruction<Initial> {
                     }));
                     v
                 }
-                tacky::BinaryOp::Equal
-                | tacky::BinaryOp::NotEqual
-                | tacky::BinaryOp::LessThan
-                | tacky::BinaryOp::LessOrEqual
-                | tacky::BinaryOp::GreaterThan
-                | tacky::BinaryOp::GreaterOrEqual => {
+                op @ tacky::BinaryOp::Equal
+                | op @ tacky::BinaryOp::NotEqual
+                | op @ tacky::BinaryOp::LessThan
+                | op @ tacky::BinaryOp::LessOrEqual
+                | op @ tacky::BinaryOp::GreaterThan
+                | op @ tacky::BinaryOp::GreaterOrEqual => {
                     // Unsigned integers and doubles both set the CF and ZF
                     // when doing comparisons
+                    let float_cmp = is_float(&src1, symbols);
                     assert!(
-                        is_float(&src1, symbols) == is_float(&src2, symbols),
+                        float_cmp == is_float(&src2, symbols),
                         "Either both operators should be floats or neither should be floats."
                     );
                     let use_cf_zf_cmp = !is_signed(&src1, symbols) || is_float(&src2, symbols);
-                    vec![
+                    let mut instrs = vec![
                         new_instr(InstructionType::Cmp {
                             src: Operand::from_tacky(src2, symbols, float_constants),
                             dst: Operand::from_tacky(src1, symbols, float_constants),
@@ -1889,7 +1892,8 @@ impl Instruction<Initial> {
                             dst: {
                                 // FIXME: Since SetCC takes a byte value we must manually
                                 // fixup the stack location size
-                                let dst = Operand::from_tacky(dst, symbols, float_constants);
+                                let dst =
+                                    Operand::from_tacky(dst.clone(), symbols, float_constants);
                                 match dst {
                                     Operand::Pseudo { name, .. } => Operand::Pseudo {
                                         name,
@@ -1900,7 +1904,34 @@ impl Instruction<Initial> {
                                 }
                             },
                         }),
-                    ]
+                    ];
+                    if float_cmp {
+                        let ecx = Operand::Reg(Reg::X86 {
+                            reg: X86Reg::Cx,
+                            section: RegSection::Dword,
+                        });
+
+                        instrs.extend(vec![
+                            new_instr(InstructionType::Mov {
+                                src: Operand::Imm(ast::Constant::I32(0)),
+                                dst: ecx.clone(),
+                            }),
+                            new_instr(InstructionType::SetCC {
+                                cond_code: CondCode::P,
+                                dst: ecx.clone(),
+                            }),
+                            new_instr(InstructionType::Binary {
+                                op: if op == tacky::BinaryOp::NotEqual {
+                                    BinaryOp::BitOr
+                                } else {
+                                    BinaryOp::Shr
+                                },
+                                src: ecx,
+                                dst: Operand::from_tacky(dst, symbols, float_constants),
+                            }),
+                        ]);
+                    }
+                    instrs
                 }
                 _ => unimplemented!(),
             },

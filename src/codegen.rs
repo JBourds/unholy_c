@@ -2138,8 +2138,8 @@ impl Instruction<Initial> {
                 let dst = Operand::from_tacky(dst, symbols, float_constants);
 
                 // Fast path when we are just dealing with unsigned ints
-                let src_type = AssemblyType::from(&src);
-                if matches!(src_type, AssemblyType::Longword) {
+                let dst_type = AssemblyType::from(&dst);
+                if matches!(dst_type, AssemblyType::Longword) {
                     return vec![
                         new_instr(InstructionType::Cvttsd2si {
                             src: src.clone(),

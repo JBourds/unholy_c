@@ -149,6 +149,17 @@ pub mod x64 {
                 let specifier = get_specifier(Some(&src), &dst);
                 w.write_fmt(format_args!("\tmov{suffix} {specifier}{dst}, {src}\n",))?;
             }
+            codegen::InstructionType::CMovCC {
+                src,
+                dst,
+                cond_code,
+            } => {
+                let suffix = instr_suffix(codegen::AssemblyType::from(&dst));
+                let specifier = get_specifier(Some(&src), &dst);
+                w.write_fmt(format_args!(
+                    "\tcmov{cond_code}{suffix} {specifier}{dst}, {src}\n",
+                ))?;
+            }
             codegen::InstructionType::Movsx { src, dst } => {
                 w.write_fmt(format_args!(
                     "\tmovslq {}{dst}, {src}\n",

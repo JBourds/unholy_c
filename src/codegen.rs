@@ -714,7 +714,7 @@ impl fmt::Display for Reg {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum CondCode {
     E,
     NE,
@@ -797,6 +797,11 @@ pub enum InstructionType {
     Mov {
         src: Operand,
         dst: Operand,
+    },
+    CMovCC {
+        src: Operand,
+        dst: Operand,
+        cond_code: CondCode,
     },
     Movsx {
         src: Operand,
@@ -946,6 +951,15 @@ impl Instruction<WithStorage> {
                 InstructionType::Mov { src, dst } => InstructionType::Mov {
                     src: convert_operand_offset(src),
                     dst: convert_operand_offset(dst),
+                },
+                InstructionType::CMovCC {
+                    src,
+                    dst,
+                    cond_code,
+                } => InstructionType::CMovCC {
+                    src: convert_operand_offset(src),
+                    dst: convert_operand_offset(dst),
+                    cond_code,
                 },
                 InstructionType::Movsx { src, dst } => InstructionType::Movsx {
                     src: convert_operand_offset(src),
@@ -1227,6 +1241,23 @@ impl Instruction<WithStorage> {
                 RewriteRule::new(ImmRewrite::Ignore, MemRewrite::Default, true),
                 RewriteRule::new(ImmRewrite::Error, MemRewrite::Ignore, false),
                 |src, dst| Self::from_op(InstructionType::Mov { src, dst }),
+            ),
+            InstructionType::CMovCC {
+                src,
+                dst,
+                cond_code,
+            } => Self::rewrite_move(
+                src,
+                dst,
+                RewriteRule::new(ImmRewrite::Require, MemRewrite::Default, true),
+                RewriteRule::new(ImmRewrite::Error, MemRewrite::UseAndStore, false),
+                |src, dst| {
+                    Self::from_op(InstructionType::CMovCC {
+                        src,
+                        dst,
+                        cond_code,
+                    })
+                },
             ),
             InstructionType::Movsx { src, dst } => Self::rewrite_move(
                 src,
@@ -1553,10 +1584,11 @@ impl Instruction<Initial> {
                     let neg_zero = float_constant.id();
                     // Super special 16-byte alignemnt needed here for SSE
                     float_constants.insert(float_constant);
+                    let src = Operand::from_tacky(src, symbols, float_constants);
                     let dst = Operand::from_tacky(dst, symbols, float_constants);
                     return vec![
                         new_instr(InstructionType::Mov {
-                            src: Operand::from_tacky(src, symbols, float_constants),
+                            src: src.clone(),
                             dst: dst.clone(),
                         }),
                         new_instr(InstructionType::Binary {
@@ -1569,6 +1601,7 @@ impl Instruction<Initial> {
                             },
                             dst,
                         }),
+                        new_instr(InstructionType::Cmp { src: (), dst: () }),
                     ];
                 }
                 if is_float(&src, symbols) && matches!(op, tacky::UnaryOp::Not) {
@@ -1906,30 +1939,15 @@ impl Instruction<Initial> {
                         }),
                     ];
                     if float_cmp {
-                        let ecx = Operand::Reg(Reg::X86 {
-                            reg: X86Reg::Cx,
-                            section: RegSection::Dword,
-                        });
-
-                        instrs.extend(vec![
-                            new_instr(InstructionType::Mov {
-                                src: Operand::Imm(ast::Constant::I32(0)),
-                                dst: ecx.clone(),
-                            }),
-                            new_instr(InstructionType::SetCC {
-                                cond_code: CondCode::P,
-                                dst: ecx.clone(),
-                            }),
-                            new_instr(InstructionType::Binary {
-                                op: if op == tacky::BinaryOp::NotEqual {
-                                    BinaryOp::BitOr
-                                } else {
-                                    BinaryOp::Shr
-                                },
-                                src: ecx,
-                                dst: Operand::from_tacky(dst, symbols, float_constants),
-                            }),
-                        ]);
+                        instrs.extend(vec![new_instr(InstructionType::CMovCC {
+                            src: if op == tacky::BinaryOp::NotEqual {
+                                Operand::Imm(ast::Constant::I32(1))
+                            } else {
+                                Operand::Imm(ast::Constant::I32(0))
+                            },
+                            dst: Operand::from_tacky(dst, symbols, float_constants),
+                            cond_code: CondCode::P,
+                        })]);
                     }
                     instrs
                 }

@@ -1601,7 +1601,6 @@ impl Instruction<Initial> {
                             },
                             dst,
                         }),
-                        new_instr(InstructionType::Cmp { src: (), dst: () }),
                     ];
                 }
                 if is_float(&src, symbols) && matches!(op, tacky::UnaryOp::Not) {

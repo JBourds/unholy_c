@@ -1978,6 +1978,10 @@ impl Instruction<Initial> {
                             src: Operand::from_tacky(condition, symbols, float_constants),
                             dst: Operand::Reg(xmm0),
                         }),
+                        new_instr(InstructionType::JmpCCRel {
+                            cond_code: CondCode::P,
+                            offset: 4,
+                        }),
                         new_instr(InstructionType::JmpCC {
                             cond_code: CondCode::E,
                             identifier: target,

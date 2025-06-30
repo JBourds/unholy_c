@@ -230,6 +230,9 @@ pub mod x64 {
             } => {
                 w.write_fmt(format_args!("\tj{cond_code} .L{identifier}\n",))?;
             }
+            codegen::InstructionType::JmpCCRel { cond_code, offset } => {
+                w.write_fmt(format_args!("\tj{cond_code} .{offset:+}\n",))?;
+            }
             codegen::InstructionType::SetCC { cond_code, dst } => {
                 let dst = match dst {
                     codegen::Operand::Reg(r) => {

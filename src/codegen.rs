@@ -832,6 +832,10 @@ pub enum InstructionType {
         cond_code: CondCode,
         identifier: Rc<String>,
     },
+    JmpCCRel {
+        cond_code: CondCode,
+        offset: i32,
+    },
     SetCC {
         cond_code: CondCode,
         dst: Operand,
@@ -1004,6 +1008,7 @@ impl Instruction<WithStorage> {
                 instr @ InstructionType::Cdq(_) => instr,
                 instr @ InstructionType::Jmp(_) => instr,
                 instr @ InstructionType::JmpCC { .. } => instr,
+                instr @ InstructionType::JmpCCRel { .. } => instr,
                 instr @ InstructionType::Label(_) => instr,
                 instr @ InstructionType::Pop(_) => instr,
                 instr @ InstructionType::Call(_) => instr,

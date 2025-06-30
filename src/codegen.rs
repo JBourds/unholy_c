@@ -1625,7 +1625,12 @@ impl Instruction<Initial> {
                         }),
                         new_instr(InstructionType::SetCC {
                             cond_code: CondCode::E,
+                            dst: dst.clone(),
+                        }),
+                        new_instr(InstructionType::CMovCC {
+                            src: Operand::Imm(ast::Constant::I32(0)),
                             dst,
+                            cond_code: CondCode::P,
                         }),
                     ];
                 }

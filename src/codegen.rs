@@ -2017,6 +2017,10 @@ impl Instruction<Initial> {
                             dst: Operand::Reg(xmm0),
                         }),
                         new_instr(InstructionType::JmpCC {
+                            cond_code: CondCode::P,
+                            identifier: Rc::clone(&target),
+                        }),
+                        new_instr(InstructionType::JmpCC {
                             cond_code: CondCode::NE,
                             identifier: target,
                         }),

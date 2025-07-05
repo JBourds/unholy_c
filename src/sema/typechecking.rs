@@ -166,6 +166,8 @@ impl InitialValue {
             ast::Constant::U16(val) => Ok(InitialValue::Initial(val.to_ne_bytes().to_vec().into())),
             ast::Constant::U32(val) => Ok(InitialValue::Initial(val.to_ne_bytes().to_vec().into())),
             ast::Constant::U64(val) => Ok(InitialValue::Initial(val.to_ne_bytes().to_vec().into())),
+            ast::Constant::F32(val) => Ok(InitialValue::Initial(val.to_ne_bytes().to_vec().into())),
+            ast::Constant::F64(val) => Ok(InitialValue::Initial(val.to_ne_bytes().to_vec().into())),
         }
     }
 
@@ -785,6 +787,7 @@ fn try_implicit_cast(
         right_t.base.can_assign_to(&target.base),
         "Incompatible types. Cannot assign value of type {right_t:#?} to value of type {target:#?}"
     );
+
     if right_t != *target {
         Ok(ast::Expr::Cast {
             target: ast::Type {
@@ -825,6 +828,7 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
                 r#type: left_t,
             } = typecheck_expr(lvalue, symbols)
                 .context("Failed to typecheck lvalue in assignment.")?;
+
             // FIXME: Lazy clone :(
             Ok(TypedExpr {
                 expr: ast::Expr::Assignment {
@@ -841,6 +845,18 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
         ast::Expr::Unary { op, expr } => {
             let TypedExpr { expr, r#type } = typecheck_expr(expr, symbols)
                 .context("Failed to typecheck nested unary expression.")?;
+            ensure!(
+                !(op.is_bitwise()
+                    && matches!(
+                        r#type,
+                        ast::Type {
+                            base: ast::BaseType::Float(_) | ast::BaseType::Double(_),
+                            ptr: None,
+                            ..
+                        }
+                    )),
+                "Cannot perform a bitwise unary operation on a floating point value."
+            );
             Ok(TypedExpr {
                 expr: ast::Expr::Unary {
                     op: *op,
@@ -862,7 +878,37 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
             } = typecheck_expr(right, symbols)
                 .context("Failed to typecheck righthand argument of binary operation.")?;
 
+            let (lifted_left_t, lifted_right_t) =
+                ast::BaseType::lift(left_t.base.clone(), right_t.base.clone())
+                    .context("Unable to promote {left_t:#?} and {right_t:#?} to a common type.")?;
+
+            // With a binary expression, we force both operands to be of
+            // the same type so the decision between left or right is
+            // arbitrary
+            let common_t = ast::Type {
+                base: lifted_left_t.clone(),
+                storage: None,
+                is_const: true,
+                alignment: std::cmp::max(left_t.alignment, right_t.alignment),
+                ..right_t
+            };
+
+            ensure!(
+                !(op.is_bitwise()
+                    | matches!(op, ast::BinaryOp::Remainder | ast::BinaryOp::ModAssign)
+                    && matches!(
+                        common_t,
+                        ast::Type {
+                            base: ast::BaseType::Float(_) | ast::BaseType::Double(_),
+                            ptr: None,
+                            ..
+                        }
+                    )),
+                "Cannot perform a bitwise or reaminder binary operation on a floating point value."
+            );
+
             // Bitshifts do not upcast, and are just the type of the LHS
+            // assuming that it is a valid shift (not a float)
             if matches!(op, ast::BinaryOp::LShift | ast::BinaryOp::RShift) {
                 return Ok(TypedExpr {
                     expr: ast::Expr::Binary {
@@ -874,52 +920,38 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
                 });
             }
 
-            let (lifted_left_t, lifted_right_t) =
-                ast::BaseType::lift(left_t.base.clone(), right_t.base.clone())
-                    .context("Unable to promote {left_t:#?} and {right_t:#?} to a common type.")?;
-            // With a binary expression, we force both operands to be of
-            // the same type so the decision between left or right is
-            // arbitrary
-            let common_t = ast::Type {
-                base: lifted_left_t.clone(),
-                storage: None,
-                is_const: true,
-                ..left_t
-            };
-            let left = if lifted_left_t != left_t.base {
-                ast::Expr::Cast {
-                    target: common_t.clone(),
-                    exp: Box::new(left),
-                }
-            } else {
-                left
-            };
-            let right = if lifted_right_t != right_t.base {
-                ast::Expr::Cast {
-                    target: common_t.clone(),
-                    exp: Box::new(right),
-                }
-            } else {
-                right
-            };
-            let exp = ast::Expr::Binary {
-                op: *op,
-                left: Box::new(left),
-                right: Box::new(right),
-            };
             if op.is_logical() {
-                // Booleans are always represented as integers
-                let target = ast::Type::bool();
                 Ok(TypedExpr {
-                    expr: ast::Expr::Cast {
-                        target: target.clone(),
-                        exp: Box::new(exp),
+                    expr: ast::Expr::Binary {
+                        op: *op,
+                        left: Box::new(left),
+                        right: Box::new(right),
                     },
-                    r#type: target,
+                    r#type: ast::Type::bool(),
                 })
             } else {
+                let left = if lifted_left_t != left_t.base {
+                    ast::Expr::Cast {
+                        target: common_t.clone(),
+                        exp: Box::new(left),
+                    }
+                } else {
+                    left
+                };
+                let right = if lifted_right_t != right_t.base {
+                    ast::Expr::Cast {
+                        target: common_t.clone(),
+                        exp: Box::new(right),
+                    }
+                } else {
+                    right
+                };
                 Ok(TypedExpr {
-                    expr: exp,
+                    expr: ast::Expr::Binary {
+                        op: *op,
+                        left: Box::new(left),
+                        right: Box::new(right),
+                    },
                     r#type: common_t,
                 })
             }
@@ -934,36 +966,38 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
             let condition = Box::new(try_implicit_cast(&target, condition, symbols).context(
                 "Unable to implicitly cast ternary expression condition into a boolean value.",
             )?);
+
             let TypedExpr {
                 expr: then_expr,
                 r#type: then_type,
             } = typecheck_expr(then, symbols)
                 .context("Failed to typecheck ternay expression then branch.")?;
+
             let TypedExpr {
                 expr: else_expr,
                 r#type: else_type,
             } = typecheck_expr(r#else, symbols)
                 .context("Failed to typecheck ternay expression else branch.")?;
+
             let (then_base, _) = ast::BaseType::lift(then_type.base.clone(), else_type.base)
                 .context("Ternary expression branches evaluate to different types.")?;
             let common_type = ast::Type {
                 base: then_base,
+                alignment: std::cmp::max(then_type.alignment, else_type.alignment),
                 ..then_type.clone()
             };
-            let then = Box::new(ast::Expr::Cast {
-                target: common_type.clone(),
-                exp: Box::new(then_expr),
-            });
-            let r#else = Box::new(ast::Expr::Cast {
-                target: common_type,
-                exp: Box::new(else_expr),
-            });
+
+            let then = try_implicit_cast(&common_type, &then_expr, symbols)
+                .context("Unable to implicitly cast \"then\" branch of ternary expression to its common type {common_type:?}")?;
+            let r#else = try_implicit_cast(&common_type, &else_expr, symbols)
+                .context("Unable to implicitly cast \"else\" branch of ternary expression to its common type {common_type:?}")?;
+
             // Find common type between then and else
             Ok(TypedExpr {
                 expr: ast::Expr::Conditional {
                     condition,
-                    then,
-                    r#else,
+                    then: Box::new(then),
+                    r#else: Box::new(r#else),
                 },
                 r#type: then_type,
             })
@@ -1006,10 +1040,28 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
             }
             _ => bail!("Could not find symbol with name {name}."),
         },
-        expr @ ast::Expr::Cast { target, .. } => Ok(TypedExpr {
-            expr: expr.clone(),
-            r#type: target.clone(),
-        }),
+        ast::Expr::Cast { target, exp } => {
+            let TypedExpr { expr, r#type } =
+                typecheck_expr(exp, symbols).context("Failed to typecheck casted expression.")?;
+            ensure!(
+                r#type.base.can_assign_to(&target.base) && r#type.ptr == target.ptr,
+                "Unable to cast from {type:?} to {target:?}"
+            );
+
+            let expr = if *target != r#type {
+                ast::Expr::Cast {
+                    target: target.clone(),
+                    exp: Box::new(expr),
+                }
+            } else {
+                expr
+            };
+
+            Ok(TypedExpr {
+                expr,
+                r#type: target.clone(),
+            })
+        }
         expr @ ast::Expr::Constant(constant) => Ok(TypedExpr {
             expr: expr.clone(),
             r#type: ast::Type {

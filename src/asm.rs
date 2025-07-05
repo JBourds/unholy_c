@@ -35,7 +35,8 @@ pub mod x64 {
         for entry in program.top_level.into_iter() {
             match entry {
                 codegen::TopLevel::Fun(f) => gen_function(w, f)?,
-                codegen::TopLevel::Static(v) => gen_static(w, v, &program.symbols)?,
+                codegen::TopLevel::StaticVariable(v) => gen_static_var(w, v, &program.symbols)?,
+                codegen::TopLevel::StaticConstant(v) => gen_static_const(w, v)?,
             }
         }
 
@@ -43,7 +44,18 @@ pub mod x64 {
         Ok(())
     }
 
-    fn gen_static(
+    fn gen_static_const(w: &mut impl Write, constant: codegen::StaticConstant) -> Result<()> {
+        w.write_str("\t.section .rodata\n")?;
+        w.write_fmt(format_args!("\t.align {}\n", constant.alignment))?;
+        w.write_fmt(format_args!("\".L_{}\":\n", constant.id))?;
+        match constant.val {
+            codegen::FpNumber::F32(val) => w.write_fmt(format_args!("\t.long {}\n\n", val))?,
+            codegen::FpNumber::F64(val) => w.write_fmt(format_args!("\t.quad {}\n\n", val))?,
+        }
+        Ok(())
+    }
+
+    fn gen_static_var(
         w: &mut impl Write,
         var: codegen::StaticVariable,
         symbols: &tacky::SymbolTable,
@@ -98,35 +110,54 @@ pub mod x64 {
         Ok(())
     }
 
-    fn gen_instruction(w: &mut impl Write, instr: codegen::InstructionType) -> Result<()> {
-        let get_specifier = |src: Option<&Operand>, dst: &Operand| {
-            let size = match (src, dst) {
-                (None, Operand::StackOffset { size, .. } | Operand::Data { size, .. })
-                | (
-                    Some(Operand::Imm(_)),
-                    Operand::StackOffset { size, .. } | Operand::Data { size, .. },
-                ) => Some(*size),
-                (
-                    Some(Operand::StackOffset { size, .. } | Operand::Data { size, .. }),
-                    Operand::Imm(_),
-                ) => Some(*size),
-                _ => None,
-            };
-            match size {
-                None => "",
-                Some(1) => "byte ptr ",
-                Some(2) => "word ptr ",
-                Some(4) => "dword ptr ",
-                Some(8) => "qword ptr ",
-                _ => unreachable!("Cannot have a destination size other than 1, 2, 4, or 8."),
-            }
-        };
+    fn instr_suffix(r#type: codegen::AssemblyType) -> String {
+        match r#type {
+            codegen::AssemblyType::Float => "ss",
+            codegen::AssemblyType::Double => "sd",
+            _ => "",
+        }
+        .to_string()
+    }
 
+    fn get_specifier<'a>(src: Option<&Operand>, dst: &Operand) -> &'a str {
+        let size = match (src, dst) {
+            (None, Operand::StackOffset { size, .. } | Operand::Data { size, .. })
+            | (
+                Some(Operand::Imm(_)),
+                Operand::StackOffset { size, .. } | Operand::Data { size, .. },
+            ) => Some(*size),
+            (
+                Some(Operand::StackOffset { size, .. } | Operand::Data { size, .. }),
+                Operand::Imm(_),
+            ) => Some(*size),
+            _ => None,
+        };
+        match size {
+            None => "",
+            Some(1) => "byte ptr ",
+            Some(2) => "word ptr ",
+            Some(4) => "dword ptr ",
+            Some(8) => "qword ptr ",
+            _ => unreachable!("Cannot have a destination size other than 1, 2, 4, or 8."),
+        }
+    }
+
+    fn gen_instruction(w: &mut impl Write, instr: codegen::InstructionType) -> Result<()> {
         match instr {
             codegen::InstructionType::Mov { src, dst } => {
+                let suffix = instr_suffix(codegen::AssemblyType::from(&dst));
+                let specifier = get_specifier(Some(&src), &dst);
+                w.write_fmt(format_args!("\tmov{suffix} {specifier}{dst}, {src}\n",))?;
+            }
+            codegen::InstructionType::CMovCC {
+                src,
+                dst,
+                cond_code,
+            } => {
+                let suffix = instr_suffix(codegen::AssemblyType::from(&dst));
+                let specifier = get_specifier(Some(&src), &dst);
                 w.write_fmt(format_args!(
-                    "\tmov {}{dst}, {src}\n",
-                    get_specifier(Some(&src), &dst)
+                    "\tcmov{cond_code}{suffix} {specifier}{dst}, {src}\n",
                 ))?;
             }
             codegen::InstructionType::Movsx { src, dst } => {
@@ -153,26 +184,42 @@ pub mod x64 {
                     }
                     _ => get_specifier(Some(&src), &dst),
                 };
-                w.write_fmt(format_args!("\t{op} {specifier}{dst}, {src}\n",))?
+                let dst_type = codegen::AssemblyType::from(&dst);
+                let suffix = match (dst_type.clone(), &op) {
+                    (codegen::AssemblyType::Double, codegen::BinaryOp::Xor) => "pd".to_string(),
+                    (codegen::AssemblyType::Float, codegen::BinaryOp::Xor) => "ps".to_string(),
+                    (asm_type, _) => instr_suffix(asm_type),
+                };
+                // Multiply has different variants depending on if it is for
+                // floating point numbers or not
+                if matches!(op, codegen::BinaryOp::Multiply) && dst_type.uses_xmm_regs() {
+                    w.write_fmt(format_args!("\tmul{suffix} {specifier}{dst}, {src}\n",))?
+                } else {
+                    w.write_fmt(format_args!("\t{op}{suffix} {specifier}{dst}, {src}\n",))?
+                }
             }
             codegen::InstructionType::Cdq(section) => match section {
                 codegen::RegSection::Dword => w.write_str("\tcdq\n")?,
                 codegen::RegSection::Qword => w.write_str("\tcqo\n")?,
                 _ => unreachable!(),
             },
-            codegen::InstructionType::Idiv(operand) => w.write_fmt(format_args!(
-                "\tidiv {}{operand}\n",
-                get_specifier(None, &operand)
-            ))?,
-            codegen::InstructionType::Div(operand) => w.write_fmt(format_args!(
-                "\tdiv {}{operand}\n",
-                get_specifier(None, &operand)
-            ))?,
+            codegen::InstructionType::Idiv(operand) => {
+                let specifier = get_specifier(None, &operand);
+                w.write_fmt(format_args!("\tidiv {specifier}{operand}\n",))?
+            }
+            codegen::InstructionType::Div(operand) => {
+                let specifier = get_specifier(None, &operand);
+                w.write_fmt(format_args!("\tdiv {specifier}{operand}\n",))?
+            }
             codegen::InstructionType::Cmp { src, dst } => {
-                w.write_fmt(format_args!(
-                    "\tcmp {}{dst}, {src}\n",
-                    get_specifier(Some(&src), &dst)
-                ))?;
+                let specifier = get_specifier(Some(&src), &dst);
+                let asm_type = codegen::AssemblyType::from(&dst);
+                let suffix = instr_suffix(asm_type.clone());
+                if asm_type.uses_xmm_regs() {
+                    w.write_fmt(format_args!("\tcomi{suffix} {specifier}{dst}, {src}\n",))?;
+                } else {
+                    w.write_fmt(format_args!("\tcmp{suffix} {specifier}{dst}, {src}\n",))?;
+                }
             }
             codegen::InstructionType::Jmp(label) => {
                 w.write_fmt(format_args!("\tjmp .L{label}\n",))?;
@@ -183,20 +230,25 @@ pub mod x64 {
             } => {
                 w.write_fmt(format_args!("\tj{cond_code} .L{identifier}\n",))?;
             }
+            codegen::InstructionType::JmpCCRel { cond_code, offset } => {
+                w.write_fmt(format_args!("\tj{cond_code} .{offset:+}\n",))?;
+            }
             codegen::InstructionType::SetCC { cond_code, dst } => {
                 let dst = match dst {
                     codegen::Operand::Reg(r) => {
                         codegen::Operand::Reg(r.as_section(codegen::RegSection::LowByte))
                     }
-                    codegen::Operand::StackOffset { offset, .. } => {
-                        codegen::Operand::StackOffset { offset, size: 1 }
+                    codegen::Operand::StackOffset { offset, r#type, .. } => {
+                        codegen::Operand::StackOffset {
+                            offset,
+                            size: 1,
+                            r#type,
+                        }
                     }
                     _ => dst,
                 };
-                w.write_fmt(format_args!(
-                    "\tset{cond_code} {}{dst}\n",
-                    get_specifier(None, &dst)
-                ))?;
+                let specifier = get_specifier(None, &dst);
+                w.write_fmt(format_args!("\tset{cond_code} {specifier}{dst}\n",))?;
             }
             codegen::InstructionType::Label(label) => {
                 w.write_fmt(format_args!(".L{label}:\n",))?;
@@ -212,7 +264,8 @@ pub mod x64 {
                 } else {
                     op
                 };
-                w.write_fmt(format_args!("\tpush {}{op}\n", get_specifier(None, &op)))?;
+                let specifier = get_specifier(None, &op);
+                w.write_fmt(format_args!("\tpush {specifier}{op}\n",))?;
             }
             codegen::InstructionType::Pop(op) => match op {
                 codegen::Operand::Reg(_) | codegen::Operand::StackOffset { .. } => {
@@ -221,7 +274,8 @@ pub mod x64 {
                     } else {
                         op
                     };
-                    w.write_fmt(format_args!("\tpop {}{op}\n", get_specifier(None, &op)))?;
+                    let specifier = get_specifier(None, &op);
+                    w.write_fmt(format_args!("\tpop {specifier}{op}\n",))?;
                 }
                 _ => bail!(
                     "Cannot push stack to argument {} which is neither a register nor a memory location.",
@@ -230,6 +284,19 @@ pub mod x64 {
             },
             codegen::InstructionType::Call(name) => {
                 w.write_fmt(format_args!("\tcall \"{name}\"@PLT\n"))?;
+            }
+            codegen::InstructionType::Cvttsd2si { src, dst } => {
+                let specifier = get_specifier(None, &src);
+                w.write_fmt(format_args!("\tcvttsd2si {dst}, {specifier}{src}\n"))?;
+            }
+            codegen::InstructionType::Cvtsi2sd { src, dst } => {
+                let specifier = get_specifier(None, &src);
+                w.write_fmt(format_args!("\tcvtsi2sd {dst}, {specifier}{src}\n"))?;
+            }
+            codegen::InstructionType::DivDouble { src, dst } => {
+                let specifier = get_specifier(None, &src);
+                let suffix = instr_suffix(codegen::AssemblyType::from(&dst));
+                w.write_fmt(format_args!("\tdiv{suffix} {specifier}{dst}, {src}\n"))?;
             }
             codegen::InstructionType::MovZeroExtend { .. } => unreachable!(),
         }

@@ -137,7 +137,7 @@ impl From<sema::ValidAst> for Program {
 pub struct Function {
     pub name: Rc<String>,
     pub external_linkage: bool,
-    pub params: Vec<Option<Rc<String>>>,
+    pub signature: Vec<(ast::Type, Option<Rc<String>>)>,
     pub instructions: Vec<Instruction>,
 }
 
@@ -195,11 +195,6 @@ impl Function {
 
         let name = Rc::new(name.to_string());
 
-        let params = signature
-            .into_iter()
-            .map(|x| x.1)
-            .collect::<Vec<Option<Rc<String>>>>();
-
         // Check symbol table to get external linkage since the function
         // declaration could be static but the definition can elide it.
         // ```
@@ -227,7 +222,7 @@ impl Function {
 
         Some(Function {
             name,
-            params,
+            signature,
             external_linkage,
             instructions,
         })
@@ -242,6 +237,22 @@ pub enum Instruction {
         dst: Val,
     },
     ZeroExtend {
+        src: Val,
+        dst: Val,
+    },
+    DoubleToInt {
+        src: Val,
+        dst: Val,
+    },
+    IntToDouble {
+        src: Val,
+        dst: Val,
+    },
+    DoubleToUInt {
+        src: Val,
+        dst: Val,
+    },
+    UIntToDouble {
         src: Val,
         dst: Val,
     },
@@ -693,7 +704,10 @@ impl Expr {
                         instructions.push(Instruction::Binary {
                             op: BinaryOp::Add,
                             src1: val.clone(),
-                            src2: Val::Constant(ast::Constant::I32(1)),
+                            src2: Val::Constant(
+                                ast::Constant::const_from_type(&val.get_type(symbols), 1)
+                                    .expect("UnaryOp type has an ast::Constant equivilent"),
+                            ),
                             dst: val.clone(),
                         });
                         val.clone()
@@ -711,7 +725,10 @@ impl Expr {
                         instructions.push(Instruction::Binary {
                             op: BinaryOp::Add,
                             src1: val.clone(),
-                            src2: Val::Constant(ast::Constant::I32(1)),
+                            src2: Val::Constant(
+                                ast::Constant::const_from_type(&val.get_type(symbols), 1)
+                                    .expect("UnaryOp type has an ast::Constant equivilent"),
+                            ),
                             dst: val.clone(),
                         });
                         dst
@@ -720,7 +737,10 @@ impl Expr {
                         instructions.push(Instruction::Binary {
                             op: BinaryOp::Subtract,
                             src1: val.clone(),
-                            src2: Val::Constant(ast::Constant::I32(1)),
+                            src2: Val::Constant(
+                                ast::Constant::const_from_type(&val.get_type(symbols), 1)
+                                    .expect("UnaryOp type has an ast::Constant equivilent"),
+                            ),
                             dst: val.clone(),
                         });
                         val.clone()
@@ -738,15 +758,29 @@ impl Expr {
                         instructions.push(Instruction::Binary {
                             op: BinaryOp::Subtract,
                             src1: val.clone(),
-                            src2: Val::Constant(ast::Constant::I32(1)),
+                            src2: Val::Constant(
+                                ast::Constant::const_from_type(&val.get_type(symbols), 1)
+                                    .expect("UnaryOp type has an ast::Constant equivilent"),
+                            ),
                             dst: val.clone(),
+                        });
+                        dst
+                    }
+                    ast::UnaryOp::Not => {
+                        let dst = Function::make_tacky_temp_var(
+                            ast::Type::int(4, None),
+                            symbols,
+                            make_temp_var,
+                        );
+                        instructions.push(Instruction::Unary {
+                            op: UnaryOp::from(op),
+                            src: val,
+                            dst: dst.clone(),
                         });
                         dst
                     }
                     // Other operations have tacky unary op equivalents
                     _ => {
-                        // FIXME: This may not be the correct type.
-                        // Does type promotion happen explicitly in ast/sema?
                         let dst = Function::make_tacky_temp_var(
                             val.get_type(symbols),
                             symbols,
@@ -885,12 +919,14 @@ impl Expr {
                     } = Self::parse_with(*right, symbols, make_temp_var);
                     instructions.extend(right_instructions);
 
+                    let dst_type = if op.is_relational() {
+                        ast::Type::bool()
+                    } else {
+                        left_val.get_type(symbols)
+                    };
+
                     // FIXME: Same as above, not exactly sure where the type casting happens
-                    let dst = Function::make_tacky_temp_var(
-                        left_val.get_type(symbols),
-                        symbols,
-                        make_temp_var,
-                    );
+                    let dst = Function::make_tacky_temp_var(dst_type, symbols, make_temp_var);
 
                     instructions.push(Instruction::Binary {
                         op: op.into(),
@@ -1036,40 +1072,125 @@ impl Expr {
                 }
                 let dst = Function::make_tacky_temp_var(target.clone(), symbols, make_temp_var);
 
-                // FIXME: This needs to use PartialEq/Eq
-                match target.base.nbytes().cmp(&val_type.base.nbytes()) {
-                    std::cmp::Ordering::Equal => {
-                        instructions.push(Instruction::Copy {
-                            src: val,
-                            dst: dst.clone(),
-                        });
-                    }
-                    std::cmp::Ordering::Less => {
-                        instructions.push(Instruction::Truncate {
-                            src: val,
-                            dst: dst.clone(),
-                        });
-                    }
-                    _ => match val_type {
+                let is_float = |t: &ast::Type| {
+                    matches!(
+                        t,
                         ast::Type {
-                            base: ast::BaseType::Int { signed, .. },
+                            base: ast::BaseType::Float(_) | ast::BaseType::Double(_),
+                            ptr: None,
+                            ..
+                        }
+                    )
+                };
+
+                // Double -> Integer
+                if is_float(&val_type) {
+                    match target {
+                        ast::Type {
+                            base:
+                                ast::BaseType::Int {
+                                    nbytes: _,
+                                    signed: Some(false),
+                                },
                             ptr: None,
                             ..
                         } => {
-                            if signed.is_none_or(|signed| signed) {
-                                instructions.push(Instruction::SignExtend {
-                                    src: val,
-                                    dst: dst.clone(),
-                                });
-                            } else {
-                                instructions.push(Instruction::ZeroExtend {
-                                    src: val,
-                                    dst: dst.clone(),
-                                });
-                            }
+                            instructions.push(Instruction::DoubleToUInt {
+                                src: val,
+                                dst: dst.clone(),
+                            });
                         }
-                        _ => unimplemented!(),
-                    },
+                        ast::Type {
+                            base:
+                                ast::BaseType::Int {
+                                    nbytes: _,
+                                    signed: _,
+                                },
+                            ptr: None,
+                            ..
+                        } => {
+                            instructions.push(Instruction::DoubleToInt {
+                                src: val,
+                                dst: dst.clone(),
+                            });
+                        }
+                        // FIXME: Add chars here
+                        // We should not ever be trying to cast a double to
+                        // anything other than an int
+                        _ => unreachable!("Casting float type to {target:?}"),
+                    }
+                } else if is_float(&target) {
+                    match val_type {
+                        ast::Type {
+                            base:
+                                ast::BaseType::Int {
+                                    nbytes: _,
+                                    signed: Some(false),
+                                },
+                            ptr: None,
+                            ..
+                        } => {
+                            instructions.push(Instruction::UIntToDouble {
+                                src: val,
+                                dst: dst.clone(),
+                            });
+                        }
+                        ast::Type {
+                            base:
+                                ast::BaseType::Int {
+                                    nbytes: _,
+                                    signed: _,
+                                },
+                            ptr: None,
+                            ..
+                        } => {
+                            instructions.push(Instruction::IntToDouble {
+                                src: val,
+                                dst: dst.clone(),
+                            });
+                        }
+                        // FIXME: Add chars here
+                        // We should not ever be trying to cast a double to
+                        // anything other than an int
+                        _ => unreachable!("Casting float type to {target:?}"),
+                    }
+                } else {
+                    // Integer ops
+                    // FIXME: This needs to use PartialEq/Eq
+                    match target.base.nbytes().cmp(&val_type.base.nbytes()) {
+                        std::cmp::Ordering::Equal => {
+                            instructions.push(Instruction::Copy {
+                                src: val,
+                                dst: dst.clone(),
+                            });
+                        }
+                        std::cmp::Ordering::Less => {
+                            instructions.push(Instruction::Truncate {
+                                src: val,
+                                dst: dst.clone(),
+                            });
+                        }
+                        _ => match val_type {
+                            ast::Type {
+                                base: ast::BaseType::Int { signed, .. },
+                                ptr: None,
+                                ..
+                            } => {
+                                if signed.is_none_or(|signed| signed) {
+                                    instructions.push(Instruction::SignExtend {
+                                        src: val,
+                                        dst: dst.clone(),
+                                    });
+                                } else {
+                                    instructions.push(Instruction::ZeroExtend {
+                                        src: val,
+                                        dst: dst.clone(),
+                                    });
+                                }
+                            }
+                            _ => unimplemented!(),
+                        },
+                    }
                 }
 
                 Self {
@@ -1107,7 +1228,7 @@ impl From<ast::Constant> for Val {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum UnaryOp {
     Negate,
     Complement,

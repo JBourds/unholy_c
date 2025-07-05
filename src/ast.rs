@@ -1,7 +1,7 @@
-use crate::lexer::{ConstantSuffix, Token};
+use crate::lexer::{ConstantFlag, Token};
 
 use anyhow::{Context, Error, Result, bail, ensure};
-use num::bigint::BigUint;
+use num::{NumCast, bigint::BigUint};
 use std::str::FromStr;
 use std::{
     num::{NonZeroU8, NonZeroUsize},
@@ -932,6 +932,14 @@ impl BaseType {
         Self::Int { nbytes, signed }
     }
 
+    pub fn float(double: bool) -> Self {
+        if double {
+            Self::Double(8)
+        } else {
+            Self::Float(4)
+        }
+    }
+
     // Promotion rules
 
     fn rank(&self) -> Option<usize> {
@@ -1027,8 +1035,10 @@ impl From<&Constant> for BaseType {
             Constant::I64(_) => Self::int(core::mem::size_of::<i64>(), None),
             Constant::U8(_) => Self::int(core::mem::size_of::<u8>(), None),
             Constant::U16(_) => Self::int(core::mem::size_of::<u16>(), None),
-            Constant::U32(_) => Self::int(core::mem::size_of::<u32>(), None),
-            Constant::U64(_) => Self::int(core::mem::size_of::<u64>(), None),
+            Constant::U32(_) => Self::int(core::mem::size_of::<u32>(), Some(false)),
+            Constant::U64(_) => Self::int(core::mem::size_of::<u64>(), Some(false)),
+            Constant::F32(_) => Self::float(false),
+            Constant::F64(_) => Self::float(true),
         }
     }
 }
@@ -1166,9 +1176,19 @@ impl Type {
         }
     }
 
+    pub fn float(nbytes: usize) -> Self {
+        Self {
+            base: BaseType::float(nbytes == core::mem::size_of::<f64>()),
+            alignment: NonZeroUsize::new(nbytes).unwrap(),
+            ptr: None,
+            storage: None,
+            is_const: true,
+        }
+    }
+
     pub fn size_of(&self) -> usize {
         match self.ptr {
-            Some(..) => 8, // FIXME: maybe this shouldn't be a magic constant
+            Some(..) => core::mem::size_of::<usize>(),
             None => self.base.nbytes(),
         }
     }
@@ -1451,7 +1471,7 @@ impl std::fmt::Display for BaseType {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Constant {
     I8(i8),
     I16(i16),
@@ -1461,11 +1481,25 @@ pub enum Constant {
     U16(u16),
     U32(u32),
     U64(u64),
+    F32(f32),
+    F64(f64),
 }
+
+// Implement these traits knowing they will never get called on floats
+impl std::hash::Hash for Constant {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        match self {
+            Self::F32(_) | Self::F64(_) => unreachable!(),
+            _ => core::mem::discriminant(self).hash(state),
+        }
+    }
+}
+
+impl std::cmp::Eq for Constant {}
 
 impl Constant {
     pub fn is_int(&self) -> bool {
-        true
+        !matches!(self, Self::F32(_) | Self::F64(_))
     }
 
     pub fn fits_in<T>(&self) -> bool
@@ -1478,6 +1512,7 @@ impl Constant {
         T: TryFrom<u16>,
         T: TryFrom<u32>,
         T: TryFrom<u64>,
+        T: NumCast,
     {
         match &self {
             Constant::I8(v) => <T as TryFrom<i8>>::try_from(*v).is_ok(),
@@ -1488,6 +1523,8 @@ impl Constant {
             Constant::U16(v) => <T as TryFrom<u16>>::try_from(*v).is_ok(),
             Constant::U32(v) => <T as TryFrom<u32>>::try_from(*v).is_ok(),
             Constant::U64(v) => <T as TryFrom<u64>>::try_from(*v).is_ok(),
+            Constant::F32(v) => num::cast::<f32, T>(*v).is_some(),
+            Constant::F64(v) => num::cast::<f64, T>(*v).is_some(),
         }
     }
 
@@ -1501,6 +1538,8 @@ impl Constant {
             Constant::U16(_) => core::mem::size_of::<u16>(),
             Constant::U32(_) => core::mem::size_of::<u32>(),
             Constant::U64(_) => core::mem::size_of::<u64>(),
+            Constant::F32(_) => core::mem::size_of::<f32>(),
+            Constant::F64(_) => core::mem::size_of::<f64>(),
         }
     }
 
@@ -1512,6 +1551,40 @@ impl Constant {
             Self::I8(_) | Self::I16(_) | Self::I32(_) | Self::I64(_) => {
                 Type::int(self.size_bytes(), Some(true))
             }
+            Self::F32(_) => Type::float(self.size_bytes()),
+            Self::F64(_) => Type::float(self.size_bytes()),
+        }
+    }
+
+    pub fn const_from_type(r#type: &Type, value: u8) -> Result<Self> {
+        match r#type {
+            _ if *r#type == Constant::I8(value as i8).get_type() => Ok(Constant::I8(value as i8)),
+            _ if *r#type == Constant::I16(value as i16).get_type() => {
+                Ok(Constant::I16(value as i16))
+            }
+            _ if *r#type == Constant::I32(value as i32).get_type() => {
+                Ok(Constant::I32(value as i32))
+            }
+            _ if *r#type == Constant::I64(value as i64).get_type() => {
+                Ok(Constant::I64(value as i64))
+            }
+            _ if *r#type == Constant::U8(value).get_type() => Ok(Constant::U8(value)),
+            _ if *r#type == Constant::U16(value as u16).get_type() => {
+                Ok(Constant::U16(value as u16))
+            }
+            _ if *r#type == Constant::U32(value as u32).get_type() => {
+                Ok(Constant::U32(value as u32))
+            }
+            _ if *r#type == Constant::U64(value as u64).get_type() => {
+                Ok(Constant::U64(value as u64))
+            }
+            _ if *r#type == Constant::F32(value as f32).get_type() => {
+                Ok(Constant::F32(value as f32))
+            }
+            _ if *r#type == Constant::F64(value as f64).get_type() => {
+                Ok(Constant::F64(value as f64))
+            }
+            _ => bail!("Could not create a constant with type {type} and value {value}"),
         }
     }
 }
@@ -1527,6 +1600,8 @@ impl std::fmt::Display for Constant {
             Constant::U16(v) => write!(f, "{v}"),
             Constant::U32(v) => write!(f, "{v}"),
             Constant::U64(v) => write!(f, "{v}"),
+            Constant::F32(v) => write!(f, "{v}"),
+            Constant::F64(v) => write!(f, "{v}"),
         }
     }
 }
@@ -1538,7 +1613,7 @@ impl AstNode for Constant {
             match token {
                 // NOTE: The text in these nodes does not include the negative
                 // sign so we don't need to worry about absolute value sign
-                Token::Constant { text, suffix: None } => {
+                Token::Constant { text, flag: None } => {
                     if let Ok(val) = text.parse::<i32>() {
                         Ok((Self::I32(val), &tokens[1..]))
                     } else if let Ok(val) = text.parse::<i64>() {
@@ -1561,8 +1636,17 @@ impl AstNode for Constant {
                         Ok((val, &tokens[1..]))
                     }
                 }
-                Token::Constant { text, suffix } => match suffix {
-                    Some(ConstantSuffix::Unsigned) => {
+                Token::Constant { text, flag } => match flag {
+                    // FIXME: More intelligent scheme to know what this value
+                    // will end up as (e.g., float instead of double) to avoid
+                    // the double roundoff error
+                    Some(ConstantFlag::Float) => {
+                        let val = text
+                            .parse::<f64>()
+                            .context("Unable to parse double from text: \"{text}\".")?;
+                        Ok((Self::F64(val), &tokens[1..]))
+                    }
+                    Some(ConstantFlag::Unsigned) => {
                         let val = if let Ok(val) = text.parse::<u32>() {
                             Self::U32(val)
                         } else if let Ok(val) = text.parse::<u64>() {
@@ -1581,7 +1665,7 @@ impl AstNode for Constant {
                         };
                         Ok((val, &tokens[1..]))
                     }
-                    Some(ConstantSuffix::UnsignedLong) => {
+                    Some(ConstantFlag::UnsignedLong) => {
                         let val = if let Ok(val) = text.parse::<u64>() {
                             Self::U64(val)
                         } else {
@@ -1599,7 +1683,7 @@ impl AstNode for Constant {
 
                         Ok((val, &tokens[1..]))
                     }
-                    Some(ConstantSuffix::Long) => {
+                    Some(ConstantFlag::Long) => {
                         let val = if let Ok(val) = text.parse::<i64>() {
                             Self::I64(val)
                         } else if let Ok(val) = text.parse::<u64>() {
@@ -1667,8 +1751,28 @@ impl BinaryOp {
         matches!(*self, Self::And | Self::Or)
     }
 
-    pub fn is_valid_for(&self, expr: &Expr) -> bool {
-        !self.does_assignment() || matches!(expr, Expr::Var(_))
+    pub fn is_relational(&self) -> bool {
+        matches!(*self, |Self::Equal| Self::NotEqual
+            | Self::LessThan
+            | Self::LessOrEqual
+            | Self::GreaterThan
+            | Self::GreaterOrEqual)
+    }
+
+    pub fn is_bitwise(&self) -> bool {
+        matches!(
+            self,
+            Self::BitAnd
+                | Self::BitOr
+                | Self::Xor
+                | Self::LShift
+                | Self::RShift
+                | Self::AndAssign
+                | Self::OrAssign
+                | Self::XorAssign
+                | Self::LShiftAssign
+                | Self::RShiftAssign
+        )
     }
 
     pub fn does_assignment(&self) -> bool {
@@ -1793,6 +1897,17 @@ pub enum UnaryOp {
 impl UnaryOp {
     pub fn is_logical(&self) -> bool {
         *self == Self::Not
+    }
+
+    pub fn is_bitwise(&self) -> bool {
+        matches!(self, Self::Complement)
+    }
+
+    pub fn does_assignment(&self) -> bool {
+        matches!(
+            self,
+            UnaryOp::PreInc | UnaryOp::PreDec | UnaryOp::PostInc | UnaryOp::PostDec
+        )
     }
 
     pub fn is_valid_for(&self, expr: &Expr) -> bool {

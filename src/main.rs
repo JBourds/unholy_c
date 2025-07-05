@@ -38,6 +38,9 @@ struct Args {
 
     #[arg(short = 'c', long, default_value_t = false)]
     c: bool,
+
+    #[arg(short = 'l', long)]
+    l: Option<String>,
 }
 
 fn main() -> Result<()> {
@@ -186,6 +189,12 @@ fn assemble_and_link(args: &Args, asm: String) -> Result<()> {
         OsStr::new("-o"),
         output_name.as_os_str(),
     ]);
+
+    if let Some(s) = &args.l {
+        cmd.arg(OsStr::new("-l"));
+        cmd.arg(s);
+    }
+
     let output = if args.c {
         cmd.arg(OsStr::new("-c"));
         cmd.output().context("Failed to run gcc for assembly")?

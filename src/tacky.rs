@@ -319,8 +319,8 @@ impl Instruction {
         symbols: &mut SymbolTable,
         make_temp_var: &mut impl FnMut() -> String,
     ) -> Vec<Self> {
-        if decl.typ.storage != Some(ast::StorageClass::Extern) {
-            symbols.new_entry(Rc::clone(&decl.name), decl.typ.clone());
+        if decl.storage_class != Some(ast::StorageClass::Extern) {
+            symbols.new_entry(Rc::clone(&decl.name), decl.r#type.clone());
         }
         if let Some(init) = decl.init {
             let Expr {
@@ -658,11 +658,7 @@ impl Instruction {
                 // If we reinitialized them here they would act like local
                 // variables (suboptimal)
                 ast::BlockItem::Decl(ast::Declaration::VarDecl(ast::VarDecl {
-                    typ:
-                        ast::Type {
-                            storage: Some(ast::StorageClass::Static),
-                            ..
-                        },
+                    storage_class: Some(ast::StorageClass::Static),
                     ..
                 })) => {}
                 ast::BlockItem::Decl(decl) => {

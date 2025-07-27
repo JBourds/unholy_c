@@ -96,12 +96,12 @@ fn resolve_local_var_decl(
     if let Some(prev_entry) = ident_map.get(&decl.name) {
         if prev_entry.from_current_scope
             && !(prev_entry.has_external_linkage
-                && decl.typ.storage == Some(ast::StorageClass::Extern))
+                && decl.storage_class == Some(ast::StorageClass::Extern))
         {
             bail!("Conflicting local declaration '{}' ", decl.name);
         }
     }
-    if let Some(ast::StorageClass::Extern) = decl.typ.storage {
+    if let Some(ast::StorageClass::Extern) = decl.storage_class {
         _ = ident_map.insert(
             Rc::clone(&decl.name),
             IdentEntry::new_external(Rc::clone(&decl.name)),

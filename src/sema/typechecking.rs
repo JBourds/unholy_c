@@ -31,7 +31,8 @@ impl Attribute {
         scope: Scope,
         symbols: &mut SymbolTable,
     ) -> Result<Self> {
-        if matches!(scope, Scope::Local(..)) && var.typ.storage == Some(ast::StorageClass::Extern) {
+        if matches!(scope, Scope::Local(..)) && var.storage_class == Some(ast::StorageClass::Extern)
+        {
             ensure!(
                 var.init.is_none(),
                 "Local var \"{}\" is extern but has an initial value",
@@ -44,16 +45,16 @@ impl Attribute {
             init_val
         } else {
             match scope {
-                Scope::Global => match var.typ.storage {
+                Scope::Global => match var.storage_class {
                     Some(ast::StorageClass::Static) | None => InitialValue::Tentative, // Global non-externals with no initilizer are marked as tentative
                     Some(ast::StorageClass::Extern) => InitialValue::None,
                     _ => unreachable!(
                         "Earlier passes of the compiler should have reduced \"auto\" and \"register\" storage classes to be None"
                     ),
                 },
-                Scope::Local(..) => match var.typ.storage {
+                Scope::Local(..) => match var.storage_class {
                     Some(ast::StorageClass::Static) => {
-                        InitialValue::Initial(vec![0; var.typ.base.nbytes()].into())
+                        InitialValue::Initial(vec![0; var.r#type.base.nbytes()].into())
                     } // Local Statics with no initilizer get defaulted to zero
                     Some(ast::StorageClass::Extern) | None => InitialValue::None,
                     _ => unreachable!(
@@ -64,21 +65,21 @@ impl Attribute {
         };
 
         if initial_value == InitialValue::None
-            && var.typ.storage.is_none()
+            && var.storage_class.is_none()
             && matches!(scope, Scope::Local(..))
         {
             return Ok(Attribute::Local);
         }
 
         let external_linkage = match scope {
-            Scope::Global => match var.typ.storage {
+            Scope::Global => match var.storage_class {
                 Some(ast::StorageClass::Static) => false,
                 Some(ast::StorageClass::Extern) | None => true,
                 _ => unreachable!(
                     "Earlier passes of the compiler should have reduced \"auto\" and \"register\" storage classes to be None"
                 ),
             },
-            Scope::Local(..) => match var.typ.storage {
+            Scope::Local(..) => match var.storage_class {
                 Some(ast::StorageClass::Static) | None => false,
                 Some(ast::StorageClass::Extern) => true,
                 _ => unreachable!(
@@ -178,13 +179,13 @@ impl InitialValue {
     ) -> Result<Option<Self>> {
         match (scope, var.init.as_ref()) {
             (Scope::Global, Some(expr)) => {
-                let init = Self::from_expr(&var.typ, expr, symbols)
+                let init = Self::from_expr(&var.r#type, expr, symbols)
                     .context(format!("Evaluating expression for \"{}\" failed", var.name))?;
                 Ok(Some(init))
             }
-            (Scope::Local(..), Some(expr)) => match var.typ.storage {
+            (Scope::Local(..), Some(expr)) => match var.storage_class {
                 Some(ast::StorageClass::Static) => Ok(Some(
-                    Self::from_expr(&var.typ, expr, symbols)
+                    Self::from_expr(&var.r#type, expr, symbols)
                         .context(format!("Evaluating expression for \"{}\" failed", var.name))?,
                 )),
                 None => Ok(None), // Locals technically dont have initial values
@@ -193,17 +194,17 @@ impl InitialValue {
                     "Earlier passes of the compiler should have reduced \"auto\" and \"register\" storage classes to be None"
                 ),
             },
-            (Scope::Global, None) => match var.typ.storage {
+            (Scope::Global, None) => match var.storage_class {
                 Some(ast::StorageClass::Static) | None => Ok(Some(InitialValue::Tentative)), // Global non-externals with no initilizer are marked as tentative
                 Some(ast::StorageClass::Extern) => Ok(Some(InitialValue::None)),
                 _ => unreachable!(
                     "Earlier passes of the compiler should have reduced \"auto\" and \"register\" storage classes to be None"
                 ),
             },
-            (Scope::Local(..), None) => match var.typ.storage {
+            (Scope::Local(..), None) => match var.storage_class {
                 // Local Statics with no initilizer get defaulted to zero
                 Some(ast::StorageClass::Static) => Ok(Some(InitialValue::Initial(
-                    vec![0; var.typ.base.nbytes()].into(),
+                    vec![0; var.r#type.base.nbytes()].into(),
                 ))),
                 // Resolve any existing declaration's initial value
                 Some(ast::StorageClass::Extern) => {
@@ -306,16 +307,27 @@ impl SymbolTable {
         self.global.get(key)
     }
 
-    fn get_decl_info(decl: &ast::Declaration) -> (Rc<String>, ast::Type, bool) {
+    fn get_decl_info(
+        decl: &ast::Declaration,
+    ) -> (Rc<String>, ast::Type, Option<ast::StorageClass>, bool) {
         match decl {
             ast::Declaration::FunDecl(fun) => (
                 Rc::clone(&fun.name),
                 ast::Type::from(fun),
+                fun.storage_class.as_ref().copied(),
                 fun.block.is_some(),
             ),
-            ast::Declaration::VarDecl(ast::VarDecl { typ, name, init }) => {
-                (Rc::clone(name), typ.clone(), init.is_some())
-            }
+            ast::Declaration::VarDecl(ast::VarDecl {
+                r#type,
+                name,
+                init,
+                storage_class,
+            }) => (
+                Rc::clone(name),
+                r#type.clone(),
+                storage_class.as_ref().copied(),
+                init.is_some(),
+            ),
         }
     }
 
@@ -386,7 +398,7 @@ impl SymbolTable {
     }
 
     fn declare_in_scope(&mut self, decl: &ast::Declaration, scope: Scope) -> Result<SymbolEntry> {
-        let (name, new_type, defining_ident) = Self::get_decl_info(decl);
+        let (name, new_type, storage_class, defining_ident) = Self::get_decl_info(decl);
 
         let entry = if let Some(entry) = self.get(&name) {
             // FIXME: Lazy way to make rust shutup about the immutable borrow
@@ -422,7 +434,7 @@ impl SymbolTable {
                     bail!("Redefining \"{name}\" when it is already defined.")
                 }
                 let mut attribute =
-                    Self::check_attribute(&old_attrib, &name, new_type.storage, scope)?;
+                    Self::check_attribute(&old_attrib, &name, storage_class, scope)?;
                 match decl {
                     ast::Declaration::FunDecl(..) => {}
                     ast::Declaration::VarDecl(var) => {
@@ -488,7 +500,8 @@ impl SymbolTable {
                     let param_decl = ast::Declaration::VarDecl(ast::VarDecl {
                         name: Rc::clone(name),
                         init: None,
-                        typ: typ.clone(),
+                        r#type: r#type.clone(),
+                        storage_class: None,
                     });
                     self.declare_in_scope(&param_decl, scope)?;
                 }
@@ -498,7 +511,7 @@ impl SymbolTable {
     }
     fn declare_var(&mut self, decl: &ast::VarDecl) -> Result<SymbolEntry> {
         let key = decl.name.clone();
-        let storage_class = decl.typ.storage;
+        let storage_class = decl.storage_class;
         let decl = ast::Declaration::VarDecl(decl.clone());
 
         match storage_class {
@@ -686,7 +699,7 @@ fn typecheck_stmt(
             } => {
                 let init = match *init {
                     ast::ForInit::Decl(decl) => {
-                        if decl.typ.storage.is_some() {
+                        if decl.storage_class.is_some() {
                             bail!(
                                 "For-loop counter var \"{}\" cannot have storage class specifier",
                                 decl.name
@@ -791,7 +804,6 @@ fn try_implicit_cast(
     if right_t != *target {
         Ok(ast::Expr::Cast {
             target: ast::Type {
-                storage: None,
                 is_const: true,
                 ..target.clone()
             },
@@ -886,7 +898,6 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
             // arbitrary
             let common_t = ast::Type {
                 base: lifted_left_t.clone(),
-                storage: None,
                 is_const: true,
                 alignment: std::cmp::max(left_t.alignment, right_t.alignment),
                 ..right_t
@@ -1065,7 +1076,6 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
             r#type: ast::Type {
                 base: ast::BaseType::from(constant),
                 alignment: ast::BaseType::from(constant).default_alignment(),
-                storage: None,
                 is_const: true,
             },
         }),

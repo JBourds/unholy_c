@@ -3,10 +3,7 @@ use crate::lexer::{ConstantFlag, Token};
 use anyhow::{Context, Error, Result, bail, ensure};
 use num::{NumCast, bigint::BigUint};
 use std::str::FromStr;
-use std::{
-    num::{NonZeroU8, NonZeroUsize},
-    rc::Rc,
-};
+use std::{num::NonZeroUsize, rc::Rc};
 
 pub fn parse(tokens: &[Token]) -> Result<Program> {
     let (prog, _) = Program::consume(tokens)?;
@@ -94,7 +91,6 @@ impl From<&FunDecl> for Type {
         Self {
             alignment: base.default_alignment(),
             base,
-            ptr: None,
             storage: decl.storage_class,
             is_const: false,
         }
@@ -874,6 +870,10 @@ pub enum BaseType {
         ret_t: Box<Type>,
         param_types: Vec<Type>,
     },
+    Ptr {
+        to: Box<Type>,
+        restrict: bool,
+    },
     // TODO: Implement later and make this a non unit variant
     Struct,
     Void,
@@ -921,7 +921,8 @@ impl BaseType {
             BaseType::Int { nbytes, .. } => *nbytes,
             BaseType::Float(nbytes) => *nbytes,
             BaseType::Double(nbytes) => *nbytes,
-            BaseType::Char => 1,
+            BaseType::Ptr { .. } => core::mem::size_of::<usize>(),
+            BaseType::Char => core::mem::size_of::<i8>(),
             BaseType::Fun { .. } => unreachable!(),
             BaseType::Struct => unreachable!(),
             BaseType::Void => unreachable!(),
@@ -975,8 +976,10 @@ impl BaseType {
             Self::Int { nbytes, .. } => NonZeroUsize::new(*nbytes).unwrap(),
             Self::Float(nbytes) => NonZeroUsize::new(*nbytes).unwrap(),
             Self::Double(nbytes) => NonZeroUsize::new(*nbytes).unwrap(),
-            Self::Char => NonZeroUsize::new(1).unwrap(),
-            Self::Fun { .. } => NonZeroUsize::new(8).unwrap(), // This is for when we have function pointers
+            Self::Char => NonZeroUsize::new(core::mem::size_of::<i8>()).unwrap(),
+            Self::Fun { .. } | Self::Ptr { .. } => {
+                NonZeroUsize::new(core::mem::size_of::<usize>()).unwrap()
+            }
             Self::Struct => todo!(),
             Self::Void => todo!(),
         }
@@ -1081,83 +1084,17 @@ impl AstNode for BaseType {
     }
 }
 
-#[derive(Debug, PartialEq, Clone)]
-pub struct TypePtr {
-    // Hardcoded to prevent >255 pointer depths (sorry pointer fans)
-    depth: NonZeroU8,
-    // Bit vectors for whether each depth of pointer can alias/is const
-    is_restrict: [u8; Self::BITVEC_LENGTH],
-    is_const: [u8; Self::BITVEC_LENGTH],
-}
-
-impl TypePtr {
-    const BITVEC_LENGTH: usize = (u8::MAX / 8) as usize;
-
-    #[allow(dead_code)]
-    fn get(arr: &[u8], depth: NonZeroU8, max_depth: NonZeroU8) -> Result<bool> {
-        if depth.gt(&max_depth) {
-            bail!("Requested depth exceeds maximum pointer depth.")
-        } else {
-            let byte_index: usize = ((depth.get() - 1) / 8).into();
-            let bit_index = Into::<usize>::into(depth.get() - 1) - (byte_index * 8);
-            let mask = 1 << bit_index;
-            Ok(arr[byte_index] & mask > 0)
-        }
-    }
-
-    #[allow(dead_code)]
-    fn get_const(&self, depth: NonZeroU8) -> Result<bool> {
-        Self::get(&self.is_const, depth, self.depth)
-    }
-
-    #[allow(dead_code)]
-    fn get_restrict(&self, depth: NonZeroU8) -> Result<bool> {
-        Self::get(&self.is_restrict, depth, self.depth)
-    }
-
-    fn set(arr: &mut [u8], depth: NonZeroU8, max_depth: NonZeroU8) -> Result<()> {
-        if depth.gt(&max_depth) {
-            bail!("Requested depth exceeds maximum pointer depth.")
-        } else {
-            let byte_index: usize = ((depth.get() - 1) / 8).into();
-            let bit_index = Into::<usize>::into(depth.get() - 1) - (byte_index * 8);
-            let mask = 1 << bit_index;
-            arr[byte_index] |= mask;
-            Ok(())
-        }
-    }
-
-    fn set_const(&mut self, depth: NonZeroU8) -> Result<()> {
-        Self::set(&mut self.is_const, depth, self.depth)
-    }
-
-    fn set_restrict(&mut self, depth: NonZeroU8) -> Result<()> {
-        Self::set(&mut self.is_restrict, depth, self.depth)
-    }
-}
-
-impl Default for TypePtr {
-    fn default() -> Self {
-        Self {
-            depth: NonZeroU8::new(1).unwrap(),
-            is_restrict: Default::default(),
-            is_const: Default::default(),
-        }
-    }
-}
-
 #[derive(Debug, Clone)]
 pub struct Type {
     pub base: BaseType,
     pub alignment: NonZeroUsize,
-    pub ptr: Option<TypePtr>,
     pub storage: Option<StorageClass>,
     pub is_const: bool,
 }
 
 impl PartialEq for Type {
     fn eq(&self, other: &Self) -> bool {
-        self.base == other.base && self.alignment == other.alignment && self.ptr == other.ptr
+        self.base == other.base && self.alignment == other.alignment
     }
 }
 
@@ -1170,7 +1107,6 @@ impl Type {
         Self {
             base: BaseType::int(nbytes, signed),
             alignment: NonZeroUsize::new(nbytes).unwrap(),
-            ptr: None,
             storage: None,
             is_const: true,
         }
@@ -1180,17 +1116,13 @@ impl Type {
         Self {
             base: BaseType::float(nbytes == core::mem::size_of::<f64>()),
             alignment: NonZeroUsize::new(nbytes).unwrap(),
-            ptr: None,
             storage: None,
             is_const: true,
         }
     }
 
     pub fn size_of(&self) -> usize {
-        match self.ptr {
-            Some(..) => core::mem::size_of::<usize>(),
-            None => self.base.nbytes(),
-        }
+        self.base.nbytes()
     }
 }
 
@@ -1280,50 +1212,6 @@ impl AstNode for Type {
             }
         };
 
-        // Only a pointer can be marked as "restrict"
-        let mut is_restrict = false;
-        let mut check_for_restrict = |t: &Token| {
-            if *t == Token::Restrict {
-                // We can have multiple restricts
-                is_restrict = true;
-                true
-            } else {
-                false
-            }
-        };
-
-        let mut ptr: Option<TypePtr> = None;
-        let mut check_for_ptr = |ptr: Option<TypePtr>, tokens: &'a [Token]| {
-            let mut remaining = tokens;
-            if let Some(Token::Star) = remaining.first() {
-                // Entering a new depth, reset const and restrict flags
-                let mut inner_ptr = if let Some(p) = ptr {
-                    let _ = p.depth.checked_add(1);
-                    p
-                } else {
-                    TypePtr::default()
-                };
-                // Eat up any const or restrict keywords
-                // Ignore the result type from set_const since we are using
-                // the type's own depth to set it
-                while let Some(t) = remaining.first() {
-                    if check_for_const(t) {
-                        let _ = inner_ptr.set_const(inner_ptr.depth);
-                        remaining = &remaining[1..];
-                    } else if check_for_restrict(t) {
-                        let _ = inner_ptr.set_restrict(inner_ptr.depth);
-                        remaining = &remaining[1..];
-                    } else {
-                        break;
-                    }
-                    let _ = inner_ptr.depth.checked_add(1);
-                }
-                (true, Some(inner_ptr), remaining)
-            } else {
-                (false, ptr, remaining)
-            }
-        };
-
         // Continue eating tokens with aditional type specifiers, updating
         // flags and enforcing type specifier rules along the way
         // Requirements:
@@ -1341,15 +1229,6 @@ impl AstNode for Type {
             } else if let Ok((true, tokens)) = check_for_base_type(remaining) {
                 remaining = tokens;
             } else {
-                // We could not find anything else, but the type could be
-                // a pointer. Parse as many levels of pointer depth as possible
-                // until we no longer find another level or hit the maximum.
-                while let (true, new_ptr, tokens) = check_for_ptr(ptr.take(), remaining) {
-                    ptr = new_ptr;
-                    remaining = tokens;
-                }
-                // Once we have exhausted all the pointer indirections exit
-                // the loop
                 break;
             }
         }
@@ -1388,7 +1267,6 @@ impl AstNode for Type {
                 Self {
                     alignment: base.default_alignment(),
                     base,
-                    ptr,
                     storage,
                     is_const,
                 },
@@ -1409,25 +1287,6 @@ impl std::fmt::Display for Type {
             write!(f, "const ")?;
         }
         self.base.fmt(f)?;
-
-        if let Some(ref ptr) = self.ptr {
-            for depth in 1..=ptr.depth.into() {
-                let byte_index: usize = (depth / 8).into();
-                let bit_index = Into::<usize>::into(depth) - byte_index * 8;
-                let mask = 1 << bit_index;
-                if ptr.is_const[byte_index] & mask > 0 {
-                    write!(f, "const ")?;
-                }
-                if ptr.is_restrict[byte_index] & mask > 0 {
-                    write!(f, "restrict ")?;
-                }
-                if depth == ptr.depth.into() {
-                    write!(f, "*")?;
-                } else {
-                    write!(f, "* ")?;
-                }
-            }
-        }
 
         Ok(())
     }
@@ -1450,6 +1309,13 @@ impl std::fmt::Display for BaseType {
                 // When pretty printing, use the number of bytes rather than
                 // bending the knee to the wobbly-sized integers
                 write!(f, "{sign}{nbits}")
+            }
+            Self::Ptr { to, restrict } => {
+                write!(f, "{to}")?;
+                if *restrict {
+                    write!(f, " restrict")?;
+                }
+                write!(f, "*")
             }
             Self::Float(_) => write!(f, "float"),
             Self::Double(_) => write!(f, "double"),

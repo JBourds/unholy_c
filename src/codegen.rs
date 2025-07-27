@@ -121,7 +121,6 @@ impl AssemblyType {
 
     fn from_ast_type(r#type: ast::Type) -> Self {
         match r#type {
-            ast::Type { ptr: Some(_), .. } => Self::Pointer,
             ast::Type {
                 base: ast::BaseType::Float(_),
                 ..
@@ -1548,7 +1547,6 @@ impl Instruction<Initial> {
                 match val_type {
                     ast::Type {
                         base: ast::BaseType::Int { .. },
-                        ptr: None,
                         ..
                     } => {
                         vec![
@@ -1565,7 +1563,6 @@ impl Instruction<Initial> {
                     }
                     ast::Type {
                         base: ast::BaseType::Float(_) | ast::BaseType::Double(_),
-                        ptr: None,
                         ..
                     } => {
                         vec![
@@ -2127,7 +2124,6 @@ impl Instruction<Initial> {
                 match dst_type {
                     ast::Type {
                         base: ast::BaseType::Int { .. },
-                        ptr: None,
                         ..
                     } => {
                         let ax = Operand::Reg(Reg::X86 {
@@ -2139,7 +2135,6 @@ impl Instruction<Initial> {
                     }
                     ast::Type {
                         base: ast::BaseType::Float(_) | ast::BaseType::Double(_),
-                        ptr: None,
                         ..
                     } => {
                         let xmm0 = Operand::Reg(Reg::Xmm {
@@ -2360,7 +2355,6 @@ fn is_float(val: &tacky::Val, symbols: &tacky::SymbolTable) -> bool {
         val.get_type(symbols),
         ast::Type {
             base: ast::BaseType::Float(_) | ast::BaseType::Double(_),
-            ptr: None,
             ..
         }
     )
@@ -2370,7 +2364,6 @@ fn is_signed(val: &tacky::Val, symbols: &tacky::SymbolTable) -> bool {
     match val.get_type(symbols) {
         ast::Type {
             base: ast::BaseType::Int { signed, .. },
-            ptr: None,
             ..
         } => signed.is_none_or(|signed| signed),
         _ => true,

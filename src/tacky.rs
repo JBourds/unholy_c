@@ -1077,7 +1077,6 @@ impl Expr {
                         t,
                         ast::Type {
                             base: ast::BaseType::Float(_) | ast::BaseType::Double(_),
-                            ptr: None,
                             ..
                         }
                     )
@@ -1092,7 +1091,6 @@ impl Expr {
                                     nbytes: _,
                                     signed: Some(false),
                                 },
-                            ptr: None,
                             ..
                         } => {
                             instructions.push(Instruction::DoubleToUInt {
@@ -1106,7 +1104,6 @@ impl Expr {
                                     nbytes: _,
                                     signed: _,
                                 },
-                            ptr: None,
                             ..
                         } => {
                             instructions.push(Instruction::DoubleToInt {
@@ -1127,7 +1124,6 @@ impl Expr {
                                     nbytes: _,
                                     signed: Some(false),
                                 },
-                            ptr: None,
                             ..
                         } => {
                             instructions.push(Instruction::UIntToDouble {
@@ -1141,7 +1137,6 @@ impl Expr {
                                     nbytes: _,
                                     signed: _,
                                 },
-                            ptr: None,
                             ..
                         } => {
                             instructions.push(Instruction::IntToDouble {
@@ -1173,7 +1168,6 @@ impl Expr {
                         _ => match val_type {
                             ast::Type {
                                 base: ast::BaseType::Int { signed, .. },
-                                ptr: None,
                                 ..
                             } => {
                                 if signed.is_none_or(|signed| signed) {

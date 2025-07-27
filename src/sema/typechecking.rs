@@ -851,7 +851,6 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
                         r#type,
                         ast::Type {
                             base: ast::BaseType::Float(_) | ast::BaseType::Double(_),
-                            ptr: None,
                             ..
                         }
                     )),
@@ -900,7 +899,6 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
                         common_t,
                         ast::Type {
                             base: ast::BaseType::Float(_) | ast::BaseType::Double(_),
-                            ptr: None,
                             ..
                         }
                     )),
@@ -1044,7 +1042,7 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
             let TypedExpr { expr, r#type } =
                 typecheck_expr(exp, symbols).context("Failed to typecheck casted expression.")?;
             ensure!(
-                r#type.base.can_assign_to(&target.base) && r#type.ptr == target.ptr,
+                r#type.base.can_assign_to(&target.base),
                 "Unable to cast from {type:?} to {target:?}"
             );
 
@@ -1067,7 +1065,6 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
             r#type: ast::Type {
                 base: ast::BaseType::from(constant),
                 alignment: ast::BaseType::from(constant).default_alignment(),
-                ptr: None,
                 storage: None,
                 is_const: true,
             },

@@ -483,7 +483,7 @@ impl SymbolTable {
         if let scope @ Scope::Local(_) = self.scope() {
             // Declare function and all its params into local scope
             self.declare_in_scope(&wrapped_decl, scope)?;
-            for (typ, name) in decl.signature.iter() {
+            for (typ, name) in decl.signature.0.iter() {
                 if let Some(name) = name {
                     let param_decl = ast::Declaration::VarDecl(ast::VarDecl {
                         name: Rc::clone(name),

@@ -176,6 +176,7 @@ fn resolve_fun_decl(
     let mut inner_map = make_new_scope(ident_map);
     let new_params = decl
         .signature
+        .0
         .into_iter()
         .map(|(typ, name)| {
             // Resolve automatic variables for parameter names
@@ -198,7 +199,7 @@ fn resolve_fun_decl(
         None
     };
     Ok(ast::FunDecl {
-        signature: new_params,
+        signature: ast::ParameterList(new_params),
         block: body,
         ..decl
     })

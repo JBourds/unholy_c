@@ -72,7 +72,7 @@ impl AstNode for Program {
 pub struct FunDecl {
     pub ret_t: Type,
     pub name: Rc<String>,
-    pub signature: Vec<(Type, Option<Rc<String>>)>,
+    pub signature: ParameterList,
     pub block: Option<Block>,
     pub storage_class: Option<StorageClass>,
 }
@@ -81,6 +81,7 @@ impl From<&FunDecl> for Type {
     fn from(decl: &FunDecl) -> Self {
         let param_types = decl
             .signature
+            .0
             .iter()
             .map(|(param_type, _)| param_type.clone())
             .collect::<Vec<Type>>();
@@ -97,15 +98,18 @@ impl From<&FunDecl> for Type {
     }
 }
 
-type ParameterList = Vec<(Type, Option<Rc<String>>)>;
+#[derive(Clone, Debug, PartialEq)]
+pub struct ParameterList(pub Vec<(Type, Option<Rc<String>>)>);
 
-impl FunDecl {
-    /// Parses [ <type> [name] ]*.
-    /// Does not consume opening or closing parentheses
-    fn parse_parameter_list(tokens: &[Token]) -> Result<(ParameterList, &[Token])> {
+impl AstNode for ParameterList {
+    fn consume(tokens: &[Token]) -> Result<(Self, &[Token])> {
+        if tokens.first().is_none_or(|t| *t != Token::LParen) {
+            bail!("ast.ParameterList.consume(): Expected opening parentheses in parameter list.");
+        }
+        let tokens = &tokens[1..];
         let mut signature = vec![];
         let remaining = match tokens {
-            [Token::RParen, ..] => tokens,
+            [Token::RParen, tokens @ ..] => tokens,
             [Token::Void, Token::RParen, ..] => &tokens[1..],
             [Token::Void, t, ..] => {
                 bail!("Expected closing parentheses but found \"{}\"", t)
@@ -133,7 +137,7 @@ impl FunDecl {
                 remaining
             }
         };
-        Ok((signature, remaining))
+        Ok((Self(signature), remaining))
     }
 }
 
@@ -146,8 +150,8 @@ impl AstNode for FunDecl {
         let storage_class = ret_t.storage.take();
 
         let (name, tokens) = parse_ident(tokens).context("Missing function name.")?;
-        if let [Token::LParen, tokens @ ..] = tokens {
-            let (signature, tokens) = Self::parse_parameter_list(tokens)
+        if tokens.first().is_some_and(|t| *t == Token::LParen) {
+            let (signature, tokens) = ParameterList::consume(tokens)
                 .with_context(|| format!("Unable to parse parameter list for {}", name))?;
             if tokens.first().is_some_and(|t| *t != Token::RParen) {
                 bail!("Expected \")\" to close parameter list.");

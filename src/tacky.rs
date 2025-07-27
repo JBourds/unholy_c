@@ -137,7 +137,7 @@ impl From<sema::ValidAst> for Program {
 pub struct Function {
     pub name: Rc<String>,
     pub external_linkage: bool,
-    pub signature: Vec<(ast::Type, Option<Rc<String>>)>,
+    pub signature: ast::ParameterList,
     pub instructions: Vec<Instruction>,
 }
 
@@ -175,7 +175,7 @@ impl Function {
 
         // Insert function parameter types for type inference
         // FIXME: Make sure that parameter names are unique!!!!
-        signature.iter().for_each(|(r#type, name)| {
+        signature.0.iter().for_each(|(r#type, name)| {
             if let Some(name) = name {
                 let name = Rc::clone(name);
                 symbols.new_entry(name, r#type.clone());

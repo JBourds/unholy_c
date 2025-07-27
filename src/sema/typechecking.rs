@@ -495,7 +495,9 @@ impl SymbolTable {
         if let scope @ Scope::Local(_) = self.scope() {
             // Declare function and all its params into local scope
             self.declare_in_scope(&wrapped_decl, scope)?;
-            for (typ, name) in decl.signature.0.iter() {
+            for (r#type, name) in decl.signature()
+                .context("sema.typechecking.declare_fun(): Error getting function declaration in signature.")?
+                .into_iter() {
                 if let Some(name) = name {
                     let param_decl = ast::Declaration::VarDecl(ast::VarDecl {
                         name: Rc::clone(name),
@@ -608,8 +610,7 @@ fn typecheck_block_item(
 ) -> Result<ast::BlockItem> {
     match item {
         ast::BlockItem::Stmt(stmt) => Ok(ast::BlockItem::Stmt(
-            typecheck_stmt(stmt, symbols, function)
-                .context("Failed to typecheck block item: {item:#?}")?,
+            typecheck_stmt(stmt, symbols, function).context("Failed to typecheck block item")?,
         )),
         ast::BlockItem::Decl(decl) => Ok(ast::BlockItem::Decl(
             typecheck_decl(decl, symbols).context("Failed to typecheck block item: {item:#?}")?,

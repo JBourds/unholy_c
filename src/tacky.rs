@@ -137,7 +137,7 @@ impl From<sema::ValidAst> for Program {
 pub struct Function {
     pub name: Rc<String>,
     pub external_linkage: bool,
-    pub signature: ast::ParameterList,
+    pub signature: Vec<(ast::Type, Option<Rc<String>>)>,
     pub instructions: Vec<Instruction>,
 }
 
@@ -163,24 +163,30 @@ impl Function {
 
 impl Function {
     fn from_symbol(decl: ast::FunDecl, symbols: &mut SymbolTable) -> Option<Self> {
+        // Insert function parameter types for type inference
+        // FIXME: Make sure that parameter names are unique!!!!
+        let mut signature = vec![];
+        for (r#type, name) in decl
+            .signature()
+            .expect("tacky.Function.from_symbol(): Error getting function declaration signature.")
+            .into_iter()
+        {
+            if let Some(name) = name {
+                symbols.new_entry(Rc::clone(name), r#type.clone());
+                signature.push((r#type.clone(), Some(Rc::clone(name))));
+            } else {
+                signature.push((r#type.clone(), None));
+            }
+        }
+
         let ast::FunDecl {
             name,
-            signature,
             block: Some(block),
             ..
         } = decl
         else {
             return None;
         };
-
-        // Insert function parameter types for type inference
-        // FIXME: Make sure that parameter names are unique!!!!
-        signature.0.iter().for_each(|(r#type, name)| {
-            if let Some(name) = name {
-                let name = Rc::clone(name);
-                symbols.new_entry(name, r#type.clone());
-            }
-        });
 
         let mut temp_var_counter = 0;
         let mut make_temp_var =

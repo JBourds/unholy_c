@@ -175,19 +175,18 @@ fn resolve_fun_decl(
     );
     let mut inner_map = make_new_scope(ident_map);
     let new_params = decl
-        .signature
-        .0
+        .params
         .into_iter()
-        .map(|(typ, name)| {
+        .map(|name| {
             // Resolve automatic variables for parameter names
             if let Some(name) = name {
                 resolve_automatic(Rc::clone(&name), &mut inner_map, make_temporary)
-                    .map(|name| (typ, Some(name)))
+                    .map(Option::Some)
             } else {
-                Ok((typ, None))
+                Ok(None)
             }
         })
-        .collect::<Result<Vec<(ast::Type, Option<Rc<String>>)>, Error>>()?;
+        .collect::<Result<Vec<Option<Rc<String>>>, Error>>()?;
     let body = if let Some(body) = decl.block {
         let items = body
             .into_items()
@@ -198,8 +197,9 @@ fn resolve_fun_decl(
     } else {
         None
     };
+
     Ok(ast::FunDecl {
-        signature: ast::ParameterList(new_params),
+        params: new_params,
         block: body,
         ..decl
     })

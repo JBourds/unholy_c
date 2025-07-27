@@ -338,7 +338,7 @@ impl Function {
         let mut gpr_args = vec![];
         let mut fpr_args = vec![];
         let mut stack_args = vec![];
-        for (r#type, name) in signature.0.into_iter() {
+        for (r#type, name) in signature.into_iter() {
             let param_type = AssemblyType::from_ast_type(r#type);
             match param_type {
                 AssemblyType::Float | AssemblyType::Double

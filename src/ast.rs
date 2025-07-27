@@ -288,7 +288,7 @@ impl AstNode for Declaration {
             Ok((Self::VarDecl(decl), tokens))
         } else {
             bail!(
-                "Unable to parse valid declaration form from tokens {:#?}",
+                "Unable to parse valid declaration from tokens {:#?}",
                 &tokens[..std::cmp::min(tokens.len(), 25)]
             )
         }
@@ -1048,7 +1048,7 @@ impl From<&Constant> for BaseType {
 
 impl Default for BaseType {
     fn default() -> Self {
-        Self::int(4, None)
+        Self::int(core::mem::size_of::<i32>(), None)
     }
 }
 
@@ -1100,7 +1100,7 @@ impl PartialEq for Type {
 
 impl Type {
     pub fn bool() -> Self {
-        Self::int(4, None)
+        Self::int(core::mem::size_of::<i32>(), None)
     }
 
     pub fn int(nbytes: usize, signed: Option<bool>) -> Self {
@@ -1126,107 +1126,39 @@ impl Type {
     }
 }
 
-impl AstNode for Type {
-    fn consume<'a>(tokens: &'a [Token]) -> Result<(Self, &'a [Token])> {
+#[derive(Debug, Clone)]
+struct TypeBuilder {
+    stream_offset: usize,
+    n_longs: usize,
+    is_signed: Option<bool>,
+    is_short: bool,
+    is_const: bool,
+    alignment: Option<NonZeroUsize>,
+    storage: Option<StorageClass>,
+    base: Option<BaseType>,
+}
+
+impl TypeBuilder {
+    fn new() -> Self {
+        Self {
+            stream_offset: 0,
+            n_longs: 0,
+            is_signed: None,
+            is_short: false,
+            is_const: false,
+            alignment: None,
+            storage: None,
+            base: None,
+        }
+    }
+
+    fn get_base(mut self, tokens: &[Token]) -> Result<Self> {
         let mut remaining = tokens;
-
-        // Integers have these specifiers attached to them, and double can
-        // have up to a single "long" in its specifier
-        let mut n_longs = 0;
-        let mut is_signed = None;
-        let mut is_short = false;
-        // See if there is a specifier, ok result is boolean for if a token was found
-        let mut check_for_specifier = |t: &Token| match t {
-            Token::Short => {
-                is_short = true;
-                if is_short && n_longs > 0 {
-                    bail!("Found \"short\" and \"long\" in same type declaration.");
-                }
-                Ok(true)
-            }
-            Token::Long => {
-                n_longs += 1;
-                if is_short && n_longs > 0 {
-                    bail!("Found \"short\" and \"long\" in same type declaration.");
-                }
-                Ok(true)
-            }
-            Token::Unsigned => {
-                if is_signed.is_some_and(|signed| signed) {
-                    bail!("Type cannot be both signed and unsigned.");
-                } else if is_signed.is_some() {
-                    bail!("Error: duplicate unsigned");
-                }
-                is_signed = Some(false);
-                Ok(true)
-            }
-            Token::Signed => {
-                if is_signed.is_some_and(|signed| !signed) {
-                    bail!("Type cannot be both signed and unsigned.");
-                } else if is_signed.is_some() {
-                    bail!("Error: duplicate nsigned");
-                }
-                is_signed = Some(true);
-                Ok(true)
-            }
-            _ => Ok(false),
-        };
-
-        // Anything can be const
-        let mut is_const = false;
-        let mut check_for_const = |t: &Token| {
-            if *t == Token::Const {
-                // We can have multiple constants
-                is_const = true;
-                true
-            } else {
-                false
-            }
-        };
-
-        let mut storage = None;
-        let mut check_for_storage = |t: &Token| {
-            if storage.is_some() {
-                bail!("Error: Multiple storage class specifiers.");
-            }
-            storage = match t {
-                Token::Static => Some(StorageClass::Static),
-                Token::Extern => Some(StorageClass::Extern),
-                Token::Auto => Some(StorageClass::Auto),
-                Token::Register => Some(StorageClass::Register),
-                _ => None,
-            };
-            Ok(storage.is_some())
-        };
-
-        let mut base: Option<BaseType> = None;
-        let mut check_for_base_type = |tokens| {
-            if let Ok((r#type, tokens)) = BaseType::consume(tokens) {
-                if base.is_some() {
-                    bail!("Error: Found two conflicting types.");
-                }
-                base = Some(r#type);
-                Ok((true, tokens))
-            } else {
-                Ok((false, tokens))
-            }
-        };
-
-        // Continue eating tokens with aditional type specifiers, updating
-        // flags and enforcing type specifier rules along the way
-        // Requirements:
-        //  1. Needs to find a valid "base type" (defined as primitives or
-        //  a user defined struct). As part of this, specifiers for an integer
-        //  must be kept track of.
-        //  2. Optionally attach a storage class and const specification.
-        //  3. Parse up to some maximum pointer depth (256) and for each
-        //  pointer check whether it has a restrict or const keyword.
         while let Some(t) = remaining.first() {
-            if check_for_specifier(t).is_ok_and(|found| found)
-                || check_for_storage(t).is_ok_and(|found| found)
+            if self.check_for_specifier(t)? || self.check_for_storage(t)? || self.check_for_const(t)
             {
                 remaining = &remaining[1..];
-            } else if let Ok((true, tokens)) = check_for_base_type(remaining) {
+            } else if let (true, tokens) = self.check_for_base_type(remaining)? {
                 remaining = tokens;
             } else {
                 break;
@@ -1236,24 +1168,25 @@ impl AstNode for Type {
         // Integer checks
         // 1. If any of the integer flags changed, the base type either has
         // to be explicitly declared as an integer or have been elided
-        if n_longs > 0 && is_short {
+        if self.n_longs > 0 && self.is_short {
             bail!("Integer cannot be both a long and a short.");
         }
-        if n_longs > 0 && matches!(base, Some(BaseType::Double { .. })) {
-            base.replace(BaseType::Double(std::mem::size_of::<f64>()));
-        } else if n_longs > 0 || is_signed.is_some() || is_short {
-            match base {
+        if self.n_longs > 0 && matches!(&self.base, Some(BaseType::Double { .. })) {
+            self.base
+                .replace(BaseType::Double(std::mem::size_of::<f64>()));
+        } else if self.n_longs > 0 || self.is_signed.is_some() || self.is_short {
+            match self.base {
                 Some(BaseType::Int { .. }) | None => {
-                    let nbytes = if n_longs > 0 {
+                    let nbytes = if self.n_longs > 0 {
                         std::mem::size_of::<i64>()
-                    } else if is_short {
+                    } else if self.is_short {
                         std::mem::size_of::<i16>()
                     } else {
                         std::mem::size_of::<i32>()
                     };
-                    base.replace(BaseType::Int {
+                    self.base.replace(BaseType::Int {
                         nbytes,
-                        signed: is_signed,
+                        signed: self.is_signed,
                     });
                 }
                 _ => bail!(
@@ -1262,19 +1195,122 @@ impl AstNode for Type {
             }
         }
 
-        if let Some(base) = base {
+        // SAFETY: `remaining` is constructed from within `tokens` slice of
+        // memory. This will always be valid, and was a whole lot easier to do
+        // than reworking all our parsing logic :^)
+        self.stream_offset =
+            unsafe { remaining.as_ptr().offset_from(tokens.as_ptr()) }.try_into()?;
+
+        Ok(self)
+    }
+
+    fn check_for_base_type<'a>(&mut self, tokens: &'a [Token]) -> Result<(bool, &'a [Token])> {
+        if let Ok((r#type, tokens)) = BaseType::consume(tokens) {
+            if self.base.is_some() {
+                bail!("Error: Found two conflicting types.");
+            }
+            self.base = Some(r#type);
+            Ok((true, tokens))
+        } else {
+            Ok((false, tokens))
+        }
+    }
+
+    fn check_for_const(&mut self, t: &Token) -> bool {
+        if *t == Token::Const {
+            // More `const` won't make it more constant but still allow it
+            self.is_const = true;
+            true
+        } else {
+            false
+        }
+    }
+
+    fn check_for_specifier(&mut self, t: &Token) -> Result<bool> {
+        match t {
+            Token::Short => {
+                self.is_short = true;
+                if self.is_short && self.n_longs > 0 {
+                    bail!("Found \"short\" and \"long\" in same type declaration.");
+                }
+                Ok(true)
+            }
+            Token::Long => {
+                self.n_longs += 1;
+                if self.is_short && self.n_longs > 0 {
+                    bail!("Found \"short\" and \"long\" in same type declaration.");
+                }
+                Ok(true)
+            }
+            Token::Unsigned => {
+                if self.is_signed.is_some_and(|signed| signed) {
+                    bail!("Type cannot be both signed and unsigned.");
+                } else if self.is_signed.is_some() {
+                    bail!("Error: duplicate unsigned");
+                }
+                self.is_signed = Some(false);
+                Ok(true)
+            }
+            Token::Signed => {
+                if self.is_signed.is_some_and(|signed| !signed) {
+                    bail!("Type cannot be both signed and unsigned.");
+                } else if self.is_signed.is_some() {
+                    bail!("Error: duplicate nsigned");
+                }
+                self.is_signed = Some(true);
+                Ok(true)
+            }
+            _ => Ok(false),
+        }
+    }
+
+    fn check_for_storage(&mut self, t: &Token) -> Result<bool> {
+        let storage = match t {
+            Token::Static => Some(StorageClass::Static),
+            Token::Extern => Some(StorageClass::Extern),
+            Token::Auto => Some(StorageClass::Auto),
+            Token::Register => Some(StorageClass::Register),
+            _ => None,
+        };
+        match (self.storage.is_some(), storage.is_some()) {
+            (true, true) => bail!("Error: Multiple storage class specifiers."),
+            (false, true) => {
+                self.storage = storage;
+                Ok(true)
+            }
+            (_, false) => Ok(false),
+        }
+    }
+
+    fn into_type(self) -> Result<(usize, Type)> {
+        if let Some(base) = self.base {
+            let alignment = self.alignment.unwrap_or(base.default_alignment());
+            if !alignment.is_power_of_two() {
+                bail!("Alignment must be a power of 2");
+            }
+
             Ok((
-                Self {
-                    alignment: base.default_alignment(),
+                self.stream_offset,
+                Type {
                     base,
-                    storage,
-                    is_const,
+                    alignment,
+                    storage: self.storage,
+                    is_const: self.is_const,
                 },
-                remaining,
             ))
         } else {
-            bail!("Did not find any base type.");
+            bail!("Type builder has not parsed a base type yet");
         }
+    }
+}
+
+impl AstNode for Type {
+    fn consume(tokens: &[Token]) -> Result<(Self, &[Token])> {
+        let (stream_offset, t) = TypeBuilder::new()
+            .get_base(tokens)
+            .and_then(|b| b.into_type())
+            .context("Error building base type from token stream.")?;
+        Ok((t, &tokens[stream_offset..]))
     }
 }
 

@@ -934,9 +934,9 @@ impl BaseType {
 
     pub fn float(double: bool) -> Self {
         if double {
-            Self::Double(8)
+            Self::Double(core::mem::size_of::<f64>())
         } else {
-            Self::Float(4)
+            Self::Float(core::mem::size_of::<f32>())
         }
     }
 

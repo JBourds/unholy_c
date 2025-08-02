@@ -266,15 +266,28 @@ impl Declaration {
                 base: BaseType::Fun { .. },
                 ..
             } => {
-                let (decl, tokens) = FunDecl::new_uninit(decl_type, storage_class, name, params)
-                    .check_for_definition(tokens)
-                    .context("ast.Declaration.consume(): Error parsing function declaration.")?;
+                let (decl, tokens) = FunDecl::new_uninit(
+                    decl_type,
+                    storage_class,
+                    Rc::clone(&name),
+                    params,
+                )
+                .check_for_definition(tokens)
+                .context(format!(
+                    "ast.Declaration.consume(): Error parsing function declaration \"{name}\"."
+                ))?;
                 Ok((Declaration::FunDecl(decl), tokens))
             }
             _ => {
-                let (decl, tokens) = VarDecl::new_uninit(decl_type, storage_class, name)
-                    .check_for_definition(tokens)
-                    .context("ast.Declaration.consume(): Error parsing variable declaration.")?;
+                let (decl, tokens) = VarDecl::new_uninit(
+                    decl_type,
+                    storage_class,
+                    Rc::clone(&name),
+                )
+                .check_for_definition(tokens)
+                .context(
+                    "ast.Declaration.consume(): Error parsing variable declaration for \"{name}\".",
+                )?;
                 Ok((Declaration::VarDecl(decl), tokens))
             }
         }

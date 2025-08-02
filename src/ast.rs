@@ -1935,6 +1935,8 @@ pub enum UnaryOp {
     PreDec,
     PostInc,
     PostDec,
+    AddrOf,
+    Deref,
 }
 
 impl UnaryOp {
@@ -1963,6 +1965,8 @@ impl UnaryOp {
     fn consume_prefix(tokens: &[Token]) -> Result<(Self, &[Token])> {
         if let Some(token) = tokens.first() {
             match tokens {
+                [Token::Ampersand, tokens @ ..] => Ok((Self::AddrOf, tokens)),
+                [Token::Star, tokens @ ..] => Ok((Self::Deref, tokens)),
                 [Token::Minus, tokens @ ..] => Ok((Self::Negate, tokens)),
                 [Token::BitNot, tokens @ ..] => Ok((Self::Complement, tokens)),
                 [Token::Not, tokens @ ..] => Ok((Self::Not, tokens)),

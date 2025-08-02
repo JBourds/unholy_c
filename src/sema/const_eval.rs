@@ -430,6 +430,8 @@ fn eval_unary(op: ast::UnaryOp, expr: ast::Expr) -> Result<Constant> {
         ast::UnaryOp::Not => !val,
         ast::UnaryOp::PreInc
         | ast::UnaryOp::PreDec
+        | ast::UnaryOp::AddrOf
+        | ast::UnaryOp::Deref
         | ast::UnaryOp::PostInc
         | ast::UnaryOp::PostDec => bail!("{op:#?} is not allowed in const expresion"),
     };

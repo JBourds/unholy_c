@@ -38,7 +38,7 @@ impl RawParameterList {
         let tokens = &tokens[1..];
         let mut signature = vec![];
         let remaining = match tokens {
-            [Token::RParen, tokens @ ..] => tokens,
+            [Token::RParen, tokens @ ..] => &tokens[1..],
             [Token::Void, Token::RParen, ..] => &tokens[2..],
             [Token::Void, t, ..] => {
                 bail!("Expected closing parentheses but found \"{}\"", t)

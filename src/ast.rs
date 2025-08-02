@@ -55,7 +55,7 @@ impl RawParameterList {
                         storage.is_none(),
                         "Cannot have function parameter with storage specifier."
                     );
-                    let (declarator, tokens) = Declarator::consume(&tokens[stream_offset..])
+                    let (declarator, tokens) = Declarator::consume(&remaining[stream_offset..])
                         .context("ast.ParameterList.consume(): Unable to parse declarator.")?;
                     signature.push((r#type, declarator));
                     if let Some(Token::Comma) = tokens.first() {

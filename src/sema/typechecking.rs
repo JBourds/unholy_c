@@ -858,6 +858,10 @@ fn try_implicit_cast(
     let TypedExpr { expr, r#type } = typecheck_expr(from, symbols)
         .context("Failed to typecheck from argument in implicit cast.")?;
 
+    if r#type.is_pointer() && target.is_float() || target.is_pointer() && r#type.is_float() {
+        bail!("Cannot convert between double and pointer.");
+    }
+
     if r#type != *target {
         Ok(ast::Expr::Cast {
             target: ast::Type {

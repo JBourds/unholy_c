@@ -548,20 +548,17 @@ fn is_null_pointer_constant(e: &ast::Expr) -> bool {
     let Ok(c) = const_eval::eval(e.clone()) else {
         return false;
     };
-    match c {
+    matches!(
+        c,
         ast::Constant::I8(0)
-        | ast::Constant::I16(0)
-        | ast::Constant::I32(0)
-        | ast::Constant::I64(0)
-        | ast::Constant::U8(0)
-        | ast::Constant::U16(0)
-        | ast::Constant::U32(0)
-        | ast::Constant::U64(0) => true,
-        ast::Constant::F32(_) | ast::Constant::F64(_) => {
-            unreachable!("Floats cannot be null pointer constants!")
-        }
-        _ => false,
-    }
+            | ast::Constant::I16(0)
+            | ast::Constant::I32(0)
+            | ast::Constant::I64(0)
+            | ast::Constant::U8(0)
+            | ast::Constant::U16(0)
+            | ast::Constant::U32(0)
+            | ast::Constant::U64(0)
+    )
 }
 
 fn get_common_pointer_type(

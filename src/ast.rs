@@ -815,8 +815,7 @@ impl Factor {
                     Ok((Expr::Constant(lit), tokens))
                 }
                 [Token::Ident(s), tokens @ ..] => {
-                    let (expr, tokens) = Self::check_for_postfix(Expr::Var(Rc::clone(s)), tokens);
-                    Self::check_for_call(expr, tokens)
+                    Self::check_for_call(Expr::Var(Rc::clone(s)), tokens)
                 }
                 // Could be parentheses for a type cast or expression precedence
                 [Token::LParen, tokens @ ..] => {
@@ -825,7 +824,6 @@ impl Factor {
                         .and_then(|b| b.into_type())
                     {
                         let tokens = &tokens[stream_offset..];
-
                         let (r#type, tokens) =
                             if let Ok((decl, tokens)) = AbstractDeclarator::consume(tokens) {
                                 (AbstractDeclarator::process(decl, r#type)?, tokens)
@@ -864,7 +862,8 @@ impl Factor {
                     }
                 }
                 _ => bail!("Could not match valid grammar rule."),
-            },
+            }
+            .map(|(expr, tokens)| Self::check_for_postfix(expr, tokens)),
         }
     }
 }

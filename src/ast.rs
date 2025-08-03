@@ -1154,7 +1154,7 @@ impl std::fmt::Display for Type {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Default, Clone, PartialEq)]
 struct TypeBuilder {
     stream_offset: usize,
     n_longs: usize,
@@ -1164,21 +1164,6 @@ struct TypeBuilder {
     alignment: Option<NonZeroUsize>,
     storage: Option<StorageClass>,
     base: Option<BaseType>,
-}
-
-impl Default for TypeBuilder {
-    fn default() -> Self {
-        Self {
-            stream_offset: 0,
-            n_longs: 0,
-            is_signed: None,
-            is_short: false,
-            is_const: false,
-            alignment: None,
-            storage: None,
-            base: None,
-        }
-    }
 }
 
 impl TypeBuilder {

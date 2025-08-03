@@ -357,19 +357,10 @@ fn resolve_stmt(
 
 fn resolve_expr(expr: ast::Expr, ident_map: &HashMap<Rc<String>, IdentEntry>) -> Result<ast::Expr> {
     match expr {
-        ast::Expr::Assignment { lvalue, rvalue } => {
-            let lvalue = match *lvalue {
-                ast::Expr::Var(v) => ast::Expr::Var(v),
-                _ => bail!(
-                    "Invalid lvalue '{:?}'",
-                    ast::Expr::Assignment { lvalue, rvalue }
-                ),
-            };
-            Ok(ast::Expr::Assignment {
-                lvalue: Box::new(resolve_expr(lvalue, ident_map)?),
-                rvalue: Box::new(resolve_expr(*rvalue, ident_map)?),
-            })
-        }
+        ast::Expr::Assignment { lvalue, rvalue } => Ok(ast::Expr::Assignment {
+            lvalue: Box::new(resolve_expr(*lvalue, ident_map)?),
+            rvalue: Box::new(resolve_expr(*rvalue, ident_map)?),
+        }),
         ast::Expr::Var(var) => {
             if let Some(IdentEntry { name, .. }) = ident_map.get(&var) {
                 Ok(ast::Expr::Var(Rc::clone(name)))

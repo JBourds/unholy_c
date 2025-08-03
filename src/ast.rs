@@ -1137,6 +1137,10 @@ impl Type {
     pub fn is_pointer(&self) -> bool {
         matches!(self.base, BaseType::Ptr { .. })
     }
+
+    pub fn is_arithmetic(&self) -> bool {
+        matches!(self.base, BaseType::Int { .. } | BaseType::Float(_))
+    }
 }
 
 impl std::fmt::Display for Type {

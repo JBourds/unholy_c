@@ -130,13 +130,10 @@ impl AssemblyType {
                 ..
             } => Self::Double,
             ast::Type {
-                base: ast::BaseType::Char,
-                ..
-            } => Self::Byte,
-            ast::Type {
                 base: ast::BaseType::Int { nbytes, .. },
                 ..
             } => match nbytes {
+                1 => Self::Byte,
                 2 => Self::Word,
                 4 => Self::Longword,
                 8 => Self::Quadword,

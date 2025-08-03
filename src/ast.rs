@@ -883,7 +883,6 @@ pub enum BaseType {
     },
     Float(usize),
     Double(usize),
-    Char,
     Fun {
         ret_t: Box<Type>,
         param_types: Vec<Type>,
@@ -940,7 +939,6 @@ impl BaseType {
             BaseType::Float(nbytes) => *nbytes,
             BaseType::Double(nbytes) => *nbytes,
             BaseType::Ptr { .. } => core::mem::size_of::<usize>(),
-            BaseType::Char => core::mem::size_of::<i8>(),
             BaseType::Fun { .. } => unreachable!(),
             BaseType::Struct => unreachable!(),
             BaseType::Void => unreachable!(),
@@ -994,7 +992,6 @@ impl BaseType {
             Self::Int { nbytes, .. } => NonZeroUsize::new(*nbytes).unwrap(),
             Self::Float(nbytes) => NonZeroUsize::new(*nbytes).unwrap(),
             Self::Double(nbytes) => NonZeroUsize::new(*nbytes).unwrap(),
-            Self::Char => NonZeroUsize::new(core::mem::size_of::<i8>()).unwrap(),
             Self::Fun { .. } | Self::Ptr { .. } => {
                 NonZeroUsize::new(core::mem::size_of::<usize>()).unwrap()
             }
@@ -1017,7 +1014,7 @@ impl BaseType {
     fn default_promote(self) -> Self {
         match self {
             // Integer types get promoted to a basic signed int by default
-            Self::Int { .. } | Self::Char => {
+            Self::Int { .. } => {
                 let int = Self::default();
                 let int_rank = int.rank().expect("Integer does not have a rank?");
                 if self.rank().expect("Integer does not have a rank?") >= int_rank {
@@ -1066,7 +1063,6 @@ impl BaseType {
                 )),
                 Token::Float => Ok((Self::Float(std::mem::size_of::<f32>()), &tokens[1..])),
                 Token::Double => Ok((Self::Double(std::mem::size_of::<f64>()), &tokens[1..])),
-                Token::Char => Ok((Self::Char, &tokens[1..])),
                 // TODO: Recursive parsing logic for structs
                 Token::Struct => Ok((Self::Struct, &tokens[1..])),
                 _ => bail!("Could not parse base type."),
@@ -1577,7 +1573,6 @@ impl std::fmt::Display for BaseType {
             }
             Self::Float(_) => write!(f, "float"),
             Self::Double(_) => write!(f, "double"),
-            Self::Char => write!(f, "char"),
             Self::Struct => todo!(),
             Self::Fun { ret_t, param_types } => {
                 write!(f, "(")?;

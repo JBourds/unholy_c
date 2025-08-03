@@ -1144,6 +1144,10 @@ impl Type {
             BaseType::Int { .. } | BaseType::Float(_) | BaseType::Double(_)
         )
     }
+
+    pub fn is_float(&self) -> bool {
+        matches!(self.base, BaseType::Float(_) | BaseType::Double(_))
+    }
 }
 
 impl std::fmt::Display for Type {

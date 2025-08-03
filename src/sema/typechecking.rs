@@ -1059,7 +1059,7 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
             r#else,
         } => {
             let target = ast::Type::bool();
-            let condition = Box::new(convert_by_assignment(condition, &target, symbols).context(
+            let condition = Box::new(try_implicit_cast(&target, condition, symbols).context(
                 "Unable to implicitly cast ternary expression condition into a boolean value.",
             )?);
 

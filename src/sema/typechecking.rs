@@ -154,7 +154,7 @@ impl PartialOrd for InitialValue {
 impl InitialValue {
     // TODO: Make this not dependent on host computer byte ordering
     fn from_expr(r#type: &ast::Type, expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<Self> {
-        let expr = try_implicit_cast(r#type, expr, symbols).context(
+        let expr = convert_by_assignment(expr, r#type, symbols).context(
             "Failed to perform implicit casting when constructing initial value for declaration",
         )?;
         let val = const_eval::eval(expr.clone()).context("Failed to const eval expression")?;
@@ -708,7 +708,7 @@ fn typecheck_stmt(
                         if !found.base.can_assign_to(&expected.base) {
                             bail!("Found return type: \"{found}\" in function \"{function}\" but expected return type: \"{expected}\"");
                         } else {
-                            Ok(ast::Stmt::Return(Some(try_implicit_cast(&expected.clone(), &expr, symbols)
+                            Ok(ast::Stmt::Return(Some(convert_by_assignment( &expr,&expected.clone(), symbols)
                                         .context(format!("Unable to implicitly cast return value to expected return type in \"{}\"", function))?
                                         )))
                         }
@@ -822,7 +822,7 @@ fn typecheck_stmt(
                 let cases = cases.as_ref().expect("At this point there should be cases or an empty vector, but never a None variant.");
                 let mut case_values = HashSet::new();
                 for (val, s) in cases.iter() {
-                    let expr = try_implicit_cast(&condition_type, &ast::Expr::Constant(*val), symbols)
+                    let expr = convert_by_assignment( &ast::Expr::Constant(*val),&condition_type, symbols)
                         .context(format!("Unable to implicitly case constant to type {condition_type:#?}"))?;
                     let constant = const_eval::eval(expr)
                         .context("Unable to convert case expression into constant value.")?;
@@ -903,7 +903,7 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
                 expr: ast::Expr::Assignment {
                     lvalue: lvalue.clone(),
                     rvalue: Box::new(
-                        try_implicit_cast(&left_t, rvalue, symbols).context(
+                        convert_by_assignment(rvalue, &left_t, symbols).context(
                             "Failed to implicitly cast righthand side during assignment.",
                         )?,
                     ),
@@ -1046,7 +1046,7 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
             r#else,
         } => {
             let target = ast::Type::bool();
-            let condition = Box::new(try_implicit_cast(&target, condition, symbols).context(
+            let condition = Box::new(convert_by_assignment(condition, &target, symbols).context(
                 "Unable to implicitly cast ternary expression condition into a boolean value.",
             )?);
 
@@ -1074,9 +1074,9 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
                 }
             };
 
-            let then = try_implicit_cast(&common_t, &then_expr, symbols)
+            let then = convert_by_assignment( &then_expr,&common_t, symbols)
                 .context("Unable to implicitly cast \"then\" branch of ternary expression to its common type {common_type:?}")?;
-            let r#else = try_implicit_cast(&common_t, &else_expr, symbols)
+            let r#else = convert_by_assignment( &else_expr,&common_t, symbols)
                 .context("Unable to implicitly cast \"else\" branch of ternary expression to its common type {common_type:?}")?;
 
             Ok(TypedExpr {
@@ -1111,7 +1111,7 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
                 let args = args
                     .iter()
                     .zip(param_types.iter())
-                    .map(|(arg, exp_t)| try_implicit_cast(exp_t, arg, symbols))
+                    .map(|(arg, exp_t)| convert_by_assignment(arg, exp_t, symbols))
                     .collect::<Result<Vec<_>>>()?;
                 Ok(TypedExpr {
                     expr: ast::Expr::FunCall {
@@ -1222,10 +1222,12 @@ fn typecheck_var_decl(decl: ast::VarDecl, symbols: &mut SymbolTable) -> Result<a
     ))?;
     let target = entry.r#type;
     let init = if let Some(init) = decl.init {
-        Some(try_implicit_cast(&target, &init, symbols).context(format!(
-            "Failed to typecheck initialization for variable \"{}\": {init:#?}",
-            decl.name
-        ))?)
+        Some(
+            convert_by_assignment(&init, &target, symbols).context(format!(
+                "Failed to typecheck initialization for variable \"{}\": {init:#?}",
+                decl.name
+            ))?,
+        )
     } else {
         None
     };

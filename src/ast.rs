@@ -825,6 +825,14 @@ impl Factor {
                         .and_then(|b| b.into_type())
                     {
                         let tokens = &tokens[stream_offset..];
+
+                        let (r#type, tokens) =
+                            if let Ok((decl, tokens)) = AbstractDeclarator::consume(tokens) {
+                                (AbstractDeclarator::process(decl, r#type)?, tokens)
+                            } else {
+                                (r#type, tokens)
+                            };
+
                         ensure!(
                             matches!(tokens.first(), Some(Token::RParen)),
                             "Expected closing parentheses in type cast."
@@ -1321,6 +1329,77 @@ impl TypeBuilder {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+enum AbstractDeclarator {
+    Pointer {
+        decl: Option<Box<Self>>,
+        is_const: bool,
+    },
+}
+
+impl AbstractDeclarator {
+    fn consume(tokens: &[Token]) -> Result<(Self, &[Token])> {
+        match tokens {
+            [Token::LParen, tokens @ ..] => {
+                let (decl, tokens) =
+                    Self::consume(tokens).context("Failed to parse abstract declarator.")?;
+                ensure!(
+                    tokens.first().is_some_and(|t| *t == Token::RParen),
+                    "Expected closing \")\" in abstract declarator."
+                );
+                Ok((decl, &tokens[1..]))
+            }
+            [Token::Star, tokens @ ..] => {
+                let (is_const, is_restrict, tokens) = consume_pointer_modifiers(tokens);
+                ensure!(
+                    !is_restrict,
+                    "Cannot use \"restrict\" keyword in abstract declarator."
+                );
+                if let Ok((decl, tokens)) = Self::consume(tokens) {
+                    Ok((
+                        Self::Pointer {
+                            decl: Some(Box::new(decl)),
+                            is_const,
+                        },
+                        tokens,
+                    ))
+                } else {
+                    Ok((
+                        Self::Pointer {
+                            decl: None,
+                            is_const,
+                        },
+                        tokens,
+                    ))
+                }
+            }
+            _ => bail!("Failed to parse abstract declarator"),
+        }
+    }
+
+    fn process(declarator: Self, base: Type) -> Result<Type> {
+        match declarator {
+            Self::Pointer { decl, is_const } => {
+                let derived_type = Type {
+                    base: BaseType::Ptr {
+                        to: Box::new(base),
+                        is_restrict: false,
+                    },
+                    alignment: NonZeroUsize::new(core::mem::size_of::<usize>()).expect(
+                        "ast.Declarator.process(): Pointers always have word-sized alignment.",
+                    ),
+                    is_const,
+                };
+                if let Some(decl) = decl {
+                    Self::process(*decl, derived_type)
+                } else {
+                    Ok(derived_type)
+                }
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
 enum Declarator {
     Ident(Option<Rc<String>>),
     Pointer {
@@ -1332,6 +1411,26 @@ enum Declarator {
         decl: Box<Self>,
         params: RawParameterList,
     },
+}
+
+fn consume_pointer_modifiers(tokens: &[Token]) -> (bool, bool, &[Token]) {
+    let mut remaining = tokens;
+    let mut is_restrict = false;
+    let mut is_const = false;
+    while match remaining.first() {
+        Some(Token::Restrict) => {
+            is_restrict = true;
+            true
+        }
+        Some(Token::Const) => {
+            is_const = true;
+            true
+        }
+        _ => false,
+    } {
+        remaining = &remaining[1..];
+    }
+    (is_const, is_restrict, remaining)
 }
 
 impl Declarator {
@@ -1350,22 +1449,7 @@ impl Declarator {
                 Ok((decl, &tokens[1..]))
             }
             [Token::Star, tokens @ ..] => {
-                let mut remaining = tokens;
-                let mut is_restrict = false;
-                let mut is_const = false;
-                while match remaining.first() {
-                    Some(Token::Restrict) => {
-                        is_restrict = true;
-                        true
-                    }
-                    Some(Token::Const) => {
-                        is_const = true;
-                        true
-                    }
-                    _ => false,
-                } {
-                    remaining = &remaining[1..];
-                }
+                let (is_const, is_restrict, remaining) = consume_pointer_modifiers(tokens);
                 let (decl, tokens) = Self::consume(remaining)?;
                 Ok((
                     Self::Pointer {

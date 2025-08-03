@@ -944,7 +944,6 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
                 r#type,
             })
         }
-        // TODO: Fix once we get to pointers
         ast::Expr::Binary { op, left, right } => {
             let TypedExpr {
                 expr: left,
@@ -957,17 +956,41 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
             } = typecheck_expr(right, symbols)
                 .context("Failed to typecheck righthand argument of binary operation.")?;
 
-            let (lifted_left_t, lifted_right_t) =
-                ast::BaseType::lift(left_t.base.clone(), right_t.base.clone())
-                    .context("Unable to promote {left_t:#?} and {right_t:#?} to a common type.")?;
+            let (common_t, left, right) = if left_t.is_pointer() || right_t.is_pointer() {
+                (
+                    get_common_pointer_type(&left, &right, symbols)?,
+                    left,
+                    right,
+                )
+            } else {
+                let (lifted_left_t, lifted_right_t) =
+                    ast::BaseType::lift(left_t.base.clone(), right_t.base.clone()).context(
+                        "Unable to promote {left_t:#?} and {right_t:#?} to a common type.",
+                    )?;
 
-            // With a binary expression, we force both operands to be of
-            // the same type so the decision between left or right is
-            // arbitrary
-            let common_t = ast::Type {
-                base: lifted_left_t.clone(),
-                is_const: true,
-                alignment: std::cmp::max(left_t.alignment, right_t.alignment),
+                let common_t = ast::Type {
+                    base: lifted_left_t.clone(),
+                    is_const: true,
+                    alignment: std::cmp::max(left_t.alignment, right_t.alignment),
+                };
+
+                let left = if lifted_left_t != left_t.base {
+                    ast::Expr::Cast {
+                        target: common_t.clone(),
+                        exp: Box::new(left),
+                    }
+                } else {
+                    left
+                };
+                let right = if lifted_right_t != right_t.base {
+                    ast::Expr::Cast {
+                        target: common_t.clone(),
+                        exp: Box::new(right),
+                    }
+                } else {
+                    right
+                };
+                (common_t, left, right)
             };
 
             ensure!(
@@ -986,17 +1009,15 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
             // Bitshifts do not upcast, and are just the type of the LHS
             // assuming that it is a valid shift (not a float)
             if matches!(op, ast::BinaryOp::LShift | ast::BinaryOp::RShift) {
-                return Ok(TypedExpr {
+                Ok(TypedExpr {
                     expr: ast::Expr::Binary {
                         op: *op,
                         left: Box::new(left),
                         right: Box::new(right),
                     },
                     r#type: left_t,
-                });
-            }
-
-            if op.is_logical() {
+                })
+            } else if op.is_logical() {
                 Ok(TypedExpr {
                     expr: ast::Expr::Binary {
                         op: *op,
@@ -1006,22 +1027,6 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
                     r#type: ast::Type::bool(),
                 })
             } else {
-                let left = if lifted_left_t != left_t.base {
-                    ast::Expr::Cast {
-                        target: common_t.clone(),
-                        exp: Box::new(left),
-                    }
-                } else {
-                    left
-                };
-                let right = if lifted_right_t != right_t.base {
-                    ast::Expr::Cast {
-                        target: common_t.clone(),
-                        exp: Box::new(right),
-                    }
-                } else {
-                    right
-                };
                 Ok(TypedExpr {
                     expr: ast::Expr::Binary {
                         op: *op,

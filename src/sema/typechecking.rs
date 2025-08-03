@@ -564,6 +564,32 @@ fn is_null_pointer_constant(e: &ast::Expr) -> bool {
     }
 }
 
+fn get_common_pointer_type(
+    e1: &ast::Expr,
+    e2: &ast::Expr,
+    symbols: &mut SymbolTable,
+) -> Result<ast::Type> {
+    let TypedExpr {
+        expr: e1,
+        r#type: e1_t,
+    } = typecheck_expr(e1, symbols).context("Failed to typecheck expression 1 argument.")?;
+    let TypedExpr {
+        expr: e2,
+        r#type: e2_t,
+    } = typecheck_expr(e2, symbols).context("Failed to typecheck expression 2 argument.")?;
+    if e1_t == e2_t {
+        Ok(e1_t)
+    } else if is_null_pointer_constant(&e1) {
+        Ok(e2_t)
+    } else if is_null_pointer_constant(&e2) {
+        Ok(e1_t)
+    } else {
+        bail!(format!(
+            "{e1:#?} and {e2:#?} are not compatable pointer types."
+        ))
+    }
+}
+
 struct TypedExpr {
     expr: ast::Expr,
     r#type: ast::Type,

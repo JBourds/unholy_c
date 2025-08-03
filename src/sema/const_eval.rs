@@ -52,11 +52,16 @@ fn eval_constant(expr: ast::Expr) -> Result<Constant> {
                 },
                 ast::BaseType::Float(_) => Constant::F32(exp.cast::<f32>()),
                 ast::BaseType::Double(_) => Constant::F64(exp.cast::<f64>()),
-                _ => unreachable!(),
+                _ => bail!(format!(
+                    "Non constant base type cannot be const evaluated: {:#?}",
+                    target.base
+                )),
             };
             Ok(casted)
         }
-        _ => unimplemented!(),
+        _ => bail!(format!(
+            "Constant evaluation is unimplemented for expression like: {expr:#?}"
+        )),
     }
 }
 

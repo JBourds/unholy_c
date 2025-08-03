@@ -591,16 +591,16 @@ fn get_common_pointer_type(
 }
 
 fn convert_by_assignment(
-    e: ast::Expr,
+    e: &ast::Expr,
     target: &ast::Type,
     symbols: &mut SymbolTable,
 ) -> Result<ast::Expr> {
-    let TypedExpr { expr, r#type } = typecheck_expr(&e, symbols)?;
+    let TypedExpr { expr, r#type } = typecheck_expr(e, symbols)?;
     if r#type == *target {
-        Ok(e)
-    } else if r#type.is_arithmetic() && target.is_arithmetic() {
-        try_implicit_cast(target, &expr, symbols)
-    } else if is_null_pointer_constant(&e) && target.is_pointer() {
+        Ok(expr)
+    } else if r#type.is_arithmetic() && target.is_arithmetic()
+        || is_null_pointer_constant(e) && target.is_pointer()
+    {
         try_implicit_cast(target, &expr, symbols)
     } else {
         bail!("Cannot convert type for assignment.")

@@ -676,7 +676,7 @@ fn typecheck_block_item(
             typecheck_stmt(stmt, symbols, function).context("Failed to typecheck block item")?,
         )),
         ast::BlockItem::Decl(decl) => Ok(ast::BlockItem::Decl(
-            typecheck_decl(decl, symbols).context("Failed to typecheck block item: {item:#?}")?,
+            typecheck_decl(decl, symbols).context("Failed to typecheck block item")?,
         )),
     }
 }
@@ -1073,13 +1073,13 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
                 expr: then_expr,
                 r#type: then_type,
             } = typecheck_expr(then, symbols)
-                .context("Failed to typecheck ternay expression then branch.")?;
+                .context("Failed to typecheck ternary expression then branch.")?;
 
             let TypedExpr {
                 expr: else_expr,
                 r#type: else_type,
             } = typecheck_expr(r#else, symbols)
-                .context("Failed to typecheck ternay expression else branch.")?;
+                .context("Failed to typecheck ternary expression else branch.")?;
 
             let common_t = if then_type.is_pointer() || else_type.is_pointer() {
                 get_common_pointer_type(&then_expr, &else_expr, symbols)?

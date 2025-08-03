@@ -967,6 +967,18 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
             } = typecheck_expr(right, symbols)
                 .context("Failed to typecheck righthand argument of binary operation.")?;
 
+            if op.is_logical() {
+                let target = ast::Type::bool();
+                return Ok(TypedExpr {
+                    expr: ast::Expr::Binary {
+                        op: *op,
+                        left: Box::new(try_implicit_cast(&target, &left, symbols)?),
+                        right: Box::new(try_implicit_cast(&target, &right, symbols)?),
+                    },
+                    r#type: target,
+                });
+            }
+
             let common_t = if left_t.is_pointer() || right_t.is_pointer() {
                 ensure!(
                     !matches!(
@@ -1013,15 +1025,6 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
                         right: Box::new(right),
                     },
                     r#type: left_t,
-                })
-            } else if op.is_logical() {
-                Ok(TypedExpr {
-                    expr: ast::Expr::Binary {
-                        op: *op,
-                        left: Box::new(left),
-                        right: Box::new(right),
-                    },
-                    r#type: ast::Type::bool(),
                 })
             } else {
                 let left = if common_t != left_t {

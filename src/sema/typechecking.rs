@@ -855,26 +855,19 @@ fn try_implicit_cast(
     from: &ast::Expr,
     symbols: &mut SymbolTable,
 ) -> Result<ast::Expr> {
-    let TypedExpr {
-        expr: right,
-        r#type: right_t,
-    } = typecheck_expr(from, symbols)
+    let TypedExpr { expr, r#type } = typecheck_expr(from, symbols)
         .context("Failed to typecheck from argument in implicit cast.")?;
-    ensure!(
-        right_t.base.can_assign_to(&target.base),
-        "Incompatible types. Cannot assign value of type {right_t:#?} to value of type {target:#?}"
-    );
 
-    if right_t != *target {
+    if r#type != *target {
         Ok(ast::Expr::Cast {
             target: ast::Type {
                 is_const: true,
                 ..target.clone()
             },
-            exp: Box::new(right),
+            exp: Box::new(expr),
         })
     } else {
-        Ok(right)
+        Ok(expr)
     }
 }
 

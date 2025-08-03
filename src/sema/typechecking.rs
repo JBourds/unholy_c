@@ -938,7 +938,7 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
                     alignment: NonZeroUsize::new(core::mem::size_of::<usize>()).unwrap(),
                     is_const: false,
                 },
-                ast::UnaryOp::Deref if expr.is_lvalue() => {
+                ast::UnaryOp::Deref => {
                     let ast::Type {
                         base: ast::BaseType::Ptr { to: inner, .. },
                         ..
@@ -947,6 +947,12 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
                         bail!("Trying to dereference non-pointer operand!")
                     };
                     *inner
+                }
+                ast::UnaryOp::Negate if r#type.is_pointer() => {
+                    bail!("Cannot apply unary negate operation to pointer.")
+                }
+                ast::UnaryOp::Complement if r#type.is_pointer() => {
+                    bail!("Cannot apply unary complement operation to pointer.")
                 }
                 _ => r#type,
             };

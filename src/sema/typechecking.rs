@@ -694,7 +694,6 @@ fn typecheck_stmt(
             ),
         ast::Stmt::Return(Some(expr)) => {
                 if let Some(function) = function {
-                    let TypedExpr { r#type: found, expr } = typecheck_expr(&expr, symbols)?;
                     if let Some(SymbolEntry {
                         r#type:
                             ast::Type {
@@ -704,14 +703,9 @@ fn typecheck_stmt(
                         ..
                     }) = symbols.get(&function)
                     {
-                        // TODO: Fix this once we add pointers
-                        if !found.base.can_assign_to(&expected.base) {
-                            bail!("Found return type: \"{found}\" in function \"{function}\" but expected return type: \"{expected}\"");
-                        } else {
-                            Ok(ast::Stmt::Return(Some(convert_by_assignment( &expr,&expected.clone(), symbols)
-                                        .context(format!("Unable to implicitly cast return value to expected return type in \"{}\"", function))?
-                                        )))
-                        }
+                        Ok(ast::Stmt::Return(Some(convert_by_assignment(&expr, &expected.clone(), symbols)
+                                    .context(format!("Unable to implicitly cast return value to expected return type in \"{}\"", function))?
+                                    )))
                     } else {
                         bail!("Could not find function {function} in symbol table.")
                     }
@@ -1148,10 +1142,6 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
         ast::Expr::Cast { target, exp } => {
             let TypedExpr { expr, r#type } =
                 typecheck_expr(exp, symbols).context("Failed to typecheck casted expression.")?;
-            ensure!(
-                r#type.base.can_assign_to(&target.base),
-                "Unable to cast from {type:?} to {target:?}"
-            );
 
             let expr = if *target != r#type {
                 ast::Expr::Cast {

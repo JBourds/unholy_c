@@ -977,6 +977,15 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
                 .context("Failed to typecheck righthand argument of binary operation.")?;
 
             let common_t = if left_t.is_pointer() || right_t.is_pointer() {
+                ensure!(
+                    !matches!(
+                        op,
+                        ast::BinaryOp::Multiply | ast::BinaryOp::Divide | ast::BinaryOp::Remainder
+                    ),
+                    format!(
+                        "Attempted to perform binary operation other than addition or subtraction on pointer type."
+                    )
+                );
                 get_common_pointer_type(&left, &right, symbols)?
             } else {
                 let (lifted_left_t, _) =

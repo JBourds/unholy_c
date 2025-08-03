@@ -2044,7 +2044,7 @@ impl UnaryOp {
         !matches!(
             self,
             UnaryOp::PreInc | UnaryOp::PreDec | UnaryOp::PostInc | UnaryOp::PostDec
-        ) || matches!(expr, Expr::Var(_))
+        ) || expr.is_lvalue()
     }
 
     fn consume_prefix(tokens: &[Token]) -> Result<(Self, &[Token])> {

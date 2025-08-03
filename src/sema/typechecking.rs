@@ -1,5 +1,5 @@
-use std::cmp;
 use std::collections::HashSet;
+use std::{cmp, num::NonZeroUsize};
 
 use anyhow::{Context, Error};
 
@@ -869,6 +869,31 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
                     )),
                 "Cannot perform a bitwise unary operation on a floating point value."
             );
+            let r#type = match op {
+                ast::UnaryOp::AddrOf if expr.is_lvalue() => ast::Type {
+                    base: ast::BaseType::Ptr {
+                        to: Box::new(r#type),
+                        is_restrict: false,
+                    },
+                    alignment: NonZeroUsize::new(core::mem::size_of::<usize>()).unwrap(),
+                    is_const: false,
+                },
+                ast::UnaryOp::Deref if expr.is_lvalue() => {
+                    let ast::Type {
+                        base: ast::BaseType::Ptr { to: inner, .. },
+                        ..
+                    } = r#type
+                    else {
+                        bail!("Trying to dereference non-pointer operand!")
+                    };
+                    ast::Type {
+                        base: inner.base,
+                        alignment: inner.alignment,
+                        is_const: inner.is_const,
+                    }
+                }
+                _ => r#type,
+            };
             Ok(TypedExpr {
                 expr: ast::Expr::Unary {
                     op: *op,

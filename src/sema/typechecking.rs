@@ -886,11 +886,7 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
                     else {
                         bail!("Trying to dereference non-pointer operand!")
                     };
-                    ast::Type {
-                        base: inner.base,
-                        alignment: inner.alignment,
-                        is_const: inner.is_const,
-                    }
+                    *inner
                 }
                 _ => r#type,
             };
@@ -926,7 +922,6 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
                 base: lifted_left_t.clone(),
                 is_const: true,
                 alignment: std::cmp::max(left_t.alignment, right_t.alignment),
-                ..right_t
             };
 
             ensure!(

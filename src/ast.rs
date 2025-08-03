@@ -669,7 +669,14 @@ pub enum Expr {
 
 impl Expr {
     pub fn is_lvalue(&self) -> bool {
-        matches!(self, Self::Var(_))
+        matches!(
+            self,
+            Self::Var(_)
+                | Self::Unary {
+                    op: UnaryOp::Deref,
+                    ..
+                }
+        )
     }
 
     pub fn parse<'a>(tokens: &'a [Token], min_precedence: u32) -> Result<(Expr, &'a [Token])> {

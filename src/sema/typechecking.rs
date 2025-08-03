@@ -545,7 +545,7 @@ impl SymbolTable {
 }
 
 fn is_null_pointer_constant(e: &ast::Expr) -> bool {
-    let ast::Expr::Constant(c) = e else {
+    let Ok(c) = const_eval::eval(e.clone()) else {
         return false;
     };
     match c {

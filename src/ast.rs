@@ -1137,6 +1137,10 @@ impl Type {
     pub fn size_of(&self) -> usize {
         self.base.nbytes()
     }
+
+    pub fn is_pointer(&self) -> bool {
+        matches!(self.base, BaseType::Ptr { .. })
+    }
 }
 
 impl std::fmt::Display for Type {

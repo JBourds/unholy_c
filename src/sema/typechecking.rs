@@ -157,6 +157,9 @@ impl InitialValue {
         let expr = convert_by_assignment(expr, r#type, symbols).context(
             "Failed to perform implicit casting when constructing initial value for declaration",
         )?;
+        if is_null_pointer_constant(&expr) {
+            return Ok(InitialValue::Initial(0usize.to_ne_bytes().to_vec().into()));
+        }
         let val = const_eval::eval(expr.clone()).context("Failed to const eval expression")?;
         match val {
             ast::Constant::I8(val) => Ok(InitialValue::Initial(val.to_ne_bytes().to_vec().into())),
@@ -545,6 +548,11 @@ impl SymbolTable {
 }
 
 fn is_null_pointer_constant(e: &ast::Expr) -> bool {
+    if let ast::Expr::Cast { target, exp } = e {
+        if target.is_pointer() && is_null_pointer_constant(exp) {
+            return true;
+        }
+    }
     let Ok(c) = const_eval::eval(e.clone()) else {
         return false;
     };

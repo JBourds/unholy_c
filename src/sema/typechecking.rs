@@ -1152,6 +1152,10 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
             let TypedExpr { expr, r#type } =
                 typecheck_expr(exp, symbols).context("Failed to typecheck casted expression.")?;
 
+            if target.is_pointer() && r#type.is_float() {
+                bail!("Cannot cast floating point number to pointer")
+            }
+
             let expr = if *target != r#type {
                 ast::Expr::Cast {
                     target: target.clone(),

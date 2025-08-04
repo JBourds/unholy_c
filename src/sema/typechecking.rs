@@ -929,6 +929,7 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
                     alignment: NonZeroUsize::new(core::mem::size_of::<usize>()).unwrap(),
                     is_const: false,
                 },
+                ast::UnaryOp::AddrOf => bail!("Cannot take the address of a non-lvalue"),
                 ast::UnaryOp::Deref => {
                     let ast::Type {
                         base: ast::BaseType::Ptr { to: inner, .. },

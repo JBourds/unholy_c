@@ -1156,6 +1156,10 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
                 bail!("Cannot cast floating point number to pointer")
             }
 
+            if target.is_float() && r#type.is_pointer() {
+                bail!("Cannot cast pointer to floating point number")
+            }
+
             let expr = if *target != r#type {
                 ast::Expr::Cast {
                     target: target.clone(),

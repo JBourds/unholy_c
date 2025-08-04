@@ -914,7 +914,9 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
                     && matches!(
                         r#type,
                         ast::Type {
-                            base: ast::BaseType::Float(_) | ast::BaseType::Double(_),
+                            base: ast::BaseType::Float(_)
+                                | ast::BaseType::Double(_)
+                                | ast::BaseType::Ptr { .. },
                             ..
                         }
                     )),
@@ -1022,6 +1024,17 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
                         }
                     )),
                 "Cannot perform a bitwise or reaminder binary operation on a floating point value."
+            );
+
+            ensure!(
+                !(op.is_bitwise()
+                    && matches!(
+                        common_t,
+                        ast::Type {
+                            base: ast::BaseType::Ptr { .. },
+                            ..
+                        }
+                    ))
             );
 
             // Bitshifts do not upcast, and are just the type of the LHS

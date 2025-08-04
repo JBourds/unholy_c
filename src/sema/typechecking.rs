@@ -1079,7 +1079,11 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
                         left: Box::new(left),
                         right: Box::new(right),
                     },
-                    r#type: common_t,
+                    r#type: if op.is_relational() {
+                        ast::Type::int(4, None)
+                    } else {
+                        common_t
+                    },
                 })
             }
         }

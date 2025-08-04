@@ -1148,6 +1148,10 @@ impl Type {
     pub fn is_float(&self) -> bool {
         matches!(self.base, BaseType::Float(_) | BaseType::Double(_))
     }
+
+    pub fn is_function(&self) -> bool {
+        matches!(self.base, BaseType::Fun { .. })
+    }
 }
 
 impl std::fmt::Display for Type {

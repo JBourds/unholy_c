@@ -927,6 +927,16 @@ impl PartialEq for BaseType {
                     param_types: r_param_types,
                 },
             ) => l_ret_t == r_ret_t && l_param_types == r_param_types,
+            (
+                Self::Ptr {
+                    to: l_to,
+                    is_restrict: l_is_restrict,
+                },
+                Self::Ptr {
+                    to: r_to,
+                    is_restrict: r_is_restrict,
+                },
+            ) => *l_to == *r_to && l_is_restrict == r_is_restrict,
             _ => core::mem::discriminant(self) == core::mem::discriminant(other),
         }
     }

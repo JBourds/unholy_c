@@ -281,6 +281,18 @@ pub enum Instruction {
         src: Val,
         dst: Val,
     },
+    GetAddress {
+        src: Val,
+        dst: Val,
+    },
+    Load {
+        src_ptr: Val,
+        dst: Val,
+    },
+    Store {
+        src: Val,
+        dst_ptr: Val,
+    },
     Jump(Rc<String>),
     JumpIfZero {
         condition: Val,

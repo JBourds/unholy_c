@@ -2039,6 +2039,9 @@ impl Instruction<Initial> {
                 src: Operand::from_tacky(src, symbols, float_constants),
                 dst: Operand::from_tacky(dst, symbols, float_constants),
             })],
+            tacky::Instruction::GetAddress { src, dst } => todo!(),
+            tacky::Instruction::Load { src_ptr, dst } => todo!(),
+            tacky::Instruction::Store { src, dst_ptr } => todo!(),
             tacky::Instruction::Label(label) => {
                 vec![new_instr(InstructionType::Label(label))]
             }

@@ -1162,6 +1162,14 @@ impl Type {
     pub fn is_function(&self) -> bool {
         matches!(self.base, BaseType::Fun { .. })
     }
+
+    pub fn deref(self) -> Self {
+        assert!(self.is_pointer(), "Cannot derefrence non-pointer type");
+        let BaseType::Ptr { to, is_restrict: _ } = self.base else {
+            unreachable!()
+        };
+        *to
+    }
 }
 
 impl std::fmt::Display for Type {

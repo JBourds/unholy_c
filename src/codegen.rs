@@ -139,6 +139,10 @@ impl AssemblyType {
                 8 => Self::Quadword,
                 _ => unreachable!(),
             },
+            ast::Type {
+                base: ast::BaseType::Ptr { .. },
+                ..
+            } => Self::Quadword,
             _ => unimplemented!(),
         }
     }

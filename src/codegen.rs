@@ -863,6 +863,11 @@ pub enum InstructionType {
         src: Operand,
         dst: Operand,
     },
+    Lea {
+        // Must be a memory operand!
+        src: Operand,
+        dst: Operand,
+    },
 }
 
 impl InstructionType {

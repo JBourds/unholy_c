@@ -2054,7 +2054,15 @@ impl Instruction<Initial> {
                 src: Operand::from_tacky(src, symbols, float_constants),
                 dst: Operand::from_tacky(dst, symbols, float_constants),
             })],
-            tacky::Instruction::GetAddress { src, dst } => todo!(),
+            tacky::Instruction::GetAddress { src, dst } => {
+                let src = Operand::from_tacky(src, symbols, float_constants);
+                let dst = Operand::from_tacky(dst, symbols, float_constants);
+                assert!(
+                    matches!(src, Operand::Memory { .. }),
+                    "Can only call `lea` on memory operands!"
+                );
+                vec![new_instr(InstructionType::Lea { src, dst })]
+            }
             tacky::Instruction::Load { src_ptr, dst } => {
                 let dst = Operand::from_tacky(dst, symbols, float_constants);
                 let src = Operand::from_tacky(src_ptr, symbols, float_constants);

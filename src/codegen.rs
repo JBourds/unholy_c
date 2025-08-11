@@ -655,6 +655,10 @@ impl Reg {
         reg: X86Reg::Bp,
         section: RegSection::Qword,
     };
+    const RAX: Self = Self::X86 {
+        reg: X86Reg::Ax,
+        section: RegSection::Qword,
+    };
     pub fn size(&self) -> usize {
         match self {
             Self::X86 { reg: _, section } => section.size(),
@@ -2046,7 +2050,25 @@ impl Instruction<Initial> {
                 dst: Operand::from_tacky(dst, symbols, float_constants),
             })],
             tacky::Instruction::GetAddress { src, dst } => todo!(),
-            tacky::Instruction::Load { src_ptr, dst } => todo!(),
+            tacky::Instruction::Load { src_ptr, dst } => {
+                let dst = Operand::from_tacky(dst, symbols, float_constants);
+                let src = Operand::from_tacky(src_ptr, symbols, float_constants);
+                vec![
+                    new_instr(InstructionType::Mov {
+                        src,
+                        dst: Operand::Reg(Reg::RAX),
+                    }),
+                    new_instr(InstructionType::Mov {
+                        src: Operand::Memory {
+                            reg: Reg::RAX,
+                            offset: 0,
+                            size: dst.size(),
+                            r#type: AssemblyType::from(&dst),
+                        },
+                        dst,
+                    }),
+                ]
+            }
             tacky::Instruction::Store { src, dst_ptr } => todo!(),
             tacky::Instruction::Label(label) => {
                 vec![new_instr(InstructionType::Label(label))]

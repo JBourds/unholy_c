@@ -2069,7 +2069,27 @@ impl Instruction<Initial> {
                     }),
                 ]
             }
-            tacky::Instruction::Store { src, dst_ptr } => todo!(),
+            tacky::Instruction::Store { src, dst_ptr } => {
+                let dst = Operand::from_tacky(dst_ptr, symbols, float_constants);
+                let src = Operand::from_tacky(src, symbols, float_constants);
+                let src_type = AssemblyType::from(&src);
+                let src_size = src.size();
+                vec![
+                    new_instr(InstructionType::Mov {
+                        src: dst,
+                        dst: Operand::Reg(Reg::RAX),
+                    }),
+                    new_instr(InstructionType::Mov {
+                        src,
+                        dst: Operand::Memory {
+                            reg: Reg::RAX,
+                            offset: 0,
+                            size: src_size,
+                            r#type: src_type,
+                        },
+                    }),
+                ]
+            }
             tacky::Instruction::Label(label) => {
                 vec![new_instr(InstructionType::Label(label))]
             }

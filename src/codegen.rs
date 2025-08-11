@@ -104,7 +104,7 @@ impl From<&Operand> for AssemblyType {
                 },
             },
             Operand::Pseudo { r#type, .. } => r#type.clone(),
-            Operand::StackOffset { r#type, .. } => r#type.clone(),
+            Operand::Memory { r#type, .. } => r#type.clone(),
             Operand::Data { r#type, .. } => r#type.clone(),
         }
     }
@@ -385,7 +385,8 @@ impl Function {
         for (arg_type, arg) in stack_args.into_iter() {
             stack_bound += 8;
             instructions.push(Instruction::<Initial>::new(InstructionType::Mov {
-                src: Operand::StackOffset {
+                src: Operand::Memory {
+                    reg: Reg::RBP,
                     offset: stack_bound,
                     size: arg_type.size_bytes(),
                     r#type: arg_type.clone(),
@@ -650,6 +651,10 @@ pub enum Reg {
 }
 
 impl Reg {
+    const RBP: Self = Self::X86 {
+        reg: X86Reg::Bp,
+        section: RegSection::Qword,
+    };
     pub fn size(&self) -> usize {
         match self {
             Self::X86 { reg: _, section } => section.size(),
@@ -934,7 +939,8 @@ impl Instruction<WithStorage> {
                         .or_insert_with(|| {
                             *stack_bound = align_up(*stack_bound, size);
                             *stack_bound += size;
-                            Operand::StackOffset {
+                            Operand::Memory {
+                                reg: Reg::RBP,
                                 offset: -(*stack_bound as isize),
                                 size,
                                 r#type,
@@ -1275,7 +1281,7 @@ impl Instruction<WithStorage> {
             }
             InstructionType::MovZeroExtend {
                 src,
-                dst: dst @ Operand::StackOffset { .. },
+                dst: dst @ Operand::Memory { .. },
             } => {
                 vec![
                     Self::from_op(InstructionType::Mov {
@@ -1424,7 +1430,7 @@ impl Instruction<WithStorage> {
             }
             InstructionType::Mov {
                 src: imm @ Operand::Imm(..),
-                dst: dst @ Operand::StackOffset { .. } | dst @ Operand::Data { .. },
+                dst: dst @ Operand::Memory { .. } | dst @ Operand::Data { .. },
             } if imm.size() > 4 => {
                 let r10 = Operand::Reg(Reg::X64 {
                     reg: X64Reg::R10,
@@ -2084,7 +2090,7 @@ impl Instruction<Initial> {
                         Operand::Reg(r) => {
                             v.push(new_instr(InstructionType::Push(Operand::Reg(r))))
                         }
-                        src @ Operand::StackOffset { .. }
+                        src @ Operand::Memory { .. }
                         | src @ Operand::Pseudo { .. }
                         | src @ Operand::Data { .. } => {
                             let size = src.size();
@@ -2396,7 +2402,8 @@ pub enum Operand {
         size: usize,
         r#type: AssemblyType,
     },
-    StackOffset {
+    Memory {
+        reg: Reg,
         offset: isize,
         size: usize,
         r#type: AssemblyType,
@@ -2415,7 +2422,7 @@ impl Operand {
             Self::Imm(c) => c.get_type().size_of(),
             Self::Reg(r) => r.size(),
             Self::Pseudo { size, .. } => *size,
-            Self::StackOffset { size, .. } => *size,
+            Self::Memory { size, .. } => *size,
             Self::Data { size, .. } => *size,
         }
     }
@@ -2482,8 +2489,8 @@ impl fmt::Display for Operand {
         match self {
             Self::Imm(v) => write!(f, "{v}"),
             Self::Reg(r) => write!(f, "{r}"),
-            Self::StackOffset { offset, .. } => {
-                write!(f, "[rbp{offset:+}]")
+            Self::Memory { reg, offset, .. } => {
+                write!(f, "[{reg}{offset:+}]")
             }
             Self::Data { name, is_const, .. } => {
                 if *is_const {

@@ -1020,6 +1020,10 @@ impl Instruction<WithStorage> {
                     src: convert_operand_offset(src),
                     dst: convert_operand_offset(dst),
                 },
+                InstructionType::Lea { src, dst } => InstructionType::Lea {
+                    src: convert_operand_offset(src),
+                    dst: convert_operand_offset(dst),
+                },
                 instr @ InstructionType::Cdq(_) => instr,
                 instr @ InstructionType::Jmp(_) => instr,
                 instr @ InstructionType::JmpCC { .. } => instr,
@@ -1322,6 +1326,13 @@ impl Instruction<WithStorage> {
                     })
                 },
             ),
+            InstructionType::Lea { src, dst } => Self::rewrite_move(
+                src,
+                dst,
+                RewriteRule::new(ImmRewrite::Ignore, MemRewrite::Default, true),
+                RewriteRule::new(ImmRewrite::Error, MemRewrite::Default, false),
+                |src, dst| Self::from_op(InstructionType::Lea { src, dst }),
+            ),
             InstructionType::Idiv(src @ Operand::Imm(_)) => {
                 let r10 = Operand::Reg(Reg::X64 {
                     reg: X64Reg::R10,
@@ -1559,6 +1570,10 @@ impl Instruction<Initial> {
                 match val_type {
                     ast::Type {
                         base: ast::BaseType::Int { .. },
+                        ..
+                    }
+                    | ast::Type {
+                        base: ast::BaseType::Ptr { .. },
                         ..
                     } => {
                         vec![
@@ -2185,6 +2200,10 @@ impl Instruction<Initial> {
                 match dst_type {
                     ast::Type {
                         base: ast::BaseType::Int { .. },
+                        ..
+                    }
+                    | ast::Type {
+                        base: ast::BaseType::Ptr { .. },
                         ..
                     } => {
                         let ax = Operand::Reg(Reg::X86 {

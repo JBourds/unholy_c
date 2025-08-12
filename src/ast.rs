@@ -1120,6 +1120,8 @@ impl PartialEq for Type {
 }
 
 impl Type {
+    pub const PTR_ALIGNMENT: NonZeroUsize =
+        NonZeroUsize::new(core::mem::size_of::<usize>()).unwrap();
     pub fn bool() -> Self {
         Self::int(core::mem::size_of::<i32>(), None)
     }

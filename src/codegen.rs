@@ -1128,10 +1128,7 @@ impl Instruction<WithStorage> {
             dst_type.size_bytes()
         };
 
-        // Step 1. Rewrite immediate values which are not allowed to be immediates
-
-        // Rewrite the `src` and `dst` operands if they cannot be immediates
-        // but are by using the designated rewrite registers
+        // Step 1. Figure out what register should be used for the rewrite
         let src_rewrite_reg = if src_type.uses_xmm_regs() {
             Operand::Reg(Reg::Xmm {
                 reg: XmmReg::XMM14,
@@ -1158,10 +1155,9 @@ impl Instruction<WithStorage> {
 
         let mut instrs = vec![];
 
-        // Step 1. Rewrite immediate values which are not allowed to be immediates
-
-        // Rewrite the `src` and `dst` operands if they cannot be immediates
-        // but are by using the designated rewrite registers
+        // Step 2. Rewrite immediate values which are not allowed to be
+        // immediates for `src` and `dst` and make sure what remains in `src`
+        // will have the correct value regardless of if it is rewritten.
         let src = if src_rewrites.imm_rule.requires_rewrite(&src) {
             instrs.push(Self::from_op(InstructionType::Mov {
                 src,
@@ -1182,7 +1178,7 @@ impl Instruction<WithStorage> {
             dst
         };
 
-        // Step 2. Rewrite memory address values where they are not allowed
+        // Step 3. Rewrite memory address values where they are not allowed
 
         // Happy path: Always good
         if dst.is_reg() {

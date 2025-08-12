@@ -733,7 +733,14 @@ impl Expr {
                             val,
                         } = expr;
                         let dst = Function::make_tacky_temp_var(
-                            val.get_type(symbols),
+                            ast::Type {
+                                base: ast::BaseType::Ptr {
+                                    to: Box::new(val.get_type(symbols)),
+                                    is_restrict: false,
+                                },
+                                alignment: ast::Type::PTR_ALIGNMENT,
+                                is_const: false,
+                            },
                             symbols,
                             make_temp_var,
                         );

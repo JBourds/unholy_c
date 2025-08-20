@@ -301,7 +301,9 @@ pub mod x64 {
                 w.write_fmt(format_args!("\tdiv{suffix} {specifier}{dst}, {src}\n"))?;
             }
             codegen::InstructionType::MovZeroExtend { .. } => unreachable!(),
-            codegen::InstructionType::Lea { src, dst } => unimplemented!(),
+            codegen::InstructionType::Lea { src, dst } => {
+                w.write_fmt(format_args!("\tlea {dst}, {src}\n"))?;
+            }
         }
         Ok(())
     }

@@ -757,78 +757,250 @@ impl Expr {
                 }
             }
             ast::Expr::Unary { op, expr } => {
-                let Self {
-                    mut instructions,
-                    val,
-                } = Expr::parse_with_and_convert(*expr, symbols, make_temp_var);
-                let dst = match op {
-                    ast::UnaryOp::PreInc => {
-                        instructions.push(Instruction::Binary {
-                            op: BinaryOp::Add,
-                            src1: val.clone(),
-                            src2: Val::Constant(
-                                ast::Constant::const_from_type(&val.get_type(symbols), 1)
-                                    .expect("UnaryOp type has an ast::Constant equivilent"),
-                            ),
-                            dst: val.clone(),
-                        });
-                        val.clone()
-                    }
+                let (instructions, dst) = match op {
+                    ast::UnaryOp::PreInc => match Expr::parse_with(*expr, symbols, make_temp_var) {
+                        ExprResult::PlainOperand(Expr {
+                            mut instructions,
+                            val,
+                        }) => {
+                            instructions.push(Instruction::Binary {
+                                op: BinaryOp::Add,
+                                src1: val.clone(),
+                                src2: Val::Constant(
+                                    ast::Constant::const_from_type(&val.get_type(symbols), 1)
+                                        .expect("UnaryOp type has an ast::Constant equivalent"),
+                                ),
+                                dst: val.clone(),
+                            });
+                            (instructions, val.clone())
+                        }
+                        ExprResult::DerefrencedPointer(Expr {
+                            mut instructions,
+                            val,
+                        }) => {
+                            let intermediate = Function::make_tacky_temp_var(
+                                val.get_type(symbols).deref(),
+                                symbols,
+                                make_temp_var,
+                            );
+                            instructions.extend([
+                                Instruction::Load {
+                                    src_ptr: val.clone(),
+                                    dst: intermediate.clone(),
+                                },
+                                Instruction::Binary {
+                                    op: BinaryOp::Add,
+                                    src1: intermediate.clone(),
+                                    src2: Val::Constant(
+                                        ast::Constant::const_from_type(
+                                            &val.get_type(symbols).deref(),
+                                            1,
+                                        )
+                                        .expect("UnaryOp type has an ast::Constant equivalent"),
+                                    ),
+                                    dst: intermediate.clone(),
+                                },
+                                Instruction::Store {
+                                    src: intermediate.clone(),
+                                    dst_ptr: val,
+                                },
+                            ]);
+                            (instructions, intermediate)
+                        }
+                    },
                     ast::UnaryOp::PostInc => {
-                        let dst = Function::make_tacky_temp_var(
-                            val.get_type(symbols),
-                            symbols,
-                            make_temp_var,
-                        );
-                        instructions.push(Instruction::Copy {
-                            src: val.clone(),
-                            dst: dst.clone(),
-                        });
-                        instructions.push(Instruction::Binary {
-                            op: BinaryOp::Add,
-                            src1: val.clone(),
-                            src2: Val::Constant(
-                                ast::Constant::const_from_type(&val.get_type(symbols), 1)
-                                    .expect("UnaryOp type has an ast::Constant equivilent"),
-                            ),
-                            dst: val.clone(),
-                        });
-                        dst
+                        match Expr::parse_with(*expr, symbols, make_temp_var) {
+                            ExprResult::PlainOperand(Expr {
+                                mut instructions,
+                                val,
+                            }) => {
+                                let dst = Function::make_tacky_temp_var(
+                                    val.get_type(symbols),
+                                    symbols,
+                                    make_temp_var,
+                                );
+                                instructions.push(Instruction::Copy {
+                                    src: val.clone(),
+                                    dst: dst.clone(),
+                                });
+                                instructions.push(Instruction::Binary {
+                                    op: BinaryOp::Add,
+                                    src1: val.clone(),
+                                    src2: Val::Constant(
+                                        ast::Constant::const_from_type(&val.get_type(symbols), 1)
+                                            .expect("UnaryOp type has an ast::Constant equivalent"),
+                                    ),
+                                    dst: val.clone(),
+                                });
+                                (instructions, dst)
+                            }
+                            ExprResult::DerefrencedPointer(Expr {
+                                mut instructions,
+                                val,
+                            }) => {
+                                let typ = val.get_type(symbols).deref();
+                                let dst = Function::make_tacky_temp_var(
+                                    typ.clone(),
+                                    symbols,
+                                    make_temp_var,
+                                );
+                                let intermediate =
+                                    Function::make_tacky_temp_var(typ, symbols, make_temp_var);
+                                instructions.extend([
+                                    Instruction::Load {
+                                        src_ptr: val.clone(),
+                                        dst: intermediate.clone(),
+                                    },
+                                    // Save this to return
+                                    Instruction::Copy {
+                                        src: intermediate.clone(),
+                                        dst: dst.clone(),
+                                    },
+                                    Instruction::Binary {
+                                        op: BinaryOp::Add,
+                                        src1: intermediate.clone(),
+                                        src2: Val::Constant(
+                                            ast::Constant::const_from_type(
+                                                &val.get_type(symbols).deref(),
+                                                1,
+                                            )
+                                            .expect("UnaryOp type has an ast::Constant equivalent"),
+                                        ),
+                                        dst: intermediate.clone(),
+                                    },
+                                    Instruction::Store {
+                                        src: intermediate,
+                                        dst_ptr: val,
+                                    },
+                                ]);
+                                (instructions, dst)
+                            }
+                        }
                     }
-                    ast::UnaryOp::PreDec => {
-                        instructions.push(Instruction::Binary {
-                            op: BinaryOp::Subtract,
-                            src1: val.clone(),
-                            src2: Val::Constant(
-                                ast::Constant::const_from_type(&val.get_type(symbols), 1)
-                                    .expect("UnaryOp type has an ast::Constant equivilent"),
-                            ),
-                            dst: val.clone(),
-                        });
-                        val.clone()
-                    }
+                    ast::UnaryOp::PreDec => match Expr::parse_with(*expr, symbols, make_temp_var) {
+                        ExprResult::PlainOperand(Expr {
+                            mut instructions,
+                            val,
+                        }) => {
+                            instructions.push(Instruction::Binary {
+                                op: BinaryOp::Subtract,
+                                src1: val.clone(),
+                                src2: Val::Constant(
+                                    ast::Constant::const_from_type(&val.get_type(symbols), 1)
+                                        .expect("UnaryOp type has an ast::Constant equivalent"),
+                                ),
+                                dst: val.clone(),
+                            });
+                            (instructions, val.clone())
+                        }
+                        ExprResult::DerefrencedPointer(Expr {
+                            mut instructions,
+                            val,
+                        }) => {
+                            let intermediate = Function::make_tacky_temp_var(
+                                val.get_type(symbols).deref(),
+                                symbols,
+                                make_temp_var,
+                            );
+                            instructions.extend([
+                                Instruction::Load {
+                                    src_ptr: val.clone(),
+                                    dst: intermediate.clone(),
+                                },
+                                Instruction::Binary {
+                                    op: BinaryOp::Subtract,
+                                    src1: intermediate.clone(),
+                                    src2: Val::Constant(
+                                        ast::Constant::const_from_type(
+                                            &val.get_type(symbols).deref(),
+                                            1,
+                                        )
+                                        .expect("UnaryOp type has an ast::Constant equivalent"),
+                                    ),
+                                    dst: intermediate.clone(),
+                                },
+                                Instruction::Store {
+                                    src: intermediate.clone(),
+                                    dst_ptr: val,
+                                },
+                            ]);
+                            (instructions, intermediate)
+                        }
+                    },
                     ast::UnaryOp::PostDec => {
-                        let dst = Function::make_tacky_temp_var(
-                            val.get_type(symbols),
-                            symbols,
-                            make_temp_var,
-                        );
-                        instructions.push(Instruction::Copy {
-                            src: val.clone(),
-                            dst: dst.clone(),
-                        });
-                        instructions.push(Instruction::Binary {
-                            op: BinaryOp::Subtract,
-                            src1: val.clone(),
-                            src2: Val::Constant(
-                                ast::Constant::const_from_type(&val.get_type(symbols), 1)
-                                    .expect("UnaryOp type has an ast::Constant equivilent"),
-                            ),
-                            dst: val.clone(),
-                        });
-                        dst
+                        match Expr::parse_with(*expr, symbols, make_temp_var) {
+                            ExprResult::PlainOperand(Expr {
+                                mut instructions,
+                                val,
+                            }) => {
+                                let dst = Function::make_tacky_temp_var(
+                                    val.get_type(symbols),
+                                    symbols,
+                                    make_temp_var,
+                                );
+                                instructions.push(Instruction::Copy {
+                                    src: val.clone(),
+                                    dst: dst.clone(),
+                                });
+                                instructions.push(Instruction::Binary {
+                                    op: BinaryOp::Subtract,
+                                    src1: val.clone(),
+                                    src2: Val::Constant(
+                                        ast::Constant::const_from_type(&val.get_type(symbols), 1)
+                                            .expect("UnaryOp type has an ast::Constant equivalent"),
+                                    ),
+                                    dst: val.clone(),
+                                });
+                                (instructions, dst)
+                            }
+                            ExprResult::DerefrencedPointer(Expr {
+                                mut instructions,
+                                val,
+                            }) => {
+                                let typ = val.get_type(symbols).deref();
+                                let dst = Function::make_tacky_temp_var(
+                                    typ.clone(),
+                                    symbols,
+                                    make_temp_var,
+                                );
+                                let intermediate =
+                                    Function::make_tacky_temp_var(typ, symbols, make_temp_var);
+                                instructions.extend([
+                                    Instruction::Load {
+                                        src_ptr: val.clone(),
+                                        dst: intermediate.clone(),
+                                    },
+                                    // Save this to return
+                                    Instruction::Copy {
+                                        src: intermediate.clone(),
+                                        dst: dst.clone(),
+                                    },
+                                    Instruction::Binary {
+                                        op: BinaryOp::Subtract,
+                                        src1: intermediate.clone(),
+                                        src2: Val::Constant(
+                                            ast::Constant::const_from_type(
+                                                &val.get_type(symbols).deref(),
+                                                1,
+                                            )
+                                            .expect("UnaryOp type has an ast::Constant equivalent"),
+                                        ),
+                                        dst: intermediate.clone(),
+                                    },
+                                    Instruction::Store {
+                                        src: intermediate,
+                                        dst_ptr: val,
+                                    },
+                                ]);
+                                (instructions, dst)
+                            }
+                        }
                     }
                     ast::UnaryOp::Not => {
+                        let Self {
+                            mut instructions,
+                            val,
+                        } = Expr::parse_with_and_convert(*expr, symbols, make_temp_var);
                         let dst = Function::make_tacky_temp_var(
                             ast::Type::int(4, None),
                             symbols,
@@ -839,10 +1011,14 @@ impl Expr {
                             src: val,
                             dst: dst.clone(),
                         });
-                        dst
+                        (instructions, dst)
                     }
                     // Other operations have tacky unary op equivalents
                     _ => {
+                        let Self {
+                            mut instructions,
+                            val,
+                        } = Expr::parse_with_and_convert(*expr, symbols, make_temp_var);
                         let dst = Function::make_tacky_temp_var(
                             val.get_type(symbols),
                             symbols,
@@ -853,7 +1029,7 @@ impl Expr {
                             src: val,
                             dst: dst.clone(),
                         });
-                        dst
+                        (instructions, dst)
                     }
                 };
                 ExprResult::PlainOperand(Expr {

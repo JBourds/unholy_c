@@ -1124,27 +1124,51 @@ impl Expr {
                         val: dst,
                     })
                 } else if let Some(op) = op.compound_op() {
-                    if let ast::Expr::Var(dst) = left.as_ref() {
-                        let binary = ast::Expr::Binary {
-                            op,
-                            left: left.clone(),
-                            right: right.clone(),
-                        };
-                        let Self {
+                    let lval = Self::parse_with(*left, symbols, make_temp_var);
+                    let rval = Self::parse_with_and_convert(*right, symbols, make_temp_var);
+                    match lval {
+                        ExprResult::PlainOperand(Expr {
                             mut instructions,
-                            val: src,
-                        } = Self::parse_with_and_convert(binary, symbols, make_temp_var);
+                            val,
+                        }) => {
+                            instructions.extend(rval.instructions);
+                            instructions.push(Instruction::Binary {
+                                op: op.into(),
+                                src1: val.clone(),
+                                src2: rval.val.clone(),
+                                dst: val.clone(),
+                            });
+                            ExprResult::PlainOperand(Self { instructions, val })
+                        }
+                        ExprResult::DerefrencedPointer(Expr {
+                            mut instructions,
+                            val,
+                        }) => {
+                            instructions.extend(rval.instructions);
+                            let intermediate = Function::make_tacky_temp_var(
+                                val.get_type(symbols).deref(),
+                                symbols,
+                                make_temp_var,
+                            );
+                            instructions.extend([
+                                Instruction::Load {
+                                    src_ptr: val.clone(),
+                                    dst: intermediate.clone(),
+                                },
+                                Instruction::Binary {
+                                    op: op.into(),
+                                    src1: intermediate.clone(),
+                                    src2: rval.val.clone(),
+                                    dst: intermediate.clone(),
+                                },
+                                Instruction::Store {
+                                    src: intermediate,
+                                    dst_ptr: val.clone(),
+                                },
+                            ]);
 
-                        instructions.push(Instruction::Copy {
-                            src,
-                            dst: Val::Var(Rc::clone(dst)),
-                        });
-                        ExprResult::PlainOperand(Self {
-                            instructions,
-                            val: Val::Var(Rc::clone(dst)),
-                        })
-                    } else {
-                        panic!("Cannot use compound assignment on non-variable value.")
+                            ExprResult::PlainOperand(Expr { instructions, val })
+                        }
                     }
                 } else {
                     let Self {

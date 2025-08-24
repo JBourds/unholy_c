@@ -1190,7 +1190,7 @@ impl Expr {
                         mut instructions,
                         val,
                     }) => {
-                        instructions.extend(rval.instructions.into_iter());
+                        instructions.extend(rval.instructions);
 
                         instructions.push(Instruction::Copy {
                             src: rval.val,
@@ -1202,7 +1202,7 @@ impl Expr {
                         mut instructions,
                         val,
                     }) => {
-                        instructions.extend(rval.instructions.into_iter());
+                        instructions.extend(rval.instructions);
 
                         instructions.push(Instruction::Store {
                             src: rval.val.clone(),

@@ -93,6 +93,7 @@ impl From<&FunDecl> for Type {
 }
 
 impl FunDecl {
+    #[allow(clippy::type_complexity)]
     pub fn signature(&self) -> Result<Vec<(&Type, Option<&Rc<String>>)>> {
         if let Type {
             base: BaseType::Fun {
@@ -1521,6 +1522,7 @@ impl Declarator {
         }
     }
 
+    #[allow(clippy::type_complexity)]
     fn process(
         declarator: Self,
         base: Type,
@@ -1575,7 +1577,7 @@ impl Declarator {
                     ),
                     is_const: true,
                 };
-                return Ok((name, derived_type, param_names));
+                Ok((name, derived_type, param_names))
             }
         }
     }

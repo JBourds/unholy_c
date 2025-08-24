@@ -693,19 +693,18 @@ impl Expr {
 
             if operator.does_assignment() {
                 let (right, tokens_inner) = Expr::parse(tokens_inner, operator.precedence())?;
-                let right = if let Some(op) = operator.compound_op() {
-                    Expr::Binary {
-                        op,
-                        left: Box::new(left.clone()),
-                        right: Box::new(right.clone()),
-                    }
+                if operator.compound_op().is_some() {
+                    left = Expr::Binary {
+                        op: operator,
+                        left: Box::new(left),
+                        right: Box::new(right),
+                    };
                 } else {
-                    right
-                };
-                left = Expr::Assignment {
-                    lvalue: Box::new(left),
-                    rvalue: Box::new(right),
-                };
+                    left = Expr::Assignment {
+                        lvalue: Box::new(left),
+                        rvalue: Box::new(right),
+                    };
+                }
                 tokens = tokens_inner;
             } else if operator == BinaryOp::Ternary {
                 let parse_conditional_middle =

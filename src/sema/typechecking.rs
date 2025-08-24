@@ -3,6 +3,8 @@ use std::{cmp, num::NonZeroUsize};
 
 use anyhow::{Context, Error};
 
+use crate::ast::{Expr, Type};
+
 use super::*;
 
 #[derive(Clone, Debug)]
@@ -874,6 +876,21 @@ fn try_implicit_cast(
     }
 }
 
+/// Try to implicitly cast into a boolean or, if the type is a floating point
+/// value, convert into into a comparison against zero.
+fn boolify(expr: Expr, r#type: &Type, symbols: &mut SymbolTable) -> Result<Expr> {
+    if r#type.is_float() {
+        let zero = ast::Expr::Constant(ast::Constant::const_from_type(r#type, 0)?);
+        Ok(Expr::Binary {
+            op: ast::BinaryOp::NotEqual,
+            left: Box::new(expr),
+            right: Box::new(zero),
+        })
+    } else {
+        try_implicit_cast(&ast::Type::bool(), &expr, symbols)
+    }
+}
+
 fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedExpr> {
     match expr {
         ast::Expr::Var(var) => {
@@ -986,15 +1003,15 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
             } = typecheck_expr(right, symbols)
                 .context("Failed to typecheck righthand argument of binary operation.")?;
 
+            // Evaluate all operands in a boolean context.
             if op.is_logical() {
-                let target = ast::Type::bool();
                 return Ok(TypedExpr {
                     expr: ast::Expr::Binary {
                         op: *op,
-                        left: Box::new(try_implicit_cast(&target, &left, symbols)?),
-                        right: Box::new(try_implicit_cast(&target, &right, symbols)?),
+                        left: Box::new(boolify(left, &left_t, symbols)?),
+                        right: Box::new(boolify(right, &right_t, symbols)?),
                     },
-                    r#type: target,
+                    r#type: ast::Type::bool(),
                 });
             }
 

@@ -680,6 +680,14 @@ impl Expr {
         )
     }
 
+    pub fn has_compound(&self) -> bool {
+        match self {
+            Expr::Cast { target: _, exp } => exp.has_compound(),
+            Expr::Binary { op, .. } => op.compound_op().is_some(),
+            _ => false,
+        }
+    }
+
     pub fn parse<'a>(tokens: &'a [Token], min_precedence: u32) -> Result<(Expr, &'a [Token])> {
         let (mut left, mut tokens) = Factor::parse(tokens)?;
         loop {

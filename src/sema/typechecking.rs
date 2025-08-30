@@ -614,6 +614,7 @@ fn convert_by_assignment(
     }
 }
 
+#[derive(Debug)]
 struct TypedExpr {
     expr: ast::Expr,
     r#type: ast::Type,

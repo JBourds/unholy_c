@@ -1123,29 +1123,6 @@ impl Expr {
                         instructions,
                         val: dst,
                     })
-                } else if let Some(op) = op.compound_op() {
-                    if let ast::Expr::Var(dst) = left.as_ref() {
-                        let binary = ast::Expr::Binary {
-                            op,
-                            left: left.clone(),
-                            right: right.clone(),
-                        };
-                        let Self {
-                            mut instructions,
-                            val: src,
-                        } = Self::parse_with_and_convert(binary, symbols, make_temp_var);
-
-                        instructions.push(Instruction::Copy {
-                            src,
-                            dst: Val::Var(Rc::clone(dst)),
-                        });
-                        ExprResult::PlainOperand(Self {
-                            instructions,
-                            val: Val::Var(Rc::clone(dst)),
-                        })
-                    } else {
-                        panic!("Cannot use compound assignment on non-variable value.")
-                    }
                 } else {
                     let Self {
                         mut instructions,
@@ -1182,6 +1159,72 @@ impl Expr {
                 instructions: vec![],
                 val: Val::Var(name),
             }),
+            // Special case where we kept the compound op after the typechecking
+            // rewrite so tacky can properly avoid evaluating a side-effecting
+            // expression twice
+            ast::Expr::Assignment { lvalue, rvalue } if rvalue.has_compound() => {
+                let ast::Expr::Binary { op, left, right } = *rvalue else {
+                    unreachable!();
+                };
+                let Some(op) = op.compound_op() else {
+                    unreachable!();
+                };
+                let lval = Self::parse_with(*lvalue, symbols, make_temp_var);
+                let rval = Self::parse_with_and_convert(*right, symbols, make_temp_var);
+                match lval {
+                    ExprResult::PlainOperand(Expr {
+                        mut instructions,
+                        val,
+                    }) => {
+                        instructions.extend(rval.instructions);
+                        instructions.push(Instruction::Binary {
+                            op: op.into(),
+                            src1: val.clone(),
+                            src2: rval.val.clone(),
+                            dst: val.clone(),
+                        });
+                        ExprResult::PlainOperand(Self { instructions, val })
+                    }
+                    ExprResult::DerefrencedPointer(Expr {
+                        mut instructions,
+                        val,
+                    }) => {
+                        let intermediate = Function::make_tacky_temp_var(
+                            val.get_type(symbols).deref(),
+                            symbols,
+                            make_temp_var,
+                        );
+                        let binary_lhs = if let ast::Expr::Cast { target, exp: _ } = *left {
+                            Self::cast(intermediate.clone(), target, symbols, make_temp_var)
+                        } else {
+                            Self {
+                                instructions: vec![],
+                                val: intermediate.clone(),
+                            }
+                        };
+                        instructions.push(Instruction::Load {
+                            src_ptr: val.clone(),
+                            dst: intermediate.clone(),
+                        });
+                        instructions.extend(binary_lhs.instructions);
+                        instructions.push(Instruction::Binary {
+                            op: op.into(),
+                            src1: binary_lhs.val.clone(),
+                            src2: rval.val.clone(),
+                            dst: binary_lhs.val.clone(),
+                        });
+                        let dst_type = val.get_type(symbols).deref();
+                        let casted = Self::cast(binary_lhs.val, dst_type, symbols, make_temp_var);
+                        instructions.extend(casted.instructions);
+                        instructions.push(Instruction::Store {
+                            src: casted.val,
+                            dst_ptr: val.clone(),
+                        });
+
+                        ExprResult::PlainOperand(Expr { instructions, val })
+                    }
+                }
+            }
             ast::Expr::Assignment { lvalue, rvalue } => {
                 let lval = Self::parse_with(*lvalue, symbols, make_temp_var);
                 let rval = Self::parse_with_and_convert(*rvalue, symbols, make_temp_var);
@@ -1317,134 +1360,147 @@ impl Expr {
                     mut instructions,
                     val,
                 } = Expr::parse_with_and_convert(*expr, symbols, make_temp_var);
-
-                // I do this cause get_type currently clones on vars
-                let val_type = val.get_type(symbols);
-                if target == val_type {
-                    return ExprResult::PlainOperand(Self { instructions, val });
-                }
-                let dst = Function::make_tacky_temp_var(target.clone(), symbols, make_temp_var);
-
-                let is_float = |t: &ast::Type| {
-                    matches!(
-                        t,
-                        ast::Type {
-                            base: ast::BaseType::Float(_) | ast::BaseType::Double(_),
-                            ..
-                        }
-                    )
-                };
-
-                // Double -> Integer
-                if is_float(&val_type) {
-                    match target {
-                        ast::Type {
-                            base:
-                                ast::BaseType::Int {
-                                    nbytes: _,
-                                    signed: Some(false),
-                                },
-                            ..
-                        } => {
-                            instructions.push(Instruction::DoubleToUInt {
-                                src: val,
-                                dst: dst.clone(),
-                            });
-                        }
-                        ast::Type {
-                            base:
-                                ast::BaseType::Int {
-                                    nbytes: _,
-                                    signed: _,
-                                },
-                            ..
-                        } => {
-                            instructions.push(Instruction::DoubleToInt {
-                                src: val,
-                                dst: dst.clone(),
-                            });
-                        }
-                        // FIXME: Add chars here
-                        // We should not ever be trying to cast a double to
-                        // anything other than an int
-                        _ => unreachable!("Casting float type to {target:?}"),
-                    }
-                } else if is_float(&target) {
-                    match val_type {
-                        ast::Type {
-                            base:
-                                ast::BaseType::Int {
-                                    nbytes: _,
-                                    signed: Some(false),
-                                },
-                            ..
-                        } => {
-                            instructions.push(Instruction::UIntToDouble {
-                                src: val,
-                                dst: dst.clone(),
-                            });
-                        }
-                        ast::Type {
-                            base:
-                                ast::BaseType::Int {
-                                    nbytes: _,
-                                    signed: _,
-                                },
-                            ..
-                        } => {
-                            instructions.push(Instruction::IntToDouble {
-                                src: val,
-                                dst: dst.clone(),
-                            });
-                        }
-                        // FIXME: Add chars here
-                        // We should not ever be trying to cast a double to
-                        // anything other than an int
-                        _ => unreachable!("Casting float type to {target:?}"),
-                    }
-                } else {
-                    // Integer ops
-                    // FIXME: This needs to use PartialEq/Eq
-                    match target.base.nbytes().cmp(&val_type.base.nbytes()) {
-                        std::cmp::Ordering::Equal => {
-                            instructions.push(Instruction::Copy {
-                                src: val,
-                                dst: dst.clone(),
-                            });
-                        }
-                        std::cmp::Ordering::Less => {
-                            instructions.push(Instruction::Truncate {
-                                src: val,
-                                dst: dst.clone(),
-                            });
-                        }
-                        _ => match val_type {
-                            ast::Type {
-                                base: ast::BaseType::Int { signed, .. },
-                                ..
-                            } => {
-                                if signed.is_none_or(|signed| signed) {
-                                    instructions.push(Instruction::SignExtend {
-                                        src: val,
-                                        dst: dst.clone(),
-                                    });
-                                } else {
-                                    instructions.push(Instruction::ZeroExtend {
-                                        src: val,
-                                        dst: dst.clone(),
-                                    });
-                                }
-                            }
-                            _ => unimplemented!(),
-                        },
-                    }
-                }
-
-                ExprResult::PlainOperand(Self {
-                    instructions,
-                    val: dst,
-                })
+                let Self {
+                    instructions: cast_instrs,
+                    val,
+                } = Self::cast(val, target, symbols, make_temp_var);
+                instructions.extend(cast_instrs);
+                ExprResult::PlainOperand(Self { instructions, val })
             }
+        }
+    }
+
+    pub fn cast(
+        val: Val,
+        target: ast::Type,
+        symbols: &mut SymbolTable,
+        make_temp_var: &mut impl FnMut() -> String,
+    ) -> Self {
+        // I do this cause get_type currently clones on vars
+        let val_type = val.get_type(symbols);
+        let mut instructions = vec![];
+        if target == val_type {
+            return Self { instructions, val };
+        }
+        let dst = Function::make_tacky_temp_var(target.clone(), symbols, make_temp_var);
+
+        let is_float = |t: &ast::Type| {
+            matches!(
+                t,
+                ast::Type {
+                    base: ast::BaseType::Float(_) | ast::BaseType::Double(_),
+                    ..
+                }
+            )
+        };
+
+        // Double -> Integer
+        if is_float(&val_type) {
+            match target {
+                ast::Type {
+                    base:
+                        ast::BaseType::Int {
+                            nbytes: _,
+                            signed: Some(false),
+                        },
+                    ..
+                } => {
+                    instructions.push(Instruction::DoubleToUInt {
+                        src: val,
+                        dst: dst.clone(),
+                    });
+                }
+                ast::Type {
+                    base:
+                        ast::BaseType::Int {
+                            nbytes: _,
+                            signed: _,
+                        },
+                    ..
+                } => {
+                    instructions.push(Instruction::DoubleToInt {
+                        src: val,
+                        dst: dst.clone(),
+                    });
+                }
+                // FIXME: Add chars here
+                // We should not ever be trying to cast a double to
+                // anything other than an int
+                _ => unreachable!("Casting float type to {target:?}"),
+            }
+        } else if is_float(&target) {
+            match val_type {
+                ast::Type {
+                    base:
+                        ast::BaseType::Int {
+                            nbytes: _,
+                            signed: Some(false),
+                        },
+                    ..
+                } => {
+                    instructions.push(Instruction::UIntToDouble {
+                        src: val,
+                        dst: dst.clone(),
+                    });
+                }
+                ast::Type {
+                    base:
+                        ast::BaseType::Int {
+                            nbytes: _,
+                            signed: _,
+                        },
+                    ..
+                } => {
+                    instructions.push(Instruction::IntToDouble {
+                        src: val,
+                        dst: dst.clone(),
+                    });
+                }
+                // FIXME: Add chars here
+                // We should not ever be trying to cast a double to
+                // anything other than an int
+                _ => unreachable!("Casting float type to {target:?}"),
+            }
+        } else {
+            // Integer ops
+            // FIXME: This needs to use PartialEq/Eq
+            match target.base.nbytes().cmp(&val_type.base.nbytes()) {
+                std::cmp::Ordering::Equal => {
+                    instructions.push(Instruction::Copy {
+                        src: val,
+                        dst: dst.clone(),
+                    });
+                }
+                std::cmp::Ordering::Less => {
+                    instructions.push(Instruction::Truncate {
+                        src: val,
+                        dst: dst.clone(),
+                    });
+                }
+                _ => match val_type {
+                    ast::Type {
+                        base: ast::BaseType::Int { signed, .. },
+                        ..
+                    } => {
+                        if signed.is_none_or(|signed| signed) {
+                            instructions.push(Instruction::SignExtend {
+                                src: val,
+                                dst: dst.clone(),
+                            });
+                        } else {
+                            instructions.push(Instruction::ZeroExtend {
+                                src: val,
+                                dst: dst.clone(),
+                            });
+                        }
+                    }
+                    _ => unimplemented!(),
+                },
+            }
+        }
+        Self {
+            instructions,
+            val: dst,
         }
     }
 
@@ -1478,6 +1534,7 @@ impl Expr {
     }
 }
 
+#[derive(Debug)]
 enum ExprResult {
     PlainOperand(Expr),
     DerefrencedPointer(Expr),

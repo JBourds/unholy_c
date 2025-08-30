@@ -1068,34 +1068,51 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
                     r#type: left_t,
                 })
             } else {
-                let left = if common_t != left_t {
-                    ast::Expr::Cast {
+                let casted_left = if common_t != left_t {
+                    Some(ast::Expr::Cast {
                         target: common_t.clone(),
-                        exp: Box::new(left),
-                    }
+                        exp: Box::new(left.clone()),
+                    })
                 } else {
-                    left
+                    None
                 };
-                let right = if common_t != right_t {
-                    ast::Expr::Cast {
+                let casted_right = if common_t != right_t {
+                    Some(ast::Expr::Cast {
                         target: common_t.clone(),
-                        exp: Box::new(right),
-                    }
+                        exp: Box::new(right.clone()),
+                    })
                 } else {
-                    right
+                    None
                 };
-                Ok(TypedExpr {
-                    expr: ast::Expr::Binary {
-                        op: *op,
-                        left: Box::new(left),
-                        right: Box::new(right),
-                    },
-                    r#type: if op.is_relational() {
-                        ast::Type::int(4, None)
-                    } else {
-                        common_t
-                    },
-                })
+                match op.compound_op() {
+                    Some(_) => Ok(TypedExpr {
+                        expr: ast::Expr::Assignment {
+                            lvalue: Box::new(left.clone()),
+                            rvalue: Box::new(ast::Expr::Binary {
+                                op: *op,
+                                left: Box::new(casted_left.unwrap_or(left)),
+                                right: Box::new(casted_right.unwrap_or(right)),
+                            }),
+                        },
+                        r#type: if op.is_relational() {
+                            ast::Type::int(4, None)
+                        } else {
+                            common_t
+                        },
+                    }),
+                    _ => Ok(TypedExpr {
+                        expr: ast::Expr::Binary {
+                            op: *op,
+                            left: Box::new(casted_left.unwrap_or(left)),
+                            right: Box::new(casted_right.unwrap_or(right)),
+                        },
+                        r#type: if op.is_relational() {
+                            ast::Type::int(4, None)
+                        } else {
+                            common_t
+                        },
+                    }),
+                }
             }
         }
         ast::Expr::Conditional {

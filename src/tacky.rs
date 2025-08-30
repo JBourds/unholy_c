@@ -1177,10 +1177,20 @@ impl Expr {
                         val,
                     }) => {
                         instructions.extend(rval.instructions);
+                        let arg_type = rval.val.get_type(symbols);
+                        let casted = Self::cast(val.clone(), arg_type, symbols, make_temp_var);
+                        instructions.extend(casted.instructions);
                         instructions.push(Instruction::Binary {
                             op: op.into(),
-                            src1: val.clone(),
+                            src1: casted.val.clone(),
                             src2: rval.val.clone(),
+                            dst: casted.val.clone(),
+                        });
+                        let dst_type = val.get_type(symbols);
+                        let casted = Self::cast(casted.val, dst_type, symbols, make_temp_var);
+                        instructions.extend(casted.instructions);
+                        instructions.push(Instruction::Copy {
+                            src: casted.val,
                             dst: val.clone(),
                         });
                         ExprResult::PlainOperand(Self { instructions, val })
@@ -1189,6 +1199,7 @@ impl Expr {
                         mut instructions,
                         val,
                     }) => {
+                        instructions.extend(rval.instructions);
                         let intermediate = Function::make_tacky_temp_var(
                             val.get_type(symbols).deref(),
                             symbols,
@@ -1202,11 +1213,11 @@ impl Expr {
                                 val: intermediate.clone(),
                             }
                         };
+                        instructions.extend(binary_lhs.instructions);
                         instructions.push(Instruction::Load {
                             src_ptr: val.clone(),
-                            dst: intermediate.clone(),
+                            dst: binary_lhs.val.clone(),
                         });
-                        instructions.extend(binary_lhs.instructions);
                         instructions.push(Instruction::Binary {
                             op: op.into(),
                             src1: binary_lhs.val.clone(),

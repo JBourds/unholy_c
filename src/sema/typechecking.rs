@@ -1019,8 +1019,13 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
                 ensure!(
                     !matches!(
                         op,
-                        ast::BinaryOp::Multiply | ast::BinaryOp::Divide | ast::BinaryOp::Remainder
-                    ),
+                        ast::BinaryOp::Multiply
+                            | ast::BinaryOp::Divide
+                            | ast::BinaryOp::Remainder
+                            | ast::BinaryOp::MultAssign
+                            | ast::BinaryOp::DivAssign
+                            | ast::BinaryOp::ModAssign
+                    ) && !op.is_bitwise(),
                     format!(
                         "Attempted to perform binary operation other than addition or subtraction on pointer type."
                     )
@@ -1048,18 +1053,7 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
                             ..
                         }
                     )),
-                "Cannot perform a bitwise or reaminder binary operation on a floating point value."
-            );
-
-            ensure!(
-                !(op.is_bitwise()
-                    && matches!(
-                        common_t,
-                        ast::Type {
-                            base: ast::BaseType::Ptr { .. },
-                            ..
-                        }
-                    ))
+                "Cannot perform a bitwise or remainder binary operation on a floating point value."
             );
 
             // Bitshifts do not upcast, and are just the type of the LHS

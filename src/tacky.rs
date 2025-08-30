@@ -1178,22 +1178,26 @@ impl Expr {
                     }) => {
                         instructions.extend(rval.instructions);
                         let arg_type = rval.val.get_type(symbols);
-                        let casted = Self::cast(val.clone(), arg_type, symbols, make_temp_var);
-                        instructions.extend(casted.instructions);
+                        let upcasted = Self::cast(val.clone(), arg_type, symbols, make_temp_var);
+                        instructions.extend(upcasted.instructions);
                         instructions.push(Instruction::Binary {
                             op: op.into(),
-                            src1: casted.val.clone(),
+                            src1: upcasted.val.clone(),
                             src2: rval.val.clone(),
-                            dst: casted.val.clone(),
+                            dst: upcasted.val.clone(),
                         });
                         let dst_type = val.get_type(symbols);
-                        let casted = Self::cast(casted.val, dst_type, symbols, make_temp_var);
-                        instructions.extend(casted.instructions);
+                        let downcasted =
+                            Self::cast(upcasted.val.clone(), dst_type, symbols, make_temp_var);
+                        instructions.extend(downcasted.instructions);
                         instructions.push(Instruction::Copy {
-                            src: casted.val,
-                            dst: val.clone(),
+                            src: downcasted.val.clone(),
+                            dst: val,
                         });
-                        ExprResult::PlainOperand(Self { instructions, val })
+                        ExprResult::PlainOperand(Self {
+                            instructions,
+                            val: downcasted.val,
+                        })
                     }
                     ExprResult::DerefrencedPointer(Expr {
                         mut instructions,
@@ -1225,14 +1229,18 @@ impl Expr {
                             dst: binary_lhs.val.clone(),
                         });
                         let dst_type = val.get_type(symbols).deref();
-                        let casted = Self::cast(binary_lhs.val, dst_type, symbols, make_temp_var);
-                        instructions.extend(casted.instructions);
+                        let downcasted =
+                            Self::cast(binary_lhs.val.clone(), dst_type, symbols, make_temp_var);
+                        instructions.extend(downcasted.instructions);
                         instructions.push(Instruction::Store {
-                            src: casted.val,
-                            dst_ptr: val.clone(),
+                            src: downcasted.val.clone(),
+                            dst_ptr: val,
                         });
 
-                        ExprResult::PlainOperand(Expr { instructions, val })
+                        ExprResult::PlainOperand(Expr {
+                            instructions,
+                            val: downcasted.val,
+                        })
                     }
                 }
             }

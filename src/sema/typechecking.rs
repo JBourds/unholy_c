@@ -1085,21 +1085,27 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
                     None
                 };
                 match op.compound_op() {
-                    Some(_) => Ok(TypedExpr {
-                        expr: ast::Expr::Assignment {
-                            lvalue: Box::new(left.clone()),
-                            rvalue: Box::new(ast::Expr::Binary {
-                                op: *op,
-                                left: Box::new(casted_left.unwrap_or(left)),
-                                right: Box::new(casted_right.unwrap_or(right)),
-                            }),
-                        },
-                        r#type: if op.is_relational() {
-                            ast::Type::int(4, None)
-                        } else {
-                            common_t
-                        },
-                    }),
+                    Some(_) => {
+                        ensure!(
+                            left.is_lvalue(),
+                            "Compound operations are only vaid on lvalues."
+                        );
+                        Ok(TypedExpr {
+                            expr: ast::Expr::Assignment {
+                                lvalue: Box::new(left.clone()),
+                                rvalue: Box::new(ast::Expr::Binary {
+                                    op: *op,
+                                    left: Box::new(casted_left.unwrap_or(left)),
+                                    right: Box::new(casted_right.unwrap_or(right)),
+                                }),
+                            },
+                            r#type: if op.is_relational() {
+                                ast::Type::int(4, None)
+                            } else {
+                                common_t
+                            },
+                        })
+                    }
                     _ => Ok(TypedExpr {
                         expr: ast::Expr::Binary {
                             op: *op,

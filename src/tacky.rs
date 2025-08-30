@@ -1178,7 +1178,15 @@ impl Expr {
                     }) => {
                         instructions.extend(rval.instructions);
                         let arg_type = rval.val.get_type(symbols);
-                        let upcasted = Self::cast(val.clone(), arg_type, symbols, make_temp_var);
+                        let upcasted =
+                            if matches!(op, ast::BinaryOp::LShift | ast::BinaryOp::RShift) {
+                                Self {
+                                    instructions: vec![],
+                                    val: val.clone(),
+                                }
+                            } else {
+                                Self::cast(val.clone(), arg_type, symbols, make_temp_var)
+                            };
                         instructions.extend(upcasted.instructions);
                         instructions.push(Instruction::Binary {
                             op: op.into(),
@@ -1210,7 +1218,14 @@ impl Expr {
                             make_temp_var,
                         );
                         let binary_lhs = if let ast::Expr::Cast { target, exp: _ } = *left {
-                            Self::cast(intermediate.clone(), target, symbols, make_temp_var)
+                            if matches!(op, ast::BinaryOp::LShift | ast::BinaryOp::RShift) {
+                                Self {
+                                    instructions: vec![],
+                                    val: intermediate.clone(),
+                                }
+                            } else {
+                                Self::cast(intermediate.clone(), target, symbols, make_temp_var)
+                            }
                         } else {
                             Self {
                                 instructions: vec![],

@@ -96,12 +96,12 @@ fn resolve_local_var_decl(
     if let Some(prev_entry) = ident_map.get(&decl.name) {
         if prev_entry.from_current_scope
             && !(prev_entry.has_external_linkage
-                && decl.typ.storage == Some(ast::StorageClass::Extern))
+                && decl.storage_class == Some(ast::StorageClass::Extern))
         {
             bail!("Conflicting local declaration '{}' ", decl.name);
         }
     }
-    if let Some(ast::StorageClass::Extern) = decl.typ.storage {
+    if let Some(ast::StorageClass::Extern) = decl.storage_class {
         _ = ident_map.insert(
             Rc::clone(&decl.name),
             IdentEntry::new_external(Rc::clone(&decl.name)),
@@ -175,18 +175,18 @@ fn resolve_fun_decl(
     );
     let mut inner_map = make_new_scope(ident_map);
     let new_params = decl
-        .signature
+        .params
         .into_iter()
-        .map(|(typ, name)| {
+        .map(|name| {
             // Resolve automatic variables for parameter names
             if let Some(name) = name {
                 resolve_automatic(Rc::clone(&name), &mut inner_map, make_temporary)
-                    .map(|name| (typ, Some(name)))
+                    .map(Option::Some)
             } else {
-                Ok((typ, None))
+                Ok(None)
             }
         })
-        .collect::<Result<Vec<(ast::Type, Option<Rc<String>>)>, Error>>()?;
+        .collect::<Result<Vec<Option<Rc<String>>>, Error>>()?;
     let body = if let Some(body) = decl.block {
         let items = body
             .into_items()
@@ -197,8 +197,9 @@ fn resolve_fun_decl(
     } else {
         None
     };
+
     Ok(ast::FunDecl {
-        signature: new_params,
+        params: new_params,
         block: body,
         ..decl
     })
@@ -356,19 +357,10 @@ fn resolve_stmt(
 
 fn resolve_expr(expr: ast::Expr, ident_map: &HashMap<Rc<String>, IdentEntry>) -> Result<ast::Expr> {
     match expr {
-        ast::Expr::Assignment { lvalue, rvalue } => {
-            let lvalue = match *lvalue {
-                ast::Expr::Var(v) => ast::Expr::Var(v),
-                _ => bail!(
-                    "Invalid lvalue '{:?}'",
-                    ast::Expr::Assignment { lvalue, rvalue }
-                ),
-            };
-            Ok(ast::Expr::Assignment {
-                lvalue: Box::new(resolve_expr(lvalue, ident_map)?),
-                rvalue: Box::new(resolve_expr(*rvalue, ident_map)?),
-            })
-        }
+        ast::Expr::Assignment { lvalue, rvalue } => Ok(ast::Expr::Assignment {
+            lvalue: Box::new(resolve_expr(*lvalue, ident_map)?),
+            rvalue: Box::new(resolve_expr(*rvalue, ident_map)?),
+        }),
         ast::Expr::Var(var) => {
             if let Some(IdentEntry { name, .. }) = ident_map.get(&var) {
                 Ok(ast::Expr::Var(Rc::clone(name)))

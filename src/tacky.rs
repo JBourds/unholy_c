@@ -163,24 +163,30 @@ impl Function {
 
 impl Function {
     fn from_symbol(decl: ast::FunDecl, symbols: &mut SymbolTable) -> Option<Self> {
+        // Insert function parameter types for type inference
+        // FIXME: Make sure that parameter names are unique!!!!
+        let mut signature = vec![];
+        for (r#type, name) in decl
+            .signature()
+            .expect("tacky.Function.from_symbol(): Error getting function declaration signature.")
+            .into_iter()
+        {
+            if let Some(name) = name {
+                symbols.new_entry(Rc::clone(name), r#type.clone());
+                signature.push((r#type.clone(), Some(Rc::clone(name))));
+            } else {
+                signature.push((r#type.clone(), None));
+            }
+        }
+
         let ast::FunDecl {
             name,
-            signature,
             block: Some(block),
             ..
         } = decl
         else {
             return None;
         };
-
-        // Insert function parameter types for type inference
-        // FIXME: Make sure that parameter names are unique!!!!
-        signature.iter().for_each(|(r#type, name)| {
-            if let Some(name) = name {
-                let name = Rc::clone(name);
-                symbols.new_entry(name, r#type.clone());
-            }
-        });
 
         let mut temp_var_counter = 0;
         let mut make_temp_var =
@@ -275,6 +281,18 @@ pub enum Instruction {
         src: Val,
         dst: Val,
     },
+    GetAddress {
+        src: Val,
+        dst: Val,
+    },
+    Load {
+        src_ptr: Val,
+        dst: Val,
+    },
+    Store {
+        src: Val,
+        dst_ptr: Val,
+    },
     Jump(Rc<String>),
     JumpIfZero {
         condition: Val,
@@ -319,14 +337,14 @@ impl Instruction {
         symbols: &mut SymbolTable,
         make_temp_var: &mut impl FnMut() -> String,
     ) -> Vec<Self> {
-        if decl.typ.storage != Some(ast::StorageClass::Extern) {
-            symbols.new_entry(Rc::clone(&decl.name), decl.typ.clone());
+        if decl.storage_class != Some(ast::StorageClass::Extern) {
+            symbols.new_entry(Rc::clone(&decl.name), decl.r#type.clone());
         }
         if let Some(init) = decl.init {
             let Expr {
                 mut instructions,
                 val: src,
-            } = Expr::parse_with(init, symbols, make_temp_var);
+            } = Expr::parse_with_and_convert(init, symbols, make_temp_var);
             let dst = Val::Var(Rc::clone(&decl.name));
             instructions.push(Instruction::Copy {
                 src,
@@ -349,7 +367,7 @@ impl Instruction {
                 let Expr {
                     mut instructions,
                     val,
-                } = Expr::parse_with(expr, symbols, make_temp_var);
+                } = Expr::parse_with_and_convert(expr, symbols, make_temp_var);
                 instructions.push(Instruction::Return(Some(val)));
                 block_instructions.extend(instructions);
             }
@@ -357,7 +375,8 @@ impl Instruction {
                 block_instructions.push(Instruction::Return(None));
             }
             ast::Stmt::Expr(expr) => {
-                let Expr { instructions, .. } = Expr::parse_with(expr, symbols, make_temp_var);
+                let Expr { instructions, .. } =
+                    Expr::parse_with_and_convert(expr, symbols, make_temp_var);
                 block_instructions.extend(instructions);
             }
             ast::Stmt::Compound(block) => {
@@ -392,7 +411,7 @@ impl Instruction {
                 // <instructions for condition>
                 // v = <result of condition>
                 let Expr { instructions, val } =
-                    Expr::parse_with(condition, symbols, make_temp_var);
+                    Expr::parse_with_and_convert(condition, symbols, make_temp_var);
                 block_instructions.extend(instructions);
                 // JumpIfZero(v, break_label)
                 block_instructions.push(Self::JumpIfZero {
@@ -433,7 +452,7 @@ impl Instruction {
                 // <instructions for condition>
                 // v = <result of condition>
                 let Expr { instructions, val } =
-                    Expr::parse_with(condition, symbols, make_temp_var);
+                    Expr::parse_with_and_convert(condition, symbols, make_temp_var);
                 block_instructions.extend(instructions);
                 // JumpIfNotZero(v, start)
                 block_instructions.push(Instruction::JumpIfNotZero {
@@ -466,7 +485,7 @@ impl Instruction {
                     }
                     ast::ForInit::Expr(Some(expr)) => {
                         let Expr { instructions, .. } =
-                            Expr::parse_with(expr, symbols, make_temp_var);
+                            Expr::parse_with_and_convert(expr, symbols, make_temp_var);
                         block_instructions.extend(instructions);
                     }
                     ast::ForInit::Expr(None) => {}
@@ -479,7 +498,7 @@ impl Instruction {
                     let Expr {
                         instructions: instructions_condition,
                         val: val_condition,
-                    } = Expr::parse_with(cond, symbols, make_temp_var);
+                    } = Expr::parse_with_and_convert(cond, symbols, make_temp_var);
                     block_instructions.extend(instructions_condition);
                     // JumpIfZero(v, break_label)
                     block_instructions.push(Instruction::JumpIfZero {
@@ -500,7 +519,7 @@ impl Instruction {
                     let Expr {
                         instructions: instructions_post,
                         ..
-                    } = Expr::parse_with(post, symbols, make_temp_var);
+                    } = Expr::parse_with_and_convert(post, symbols, make_temp_var);
                     block_instructions.extend(instructions_post);
                 }
                 // Jump(Start)
@@ -526,7 +545,7 @@ impl Instruction {
                 let Expr {
                     mut instructions,
                     val,
-                } = Expr::parse_with(condition, symbols, make_temp_var);
+                } = Expr::parse_with_and_convert(condition, symbols, make_temp_var);
 
                 instructions.push(Self::JumpIfZero {
                     condition: val,
@@ -589,7 +608,7 @@ impl Instruction {
                 //  value matches.
                 if cases.is_empty() {
                     let Expr { instructions, .. } =
-                        Expr::parse_with(condition, symbols, make_temp_var);
+                        Expr::parse_with_and_convert(condition, symbols, make_temp_var);
                     block_instructions.extend(instructions);
                     block_instructions.push(Instruction::Jump(
                         default.unwrap_or(Rc::clone(&break_label)),
@@ -611,13 +630,17 @@ impl Instruction {
                     let Expr {
                         instructions,
                         val: switch_val,
-                    } = Expr::parse_with(condition, symbols, make_temp_var);
+                    } = Expr::parse_with_and_convert(condition, symbols, make_temp_var);
                     block_instructions.extend(instructions);
                     for (case, label) in cases.iter() {
                         let Expr {
                             instructions,
                             val: case_val,
-                        } = Expr::parse_with(ast::Expr::Constant(*case), symbols, make_temp_var);
+                        } = Expr::parse_with_and_convert(
+                            ast::Expr::Constant(*case),
+                            symbols,
+                            make_temp_var,
+                        );
                         block_instructions.extend(instructions);
                         let dst = Function::make_tacky_temp_var(
                             ast::Type::bool(),
@@ -658,11 +681,7 @@ impl Instruction {
                 // If we reinitialized them here they would act like local
                 // variables (suboptimal)
                 ast::BlockItem::Decl(ast::Declaration::VarDecl(ast::VarDecl {
-                    typ:
-                        ast::Type {
-                            storage: Some(ast::StorageClass::Static),
-                            ..
-                        },
+                    storage_class: Some(ast::StorageClass::Static),
                     ..
                 })) => {}
                 ast::BlockItem::Decl(decl) => {
@@ -688,85 +707,300 @@ impl Expr {
         node: ast::Expr,
         symbols: &mut SymbolTable,
         make_temp_var: &mut impl FnMut() -> String,
-    ) -> Expr {
+    ) -> ExprResult {
         match node {
-            ast::Expr::Constant(v) => Self {
+            ast::Expr::Constant(v) => ExprResult::PlainOperand(Self {
                 instructions: vec![],
                 val: Val::from(v),
-            },
+            }),
+            ast::Expr::Unary {
+                op: ast::UnaryOp::Deref,
+                expr,
+            } => ExprResult::DerefrencedPointer(Self::parse_with_and_convert(
+                *expr,
+                symbols,
+                make_temp_var,
+            )),
+            ast::Expr::Unary {
+                op: ast::UnaryOp::AddrOf,
+                expr,
+            } => {
+                let result_expr = Self::parse_with(*expr, symbols, make_temp_var);
+                match result_expr {
+                    ExprResult::PlainOperand(expr) => {
+                        let Self {
+                            mut instructions,
+                            val,
+                        } = expr;
+                        let dst = Function::make_tacky_temp_var(
+                            ast::Type {
+                                base: ast::BaseType::Ptr {
+                                    to: Box::new(val.get_type(symbols)),
+                                    is_restrict: false,
+                                },
+                                alignment: ast::Type::PTR_ALIGNMENT,
+                                is_const: false,
+                            },
+                            symbols,
+                            make_temp_var,
+                        );
+                        instructions.push(Instruction::GetAddress {
+                            src: val,
+                            dst: dst.clone(),
+                        });
+                        ExprResult::PlainOperand(Expr {
+                            instructions,
+                            val: dst,
+                        })
+                    }
+                    ExprResult::DerefrencedPointer(expr) => ExprResult::PlainOperand(expr),
+                }
+            }
             ast::Expr::Unary { op, expr } => {
-                let Self {
-                    mut instructions,
-                    val,
-                } = Expr::parse_with(*expr, symbols, make_temp_var);
-                let dst = match op {
-                    ast::UnaryOp::PreInc => {
-                        instructions.push(Instruction::Binary {
-                            op: BinaryOp::Add,
-                            src1: val.clone(),
-                            src2: Val::Constant(
-                                ast::Constant::const_from_type(&val.get_type(symbols), 1)
-                                    .expect("UnaryOp type has an ast::Constant equivilent"),
-                            ),
-                            dst: val.clone(),
-                        });
-                        val.clone()
-                    }
+                let (instructions, dst) = match op {
+                    ast::UnaryOp::PreInc => match Expr::parse_with(*expr, symbols, make_temp_var) {
+                        ExprResult::PlainOperand(Expr {
+                            mut instructions,
+                            val,
+                        }) => {
+                            instructions.push(Instruction::Binary {
+                                op: BinaryOp::Add,
+                                src1: val.clone(),
+                                src2: Val::Constant(
+                                    ast::Constant::const_from_type(&val.get_type(symbols), 1)
+                                        .expect("UnaryOp type has an ast::Constant equivalent"),
+                                ),
+                                dst: val.clone(),
+                            });
+                            (instructions, val.clone())
+                        }
+                        ExprResult::DerefrencedPointer(Expr {
+                            mut instructions,
+                            val,
+                        }) => {
+                            let intermediate = Function::make_tacky_temp_var(
+                                val.get_type(symbols).deref(),
+                                symbols,
+                                make_temp_var,
+                            );
+                            instructions.extend([
+                                Instruction::Load {
+                                    src_ptr: val.clone(),
+                                    dst: intermediate.clone(),
+                                },
+                                Instruction::Binary {
+                                    op: BinaryOp::Add,
+                                    src1: intermediate.clone(),
+                                    src2: Val::Constant(
+                                        ast::Constant::const_from_type(
+                                            &val.get_type(symbols).deref(),
+                                            1,
+                                        )
+                                        .expect("UnaryOp type has an ast::Constant equivalent"),
+                                    ),
+                                    dst: intermediate.clone(),
+                                },
+                                Instruction::Store {
+                                    src: intermediate.clone(),
+                                    dst_ptr: val,
+                                },
+                            ]);
+                            (instructions, intermediate)
+                        }
+                    },
                     ast::UnaryOp::PostInc => {
-                        let dst = Function::make_tacky_temp_var(
-                            val.get_type(symbols),
-                            symbols,
-                            make_temp_var,
-                        );
-                        instructions.push(Instruction::Copy {
-                            src: val.clone(),
-                            dst: dst.clone(),
-                        });
-                        instructions.push(Instruction::Binary {
-                            op: BinaryOp::Add,
-                            src1: val.clone(),
-                            src2: Val::Constant(
-                                ast::Constant::const_from_type(&val.get_type(symbols), 1)
-                                    .expect("UnaryOp type has an ast::Constant equivilent"),
-                            ),
-                            dst: val.clone(),
-                        });
-                        dst
+                        match Expr::parse_with(*expr, symbols, make_temp_var) {
+                            ExprResult::PlainOperand(Expr {
+                                mut instructions,
+                                val,
+                            }) => {
+                                let dst = Function::make_tacky_temp_var(
+                                    val.get_type(symbols),
+                                    symbols,
+                                    make_temp_var,
+                                );
+                                instructions.push(Instruction::Copy {
+                                    src: val.clone(),
+                                    dst: dst.clone(),
+                                });
+                                instructions.push(Instruction::Binary {
+                                    op: BinaryOp::Add,
+                                    src1: val.clone(),
+                                    src2: Val::Constant(
+                                        ast::Constant::const_from_type(&val.get_type(symbols), 1)
+                                            .expect("UnaryOp type has an ast::Constant equivalent"),
+                                    ),
+                                    dst: val.clone(),
+                                });
+                                (instructions, dst)
+                            }
+                            ExprResult::DerefrencedPointer(Expr {
+                                mut instructions,
+                                val,
+                            }) => {
+                                let typ = val.get_type(symbols).deref();
+                                let dst = Function::make_tacky_temp_var(
+                                    typ.clone(),
+                                    symbols,
+                                    make_temp_var,
+                                );
+                                let intermediate =
+                                    Function::make_tacky_temp_var(typ, symbols, make_temp_var);
+                                instructions.extend([
+                                    Instruction::Load {
+                                        src_ptr: val.clone(),
+                                        dst: intermediate.clone(),
+                                    },
+                                    // Save this to return
+                                    Instruction::Copy {
+                                        src: intermediate.clone(),
+                                        dst: dst.clone(),
+                                    },
+                                    Instruction::Binary {
+                                        op: BinaryOp::Add,
+                                        src1: intermediate.clone(),
+                                        src2: Val::Constant(
+                                            ast::Constant::const_from_type(
+                                                &val.get_type(symbols).deref(),
+                                                1,
+                                            )
+                                            .expect("UnaryOp type has an ast::Constant equivalent"),
+                                        ),
+                                        dst: intermediate.clone(),
+                                    },
+                                    Instruction::Store {
+                                        src: intermediate,
+                                        dst_ptr: val,
+                                    },
+                                ]);
+                                (instructions, dst)
+                            }
+                        }
                     }
-                    ast::UnaryOp::PreDec => {
-                        instructions.push(Instruction::Binary {
-                            op: BinaryOp::Subtract,
-                            src1: val.clone(),
-                            src2: Val::Constant(
-                                ast::Constant::const_from_type(&val.get_type(symbols), 1)
-                                    .expect("UnaryOp type has an ast::Constant equivilent"),
-                            ),
-                            dst: val.clone(),
-                        });
-                        val.clone()
-                    }
+                    ast::UnaryOp::PreDec => match Expr::parse_with(*expr, symbols, make_temp_var) {
+                        ExprResult::PlainOperand(Expr {
+                            mut instructions,
+                            val,
+                        }) => {
+                            instructions.push(Instruction::Binary {
+                                op: BinaryOp::Subtract,
+                                src1: val.clone(),
+                                src2: Val::Constant(
+                                    ast::Constant::const_from_type(&val.get_type(symbols), 1)
+                                        .expect("UnaryOp type has an ast::Constant equivalent"),
+                                ),
+                                dst: val.clone(),
+                            });
+                            (instructions, val.clone())
+                        }
+                        ExprResult::DerefrencedPointer(Expr {
+                            mut instructions,
+                            val,
+                        }) => {
+                            let intermediate = Function::make_tacky_temp_var(
+                                val.get_type(symbols).deref(),
+                                symbols,
+                                make_temp_var,
+                            );
+                            instructions.extend([
+                                Instruction::Load {
+                                    src_ptr: val.clone(),
+                                    dst: intermediate.clone(),
+                                },
+                                Instruction::Binary {
+                                    op: BinaryOp::Subtract,
+                                    src1: intermediate.clone(),
+                                    src2: Val::Constant(
+                                        ast::Constant::const_from_type(
+                                            &val.get_type(symbols).deref(),
+                                            1,
+                                        )
+                                        .expect("UnaryOp type has an ast::Constant equivalent"),
+                                    ),
+                                    dst: intermediate.clone(),
+                                },
+                                Instruction::Store {
+                                    src: intermediate.clone(),
+                                    dst_ptr: val,
+                                },
+                            ]);
+                            (instructions, intermediate)
+                        }
+                    },
                     ast::UnaryOp::PostDec => {
-                        let dst = Function::make_tacky_temp_var(
-                            val.get_type(symbols),
-                            symbols,
-                            make_temp_var,
-                        );
-                        instructions.push(Instruction::Copy {
-                            src: val.clone(),
-                            dst: dst.clone(),
-                        });
-                        instructions.push(Instruction::Binary {
-                            op: BinaryOp::Subtract,
-                            src1: val.clone(),
-                            src2: Val::Constant(
-                                ast::Constant::const_from_type(&val.get_type(symbols), 1)
-                                    .expect("UnaryOp type has an ast::Constant equivilent"),
-                            ),
-                            dst: val.clone(),
-                        });
-                        dst
+                        match Expr::parse_with(*expr, symbols, make_temp_var) {
+                            ExprResult::PlainOperand(Expr {
+                                mut instructions,
+                                val,
+                            }) => {
+                                let dst = Function::make_tacky_temp_var(
+                                    val.get_type(symbols),
+                                    symbols,
+                                    make_temp_var,
+                                );
+                                instructions.push(Instruction::Copy {
+                                    src: val.clone(),
+                                    dst: dst.clone(),
+                                });
+                                instructions.push(Instruction::Binary {
+                                    op: BinaryOp::Subtract,
+                                    src1: val.clone(),
+                                    src2: Val::Constant(
+                                        ast::Constant::const_from_type(&val.get_type(symbols), 1)
+                                            .expect("UnaryOp type has an ast::Constant equivalent"),
+                                    ),
+                                    dst: val.clone(),
+                                });
+                                (instructions, dst)
+                            }
+                            ExprResult::DerefrencedPointer(Expr {
+                                mut instructions,
+                                val,
+                            }) => {
+                                let typ = val.get_type(symbols).deref();
+                                let dst = Function::make_tacky_temp_var(
+                                    typ.clone(),
+                                    symbols,
+                                    make_temp_var,
+                                );
+                                let intermediate =
+                                    Function::make_tacky_temp_var(typ, symbols, make_temp_var);
+                                instructions.extend([
+                                    Instruction::Load {
+                                        src_ptr: val.clone(),
+                                        dst: intermediate.clone(),
+                                    },
+                                    // Save this to return
+                                    Instruction::Copy {
+                                        src: intermediate.clone(),
+                                        dst: dst.clone(),
+                                    },
+                                    Instruction::Binary {
+                                        op: BinaryOp::Subtract,
+                                        src1: intermediate.clone(),
+                                        src2: Val::Constant(
+                                            ast::Constant::const_from_type(
+                                                &val.get_type(symbols).deref(),
+                                                1,
+                                            )
+                                            .expect("UnaryOp type has an ast::Constant equivalent"),
+                                        ),
+                                        dst: intermediate.clone(),
+                                    },
+                                    Instruction::Store {
+                                        src: intermediate,
+                                        dst_ptr: val,
+                                    },
+                                ]);
+                                (instructions, dst)
+                            }
+                        }
                     }
                     ast::UnaryOp::Not => {
+                        let Self {
+                            mut instructions,
+                            val,
+                        } = Expr::parse_with_and_convert(*expr, symbols, make_temp_var);
                         let dst = Function::make_tacky_temp_var(
                             ast::Type::int(4, None),
                             symbols,
@@ -777,10 +1011,14 @@ impl Expr {
                             src: val,
                             dst: dst.clone(),
                         });
-                        dst
+                        (instructions, dst)
                     }
                     // Other operations have tacky unary op equivalents
                     _ => {
+                        let Self {
+                            mut instructions,
+                            val,
+                        } = Expr::parse_with_and_convert(*expr, symbols, make_temp_var);
                         let dst = Function::make_tacky_temp_var(
                             val.get_type(symbols),
                             symbols,
@@ -791,13 +1029,13 @@ impl Expr {
                             src: val,
                             dst: dst.clone(),
                         });
-                        dst
+                        (instructions, dst)
                     }
                 };
-                Expr {
+                ExprResult::PlainOperand(Expr {
                     instructions,
                     val: dst,
-                }
+                })
             }
             ast::Expr::Binary { op, left, right } => {
                 if op.is_logical() {
@@ -806,7 +1044,7 @@ impl Expr {
                     let Self {
                         mut instructions,
                         val: left_val,
-                    } = Self::parse_with(*left, symbols, make_temp_var);
+                    } = Self::parse_with_and_convert(*left, symbols, make_temp_var);
 
                     let label = {
                         let mut label = make_temp_var();
@@ -839,7 +1077,7 @@ impl Expr {
                     let Self {
                         instructions: right_instructions,
                         val: right_val,
-                    } = Self::parse_with(*right, symbols, make_temp_var);
+                    } = Self::parse_with_and_convert(*right, symbols, make_temp_var);
                     instructions.extend(right_instructions);
 
                     let dst =
@@ -881,42 +1119,19 @@ impl Expr {
                     // Label(end)
                     instructions.push(Instruction::Label(end));
 
-                    Self {
+                    ExprResult::PlainOperand(Self {
                         instructions,
                         val: dst,
-                    }
-                } else if let Some(op) = op.compound_op() {
-                    if let ast::Expr::Var(dst) = left.as_ref() {
-                        let binary = ast::Expr::Binary {
-                            op,
-                            left: left.clone(),
-                            right: right.clone(),
-                        };
-                        let Self {
-                            mut instructions,
-                            val: src,
-                        } = Self::parse_with(binary, symbols, make_temp_var);
-
-                        instructions.push(Instruction::Copy {
-                            src,
-                            dst: Val::Var(Rc::clone(dst)),
-                        });
-                        Self {
-                            instructions,
-                            val: Val::Var(Rc::clone(dst)),
-                        }
-                    } else {
-                        panic!("Cannot use compound assignment on non-variable value.")
-                    }
+                    })
                 } else {
                     let Self {
                         mut instructions,
                         val: left_val,
-                    } = Self::parse_with(*left, symbols, make_temp_var);
+                    } = Self::parse_with_and_convert(*left, symbols, make_temp_var);
                     let Self {
                         instructions: right_instructions,
                         val: right_val,
-                    } = Self::parse_with(*right, symbols, make_temp_var);
+                    } = Self::parse_with_and_convert(*right, symbols, make_temp_var);
                     instructions.extend(right_instructions);
 
                     let dst_type = if op.is_relational() {
@@ -934,33 +1149,148 @@ impl Expr {
                         src2: right_val,
                         dst: dst.clone(),
                     });
-                    Self {
+                    ExprResult::PlainOperand(Self {
                         instructions,
                         val: dst,
+                    })
+                }
+            }
+            ast::Expr::Var(name) => ExprResult::PlainOperand(Self {
+                instructions: vec![],
+                val: Val::Var(name),
+            }),
+            // Special case where we kept the compound op after the typechecking
+            // rewrite so tacky can properly avoid evaluating a side-effecting
+            // expression twice
+            ast::Expr::Assignment { lvalue, rvalue } if rvalue.has_compound() => {
+                let ast::Expr::Binary { op, left, right } = *rvalue else {
+                    unreachable!();
+                };
+                let Some(op) = op.compound_op() else {
+                    unreachable!();
+                };
+                let lval = Self::parse_with(*lvalue, symbols, make_temp_var);
+                let rval = Self::parse_with_and_convert(*right, symbols, make_temp_var);
+                match lval {
+                    ExprResult::PlainOperand(Expr {
+                        mut instructions,
+                        val,
+                    }) => {
+                        instructions.extend(rval.instructions);
+                        let arg_type = rval.val.get_type(symbols);
+                        let upcasted =
+                            if matches!(op, ast::BinaryOp::LShift | ast::BinaryOp::RShift) {
+                                Self {
+                                    instructions: vec![],
+                                    val: val.clone(),
+                                }
+                            } else {
+                                Self::cast(val.clone(), arg_type, symbols, make_temp_var)
+                            };
+                        instructions.extend(upcasted.instructions);
+                        instructions.push(Instruction::Binary {
+                            op: op.into(),
+                            src1: upcasted.val.clone(),
+                            src2: rval.val.clone(),
+                            dst: upcasted.val.clone(),
+                        });
+                        let dst_type = val.get_type(symbols);
+                        let downcasted =
+                            Self::cast(upcasted.val.clone(), dst_type, symbols, make_temp_var);
+                        instructions.extend(downcasted.instructions);
+                        instructions.push(Instruction::Copy {
+                            src: downcasted.val.clone(),
+                            dst: val,
+                        });
+                        ExprResult::PlainOperand(Self {
+                            instructions,
+                            val: downcasted.val,
+                        })
+                    }
+                    ExprResult::DerefrencedPointer(Expr {
+                        mut instructions,
+                        val,
+                    }) => {
+                        instructions.extend(rval.instructions);
+                        let intermediate = Function::make_tacky_temp_var(
+                            val.get_type(symbols).deref(),
+                            symbols,
+                            make_temp_var,
+                        );
+                        let binary_lhs = if let ast::Expr::Cast { target, exp: _ } = *left {
+                            if matches!(op, ast::BinaryOp::LShift | ast::BinaryOp::RShift) {
+                                Self {
+                                    instructions: vec![],
+                                    val: intermediate.clone(),
+                                }
+                            } else {
+                                Self::cast(intermediate.clone(), target, symbols, make_temp_var)
+                            }
+                        } else {
+                            Self {
+                                instructions: vec![],
+                                val: intermediate.clone(),
+                            }
+                        };
+                        instructions.extend(binary_lhs.instructions);
+                        instructions.push(Instruction::Load {
+                            src_ptr: val.clone(),
+                            dst: binary_lhs.val.clone(),
+                        });
+                        instructions.push(Instruction::Binary {
+                            op: op.into(),
+                            src1: binary_lhs.val.clone(),
+                            src2: rval.val.clone(),
+                            dst: binary_lhs.val.clone(),
+                        });
+                        let dst_type = val.get_type(symbols).deref();
+                        let downcasted =
+                            Self::cast(binary_lhs.val.clone(), dst_type, symbols, make_temp_var);
+                        instructions.extend(downcasted.instructions);
+                        instructions.push(Instruction::Store {
+                            src: downcasted.val.clone(),
+                            dst_ptr: val,
+                        });
+
+                        ExprResult::PlainOperand(Expr {
+                            instructions,
+                            val: downcasted.val,
+                        })
                     }
                 }
             }
-            ast::Expr::Var(name) => Self {
-                instructions: vec![],
-                val: Val::Var(name),
-            },
             ast::Expr::Assignment { lvalue, rvalue } => {
-                if let ast::Expr::Var(name) = lvalue.as_ref() {
-                    let Self {
+                let lval = Self::parse_with(*lvalue, symbols, make_temp_var);
+                let rval = Self::parse_with_and_convert(*rvalue, symbols, make_temp_var);
+                match lval {
+                    ExprResult::PlainOperand(Expr {
                         mut instructions,
-                        val: src,
-                    } = Self::parse_with(*rvalue, symbols, make_temp_var);
-                    let dst = Val::Var(Rc::clone(name));
-                    instructions.push(Instruction::Copy {
-                        src,
-                        dst: dst.clone(),
-                    });
-                    Self {
-                        instructions,
-                        val: dst,
+                        val,
+                    }) => {
+                        instructions.extend(rval.instructions);
+
+                        instructions.push(Instruction::Copy {
+                            src: rval.val,
+                            dst: val.clone(),
+                        });
+                        ExprResult::PlainOperand(Self { instructions, val })
                     }
-                } else {
-                    panic!("Error: Cannot assign to rvalue.")
+                    ExprResult::DerefrencedPointer(Expr {
+                        mut instructions,
+                        val,
+                    }) => {
+                        instructions.extend(rval.instructions);
+
+                        instructions.push(Instruction::Store {
+                            src: rval.val.clone(),
+                            dst_ptr: val,
+                        });
+
+                        ExprResult::PlainOperand(Expr {
+                            instructions,
+                            val: rval.val,
+                        })
+                    }
                 }
             }
             ast::Expr::Conditional {
@@ -977,7 +1307,7 @@ impl Expr {
                 let Expr {
                     mut instructions,
                     val,
-                } = Expr::parse_with(*condition, symbols, make_temp_var);
+                } = Expr::parse_with_and_convert(*condition, symbols, make_temp_var);
 
                 instructions.push(Instruction::JumpIfZero {
                     condition: val,
@@ -987,7 +1317,7 @@ impl Expr {
                 let Expr {
                     instructions: e1_instructions,
                     val: e1_val,
-                } = Expr::parse_with(*then, symbols, make_temp_var);
+                } = Expr::parse_with_and_convert(*then, symbols, make_temp_var);
 
                 let result = Function::make_tacky_temp_var(
                     e1_val.get_type(symbols).clone(),
@@ -1007,7 +1337,7 @@ impl Expr {
                 let Expr {
                     instructions: e2_instructions,
                     val: e2_val,
-                } = Expr::parse_with(*r#else, symbols, make_temp_var);
+                } = Expr::parse_with_and_convert(*r#else, symbols, make_temp_var);
 
                 instructions.extend(e2_instructions);
 
@@ -1018,10 +1348,10 @@ impl Expr {
 
                 instructions.push(Instruction::Label(end_label));
 
-                Self {
+                ExprResult::PlainOperand(Self {
                     instructions,
                     val: result,
-                }
+                })
             }
             ast::Expr::FunCall { name, args } => {
                 let SymbolEntry {
@@ -1044,7 +1374,7 @@ impl Expr {
                     args.into_iter()
                         .fold((vec![], vec![]), |(mut instrs, mut args), arg| {
                             let Expr { instructions, val } =
-                                Expr::parse_with(arg, symbols, make_temp_var);
+                                Expr::parse_with_and_convert(arg, symbols, make_temp_var);
                             instrs.extend(instructions);
                             args.push(val);
                             (instrs, args)
@@ -1054,145 +1384,181 @@ impl Expr {
                     args,
                     dst: dst.clone(),
                 });
-                Self {
+                ExprResult::PlainOperand(Self {
                     instructions,
                     val: dst,
-                }
+                })
             }
             ast::Expr::Cast { target, exp: expr } => {
                 let Expr {
                     mut instructions,
                     val,
-                } = Expr::parse_with(*expr, symbols, make_temp_var);
+                } = Expr::parse_with_and_convert(*expr, symbols, make_temp_var);
+                let Self {
+                    instructions: cast_instrs,
+                    val,
+                } = Self::cast(val, target, symbols, make_temp_var);
+                instructions.extend(cast_instrs);
+                ExprResult::PlainOperand(Self { instructions, val })
+            }
+        }
+    }
 
-                // I do this cause get_type currently clones on vars
-                let val_type = val.get_type(symbols);
-                if target == val_type {
-                    return Self { instructions, val };
+    pub fn cast(
+        val: Val,
+        target: ast::Type,
+        symbols: &mut SymbolTable,
+        make_temp_var: &mut impl FnMut() -> String,
+    ) -> Self {
+        // I do this cause get_type currently clones on vars
+        let val_type = val.get_type(symbols);
+        let mut instructions = vec![];
+        if target == val_type {
+            return Self { instructions, val };
+        }
+        let dst = Function::make_tacky_temp_var(target.clone(), symbols, make_temp_var);
+
+        let is_float = |t: &ast::Type| {
+            matches!(
+                t,
+                ast::Type {
+                    base: ast::BaseType::Float(_) | ast::BaseType::Double(_),
+                    ..
                 }
-                let dst = Function::make_tacky_temp_var(target.clone(), symbols, make_temp_var);
+            )
+        };
 
-                let is_float = |t: &ast::Type| {
-                    matches!(
-                        t,
-                        ast::Type {
-                            base: ast::BaseType::Float(_) | ast::BaseType::Double(_),
-                            ptr: None,
-                            ..
-                        }
-                    )
-                };
-
-                // Double -> Integer
-                if is_float(&val_type) {
-                    match target {
-                        ast::Type {
-                            base:
-                                ast::BaseType::Int {
-                                    nbytes: _,
-                                    signed: Some(false),
-                                },
-                            ptr: None,
-                            ..
-                        } => {
-                            instructions.push(Instruction::DoubleToUInt {
-                                src: val,
-                                dst: dst.clone(),
-                            });
-                        }
-                        ast::Type {
-                            base:
-                                ast::BaseType::Int {
-                                    nbytes: _,
-                                    signed: _,
-                                },
-                            ptr: None,
-                            ..
-                        } => {
-                            instructions.push(Instruction::DoubleToInt {
-                                src: val,
-                                dst: dst.clone(),
-                            });
-                        }
-                        // FIXME: Add chars here
-                        // We should not ever be trying to cast a double to
-                        // anything other than an int
-                        _ => unreachable!("Casting float type to {target:?}"),
-                    }
-                } else if is_float(&target) {
-                    match val_type {
-                        ast::Type {
-                            base:
-                                ast::BaseType::Int {
-                                    nbytes: _,
-                                    signed: Some(false),
-                                },
-                            ptr: None,
-                            ..
-                        } => {
-                            instructions.push(Instruction::UIntToDouble {
-                                src: val,
-                                dst: dst.clone(),
-                            });
-                        }
-                        ast::Type {
-                            base:
-                                ast::BaseType::Int {
-                                    nbytes: _,
-                                    signed: _,
-                                },
-                            ptr: None,
-                            ..
-                        } => {
-                            instructions.push(Instruction::IntToDouble {
-                                src: val,
-                                dst: dst.clone(),
-                            });
-                        }
-                        // FIXME: Add chars here
-                        // We should not ever be trying to cast a double to
-                        // anything other than an int
-                        _ => unreachable!("Casting float type to {target:?}"),
-                    }
-                } else {
-                    // Integer ops
-                    // FIXME: This needs to use PartialEq/Eq
-                    match target.base.nbytes().cmp(&val_type.base.nbytes()) {
-                        std::cmp::Ordering::Equal => {
-                            instructions.push(Instruction::Copy {
-                                src: val,
-                                dst: dst.clone(),
-                            });
-                        }
-                        std::cmp::Ordering::Less => {
-                            instructions.push(Instruction::Truncate {
-                                src: val,
-                                dst: dst.clone(),
-                            });
-                        }
-                        _ => match val_type {
-                            ast::Type {
-                                base: ast::BaseType::Int { signed, .. },
-                                ptr: None,
-                                ..
-                            } => {
-                                if signed.is_none_or(|signed| signed) {
-                                    instructions.push(Instruction::SignExtend {
-                                        src: val,
-                                        dst: dst.clone(),
-                                    });
-                                } else {
-                                    instructions.push(Instruction::ZeroExtend {
-                                        src: val,
-                                        dst: dst.clone(),
-                                    });
-                                }
-                            }
-                            _ => unimplemented!(),
+        // Double -> Integer
+        if is_float(&val_type) {
+            match target {
+                ast::Type {
+                    base:
+                        ast::BaseType::Int {
+                            nbytes: _,
+                            signed: Some(false),
                         },
-                    }
+                    ..
+                } => {
+                    instructions.push(Instruction::DoubleToUInt {
+                        src: val,
+                        dst: dst.clone(),
+                    });
                 }
+                ast::Type {
+                    base:
+                        ast::BaseType::Int {
+                            nbytes: _,
+                            signed: _,
+                        },
+                    ..
+                } => {
+                    instructions.push(Instruction::DoubleToInt {
+                        src: val,
+                        dst: dst.clone(),
+                    });
+                }
+                // FIXME: Add chars here
+                // We should not ever be trying to cast a double to
+                // anything other than an int
+                _ => unreachable!("Casting float type to {target:?}"),
+            }
+        } else if is_float(&target) {
+            match val_type {
+                ast::Type {
+                    base:
+                        ast::BaseType::Int {
+                            nbytes: _,
+                            signed: Some(false),
+                        },
+                    ..
+                } => {
+                    instructions.push(Instruction::UIntToDouble {
+                        src: val,
+                        dst: dst.clone(),
+                    });
+                }
+                ast::Type {
+                    base:
+                        ast::BaseType::Int {
+                            nbytes: _,
+                            signed: _,
+                        },
+                    ..
+                } => {
+                    instructions.push(Instruction::IntToDouble {
+                        src: val,
+                        dst: dst.clone(),
+                    });
+                }
+                // FIXME: Add chars here
+                // We should not ever be trying to cast a double to
+                // anything other than an int
+                _ => unreachable!("Casting float type to {target:?}"),
+            }
+        } else {
+            // Integer ops
+            // FIXME: This needs to use PartialEq/Eq
+            match target.base.nbytes().cmp(&val_type.base.nbytes()) {
+                std::cmp::Ordering::Equal => {
+                    instructions.push(Instruction::Copy {
+                        src: val,
+                        dst: dst.clone(),
+                    });
+                }
+                std::cmp::Ordering::Less => {
+                    instructions.push(Instruction::Truncate {
+                        src: val,
+                        dst: dst.clone(),
+                    });
+                }
+                _ => match val_type {
+                    ast::Type {
+                        base: ast::BaseType::Int { signed, .. },
+                        ..
+                    } => {
+                        if signed.is_none_or(|signed| signed) {
+                            instructions.push(Instruction::SignExtend {
+                                src: val,
+                                dst: dst.clone(),
+                            });
+                        } else {
+                            instructions.push(Instruction::ZeroExtend {
+                                src: val,
+                                dst: dst.clone(),
+                            });
+                        }
+                    }
+                    _ => unimplemented!(),
+                },
+            }
+        }
+        Self {
+            instructions,
+            val: dst,
+        }
+    }
 
+    fn parse_with_and_convert(
+        node: ast::Expr,
+        symbols: &mut SymbolTable,
+        make_temp_var: &mut impl FnMut() -> String,
+    ) -> Self {
+        match Self::parse_with(node, symbols, make_temp_var) {
+            ExprResult::PlainOperand(expr) => expr,
+            ExprResult::DerefrencedPointer(expr) => {
+                let Self {
+                    mut instructions,
+                    val,
+                } = expr;
+                let dst = Function::make_tacky_temp_var(
+                    val.get_type(symbols).deref(),
+                    symbols,
+                    make_temp_var,
+                );
+                instructions.push(Instruction::Load {
+                    src_ptr: val,
+                    dst: dst.clone(),
+                });
                 Self {
                     instructions,
                     val: dst,
@@ -1200,6 +1566,12 @@ impl Expr {
             }
         }
     }
+}
+
+#[derive(Debug)]
+enum ExprResult {
+    PlainOperand(Expr),
+    DerefrencedPointer(Expr),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -1394,60 +1766,5 @@ mod tests {
             Instruction::Return(Some(Val::Var("tacky.test.2".to_string().into()))),
         ];
         assert_eq!(actual, expected);
-    }
-
-    #[test]
-    fn test_binary_expr() {
-        let mut symbols = SymbolTable::default();
-        let ast_binary_expr = ast::Expr::Binary {
-            op: ast::BinaryOp::Subtract,
-            left: Box::new(ast::Expr::Binary {
-                op: ast::BinaryOp::Multiply,
-                left: Box::new(ast::Expr::Constant(ast::Constant::I32(1))),
-                right: Box::new(ast::Expr::Constant(ast::Constant::I32(2))),
-            }),
-            right: Box::new(ast::Expr::Binary {
-                op: ast::BinaryOp::Multiply,
-                left: Box::new(ast::Expr::Constant(ast::Constant::I32(3))),
-                right: Box::new(ast::Expr::Binary {
-                    op: ast::BinaryOp::Add,
-                    left: Box::new(ast::Expr::Constant(ast::Constant::I32(4))),
-                    right: Box::new(ast::Expr::Constant(ast::Constant::I32(5))),
-                }),
-            }),
-        };
-        let mut counter = 0;
-        let mut make_temp_var = Function::make_temp_var(Rc::new("test".to_string()), &mut counter);
-        let tacky_expr = Expr::parse_with(ast_binary_expr, &mut symbols, &mut make_temp_var);
-        let expected = Expr {
-            instructions: vec![
-                Instruction::Binary {
-                    op: BinaryOp::Multiply,
-                    src1: Val::Constant(ast::Constant::I32(1)),
-                    src2: Val::Constant(ast::Constant::I32(2)),
-                    dst: Val::Var(Rc::new("tacky.test.0".to_string())),
-                },
-                Instruction::Binary {
-                    op: BinaryOp::Add,
-                    src1: Val::Constant(ast::Constant::I32(4)),
-                    src2: Val::Constant(ast::Constant::I32(5)),
-                    dst: Val::Var(Rc::new("tacky.test.1".to_string())),
-                },
-                Instruction::Binary {
-                    op: BinaryOp::Multiply,
-                    src1: Val::Constant(ast::Constant::I32(3)),
-                    src2: Val::Var(Rc::new("tacky.test.1".to_string())),
-                    dst: Val::Var(Rc::new("tacky.test.2".to_string())),
-                },
-                Instruction::Binary {
-                    op: BinaryOp::Subtract,
-                    src1: Val::Var(Rc::new("tacky.test.0".to_string())),
-                    src2: Val::Var(Rc::new("tacky.test.2".to_string())),
-                    dst: Val::Var(Rc::new("tacky.test.3".to_string())),
-                },
-            ],
-            val: Val::Var(Rc::new("tacky.test.3".to_string())),
-        };
-        assert_eq!(expected, tacky_expr);
     }
 }

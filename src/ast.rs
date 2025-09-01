@@ -1,67 +1,23 @@
 use crate::lexer::{ConstantFlag, Token};
 
-use anyhow::{Context, Error, Result, bail, ensure};
+use anyhow::{Context, Result, bail, ensure};
 use num::{NumCast, bigint::BigUint};
 use std::str::FromStr;
-use std::{
-    num::{NonZeroU8, NonZeroUsize},
-    rc::Rc,
-};
+use std::{num::NonZeroUsize, rc::Rc};
 
 pub fn parse(tokens: &[Token]) -> Result<Program> {
     let (prog, _) = Program::consume(tokens)?;
     Ok(prog)
 }
 
-// Get ident nested in arbitrary number of parentheses
-fn parse_ident(tokens: &[Token]) -> Result<(Rc<String>, &[Token])> {
-    let mut nparens = 0;
-    let mut name = None;
-    for token in tokens.iter() {
-        match token {
-            Token::LParen => {
-                nparens += 1;
-            }
-            Token::Ident(s) => {
-                name = Some(Rc::clone(s));
-                if tokens[nparens + 1..nparens + 1 + nparens]
-                    .iter()
-                    .any(|t| *t != Token::RParen)
-                {
-                    bail!("Invalid parentheses around identifier \"{}\"", s);
-                }
-                break;
-            }
-            _ => {
-                bail!(
-                    "Failed to parse identifier in declaration. Found {:?} instead.",
-                    token
-                );
-            }
-        }
-    }
-    if let Some(name) = name {
-        Ok::<(std::rc::Rc<String>, &[Token]), Error>((name, &tokens[nparens + nparens + 1..]))
-    } else {
-        bail!("Unable to parse identifier in declaration.")
-    }
-}
-
-pub trait AstNode {
-    fn consume(tokens: &[Token]) -> Result<(Self, &[Token])>
-    where
-        Self: Sized;
-}
-
 #[derive(Debug, PartialEq)]
 pub struct Program {
     pub declarations: Vec<Declaration>,
 }
-impl AstNode for Program {
+impl Program {
     fn consume(tokens: &[Token]) -> Result<(Program, &[Token])> {
         let mut declarations = vec![];
         let mut remaining = tokens;
-        // This will change again very soon with file scope variables
         while !remaining.is_empty() {
             let (declaration, tokens) = Declaration::consume(remaining)?;
             declarations.push(declaration);
@@ -72,45 +28,18 @@ impl AstNode for Program {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct FunDecl {
-    pub ret_t: Type,
-    pub name: Rc<String>,
-    pub signature: Vec<(Type, Option<Rc<String>>)>,
-    pub block: Option<Block>,
-    pub storage_class: Option<StorageClass>,
-}
+pub struct RawParameterList(Vec<(Type, Declarator)>);
 
-impl From<&FunDecl> for Type {
-    fn from(decl: &FunDecl) -> Self {
-        let param_types = decl
-            .signature
-            .iter()
-            .map(|(param_type, _)| param_type.clone())
-            .collect::<Vec<Type>>();
-        let base = BaseType::Fun {
-            ret_t: Box::new(decl.ret_t.clone()),
-            param_types,
-        };
-        Self {
-            alignment: base.default_alignment(),
-            base,
-            ptr: None,
-            storage: decl.storage_class,
-            is_const: false,
+impl RawParameterList {
+    fn consume(tokens: &[Token]) -> Result<(Self, &[Token])> {
+        if tokens.first().is_none_or(|t| *t != Token::LParen) {
+            bail!("ast.ParameterList.consume(): Expected opening parentheses in parameter list.");
         }
-    }
-}
-
-type ParameterList = Vec<(Type, Option<Rc<String>>)>;
-
-impl FunDecl {
-    /// Parses [ <type> [name] ]*.
-    /// Does not consume opening or closing parentheses
-    fn parse_parameter_list(tokens: &[Token]) -> Result<(ParameterList, &[Token])> {
+        let tokens = &tokens[1..];
         let mut signature = vec![];
         let remaining = match tokens {
-            [Token::RParen, ..] => tokens,
-            [Token::Void, Token::RParen, ..] => &tokens[1..],
+            [Token::RParen, tokens @ ..] => &tokens[1..],
+            [Token::Void, Token::RParen, ..] => &tokens[2..],
             [Token::Void, t, ..] => {
                 bail!("Expected closing parentheses but found \"{}\"", t)
             }
@@ -118,15 +47,17 @@ impl FunDecl {
                 let mut keep_going = true;
                 let mut remaining = tokens;
                 while keep_going {
-                    let (typ, tokens) = Type::consume(remaining)?;
+                    let (stream_offset, r#type, storage) = TypeBuilder::new()
+                        .get_base(remaining)
+                        .and_then(|b| b.into_type())
+                        .context("Error building base type from token stream.")?;
                     ensure!(
-                        typ.storage.is_none(),
-                        "Cannot have storage specifier in parameter type."
+                        storage.is_none(),
+                        "Cannot have function parameter with storage specifier."
                     );
-                    let (name, tokens) = parse_ident(tokens)
-                        .map(|(name, tokens)| (Some(name), tokens))
-                        .unwrap_or((None, tokens));
-                    signature.push((typ, name));
+                    let (declarator, tokens) = Declarator::consume(&remaining[stream_offset..])
+                        .context("ast.ParameterList.consume(): Unable to parse declarator.")?;
+                    signature.push((r#type, declarator));
                     if let Some(Token::Comma) = tokens.first() {
                         remaining = &tokens[1..];
                     } else {
@@ -134,59 +65,95 @@ impl FunDecl {
                         remaining = tokens;
                     }
                 }
-                remaining
+                if remaining.first().is_none_or(|t| *t != Token::RParen) {
+                    bail!(
+                        "ast.ParameterList.consume(): Expected opening parentheses in parameter list."
+                    );
+                }
+                &remaining[1..]
             }
         };
-        Ok((signature, remaining))
+        Ok((Self(signature), remaining))
     }
 }
 
-impl AstNode for FunDecl {
-    fn consume(tokens: &[Token]) -> Result<(Self, &[Token])> {
-        // Kind of a hack, but use the return type parsing to get the storage
-        // class for the function, since the class can be intermixed with
-        // potentially many specifiers in the return type
-        let (mut ret_t, tokens) = Type::consume(tokens).context("Failed to parse function type")?;
-        let storage_class = ret_t.storage.take();
+#[derive(Clone, Debug, PartialEq)]
+pub struct FunDecl {
+    pub r#type: Type,
+    pub name: Rc<String>,
+    pub params: Vec<Option<Rc<String>>>,
+    pub block: Option<Block>,
+    pub storage_class: Option<StorageClass>,
+}
 
-        let (name, tokens) = parse_ident(tokens).context("Missing function name.")?;
-        if let [Token::LParen, tokens @ ..] = tokens {
-            let (signature, tokens) = Self::parse_parameter_list(tokens)
-                .with_context(|| format!("Unable to parse parameter list for {}", name))?;
-            if tokens.first().is_some_and(|t| *t != Token::RParen) {
-                bail!("Expected \")\" to close parameter list.");
-            }
-            let remaining = &tokens[1..];
+impl From<&FunDecl> for Type {
+    fn from(value: &FunDecl) -> Self {
+        value.r#type.clone()
+    }
+}
 
-            let (block, tokens) = match remaining {
-                [Token::Semi, tokens @ ..] => (None, tokens),
-                [Token::LSquirly, ..] => {
-                    let (block, tokens) = Block::consume(remaining)
-                        .context("Failed to parse block within function definition.")?;
-                    (Some(block), tokens)
-                }
-                [token, ..] => bail!(
-                    "Expected \";\" or \"{{\" after function signature but found token: {}.",
-                    token
-                ),
-                [] => bail!(
-                    "Expected \";\" or \"{{\" after function signature but found no more tokens."
-                ),
-            };
-
-            Ok((
-                Self {
-                    ret_t,
-                    name: Rc::clone(&name),
-                    signature,
-                    block,
-                    storage_class,
-                },
-                tokens,
-            ))
+impl FunDecl {
+    #[allow(clippy::type_complexity)]
+    pub fn signature(&self) -> Result<Vec<(&Type, Option<&Rc<String>>)>> {
+        if let Type {
+            base: BaseType::Fun {
+                ref param_types, ..
+            },
+            ..
+        } = self.r#type
+        {
+            ensure!(
+                param_types.len() == self.params.len(),
+                "ast.FunDecl.signature(): Parameter type and name vectors should be the same length."
+            );
+            Ok(param_types
+                .iter()
+                .zip(self.params.iter())
+                .map(|(r#type, name)| (r#type, name.as_ref()))
+                .collect())
         } else {
-            bail!("Expected start of function parameter list.")
+            bail!("ast.FunDecl.signature(): How did we get here? This match should always work!");
         }
+    }
+
+    fn new_uninit(
+        r#type: Type,
+        storage_class: Option<StorageClass>,
+        name: Rc<String>,
+        params: Vec<Option<Rc<String>>>,
+    ) -> Self {
+        Self {
+            r#type,
+            name,
+            params,
+            block: None,
+            storage_class,
+        }
+    }
+
+    fn check_for_definition(mut self, tokens: &[Token]) -> Result<(Self, &[Token])> {
+        ensure!(
+            self.block.is_none(),
+            "ast.FunDecl.check_for_definition: Attempting to check for definition on function which already has one."
+        );
+
+        let (block, tokens) = match tokens {
+            [Token::Semi, tokens @ ..] => (None, tokens),
+            [Token::LSquirly, ..] => {
+                let (block, tokens) = Block::consume(tokens)
+                    .context("Failed to parse block within function definition.")?;
+                (Some(block), tokens)
+            }
+            [token, ..] => bail!(
+                "Expected \";\" or \"{{\" after function signature but found token: {}.",
+                token
+            ),
+            [] => {
+                bail!("Expected \";\" or \"{{\" after function signature but found no more tokens.")
+            }
+        };
+        self.block = block;
+        Ok((self, tokens))
     }
 }
 
@@ -215,7 +182,7 @@ pub enum BlockItem {
     Decl(Declaration),
 }
 
-impl AstNode for BlockItem {
+impl BlockItem {
     fn consume(tokens: &[Token]) -> Result<(BlockItem, &[Token])> {
         if let Ok((decl, tokens)) = Declaration::consume(tokens) {
             Ok((Self::Decl(decl), tokens))
@@ -229,42 +196,35 @@ impl AstNode for BlockItem {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct VarDecl {
-    pub typ: Type,
+    pub r#type: Type,
     pub name: Rc<String>,
     pub init: Option<Expr>,
+    pub storage_class: Option<StorageClass>,
 }
 
-impl AstNode for VarDecl {
-    fn consume(tokens: &[Token]) -> Result<(Self, &[Token])> {
-        let (typ, tokens) =
-            Type::consume(tokens).context("Unable to parse type in declaration.")?;
-        let (name, tokens) =
-            parse_ident(tokens).context("Failed to find valid identifer for declaration.")?;
+impl VarDecl {
+    fn check_for_definition(mut self, tokens: &[Token]) -> Result<(Self, &[Token])> {
         match tokens {
             [Token::Assign, tokens @ ..] => {
                 let (expr, tokens) = Expr::parse(tokens, 0)?;
                 if tokens.first().is_some_and(|x| *x != Token::Semi) {
                     bail!("Semicolon required after expression in variable declaration.")
                 } else {
-                    Ok((
-                        Self {
-                            typ,
-                            name,
-                            init: Some(expr),
-                        },
-                        &tokens[1..],
-                    ))
+                    self.init = Some(expr);
+                    Ok((self, &tokens[1..]))
                 }
             }
-            [Token::Semi, tokens @ ..] => Ok((
-                Self {
-                    typ,
-                    name,
-                    init: None,
-                },
-                tokens,
-            )),
+            [Token::Semi, tokens @ ..] => Ok((self, tokens)),
             _ => bail!("Unable to parse valid variable declaration."),
+        }
+    }
+
+    fn new_uninit(r#type: Type, storage_class: Option<StorageClass>, name: Rc<String>) -> Self {
+        Self {
+            r#type,
+            name,
+            init: None,
+            storage_class,
         }
     }
 }
@@ -282,19 +242,55 @@ impl Declaration {
             Declaration::VarDecl(decl) => decl.init.is_some(),
         }
     }
-}
 
-impl AstNode for Declaration {
+    pub fn storage_class(&self) -> Option<&StorageClass> {
+        match self {
+            Declaration::FunDecl(decl) => decl.storage_class.as_ref(),
+            Declaration::VarDecl(decl) => decl.storage_class.as_ref(),
+        }
+    }
+
     fn consume(tokens: &[Token]) -> Result<(Self, &[Token])> {
-        if let Ok((decl, tokens)) = FunDecl::consume(tokens) {
-            Ok((Self::FunDecl(decl), tokens))
-        } else if let Ok((decl, tokens)) = VarDecl::consume(tokens) {
-            Ok((Self::VarDecl(decl), tokens))
-        } else {
-            bail!(
-                "Unable to parse valid declaration form from tokens {:#?}",
-                &tokens[..std::cmp::min(tokens.len(), 25)]
-            )
+        let (stream_offset, base, storage_class) = TypeBuilder::new()
+            .get_base(tokens)
+            .and_then(|b| b.into_type())
+            .context("Error building base type from token stream.")?;
+        let (declarator, tokens) = Declarator::consume(&tokens[stream_offset..])
+            .context("ast.Declaration.consume(): Error while parsing declarator.")?;
+        let (name, decl_type, params) = Declarator::process(declarator, base)
+            .context("ast.Declaration.consume(): Error while processing declarator.")?;
+        let name =
+            name.expect("ast.Declaration.consume(): Declaration must have name being declared.");
+
+        match decl_type {
+            Type {
+                base: BaseType::Fun { .. },
+                ..
+            } => {
+                let (decl, tokens) = FunDecl::new_uninit(
+                    decl_type,
+                    storage_class,
+                    Rc::clone(&name),
+                    params,
+                )
+                .check_for_definition(tokens)
+                .context(format!(
+                    "ast.Declaration.consume(): Error parsing function declaration \"{name}\"."
+                ))?;
+                Ok((Declaration::FunDecl(decl), tokens))
+            }
+            _ => {
+                let (decl, tokens) = VarDecl::new_uninit(
+                    decl_type,
+                    storage_class,
+                    Rc::clone(&name),
+                )
+                .check_for_definition(tokens)
+                .context(
+                    "ast.Declaration.consume(): Error parsing variable declaration for \"{name}\".",
+                )?;
+                Ok((Declaration::VarDecl(decl), tokens))
+            }
         }
     }
 }
@@ -302,8 +298,8 @@ impl AstNode for Declaration {
 impl From<&Declaration> for Type {
     fn from(value: &Declaration) -> Self {
         match value {
-            Declaration::FunDecl(decl) => Type::from(decl),
-            Declaration::VarDecl(decl) => decl.typ.clone(),
+            Declaration::FunDecl(decl) => decl.r#type.clone(),
+            Declaration::VarDecl(decl) => decl.r#type.clone(),
         }
     }
 }
@@ -314,12 +310,11 @@ impl Block {
     pub fn items(&self) -> &Vec<BlockItem> {
         &self.0
     }
+
     pub fn into_items(self) -> Vec<BlockItem> {
         self.0
     }
-}
 
-impl AstNode for Block {
     fn consume(tokens: &[Token]) -> Result<(Self, &[Token])> {
         match tokens.first() {
             Some(Token::LSquirly) => {
@@ -347,14 +342,16 @@ pub enum ForInit {
     Expr(Option<Expr>),
 }
 
-impl AstNode for ForInit {
+impl ForInit {
     fn consume(tokens: &[Token]) -> Result<(Self, &[Token])> {
         match tokens {
             [Token::Semi, tokens @ ..] => Ok((ForInit::Expr(None), tokens)),
-            tokens => {
-                if let Ok((decl, tokens)) = VarDecl::consume(tokens) {
-                    Ok((ForInit::Decl(decl), tokens))
-                } else {
+            tokens => match Declaration::consume(tokens) {
+                Ok((Declaration::VarDecl(decl), tokens)) => Ok((ForInit::Decl(decl), tokens)),
+                Ok((Declaration::FunDecl(_), _)) => {
+                    bail!("ast.ForInit.consume(): Cannot declare function in for loop init.")
+                }
+                _ => {
                     let (expr, tokens) = Expr::parse(tokens, 0)
                         .context("Expected decleration or expression but failed to parse both")?;
                     if let Some(Token::Semi) = tokens.first() {
@@ -363,7 +360,7 @@ impl AstNode for ForInit {
                         bail!("Missing semicolon after init expression.")
                     }
                 }
-            }
+            },
         }
     }
 }
@@ -422,7 +419,7 @@ pub enum Stmt {
     Null,
 }
 
-impl AstNode for Stmt {
+impl Stmt {
     fn consume(tokens: &[Token]) -> Result<(Stmt, &[Token])> {
         let semi_terminated_expr = |tokens| {
             let (expr, tokens) = Expr::parse(tokens, 0).context(
@@ -673,7 +670,22 @@ pub enum Expr {
 
 impl Expr {
     pub fn is_lvalue(&self) -> bool {
-        matches!(self, Self::Var(_))
+        matches!(
+            self,
+            Self::Var(_)
+                | Self::Unary {
+                    op: UnaryOp::Deref,
+                    ..
+                }
+        )
+    }
+
+    pub fn has_compound(&self) -> bool {
+        match self {
+            Expr::Cast { target: _, exp } => exp.has_compound(),
+            Expr::Binary { op, .. } => op.compound_op().is_some(),
+            _ => false,
+        }
     }
 
     pub fn parse<'a>(tokens: &'a [Token], min_precedence: u32) -> Result<(Expr, &'a [Token])> {
@@ -689,19 +701,18 @@ impl Expr {
 
             if operator.does_assignment() {
                 let (right, tokens_inner) = Expr::parse(tokens_inner, operator.precedence())?;
-                let right = if let Some(op) = operator.compound_op() {
-                    Expr::Binary {
-                        op,
-                        left: Box::new(left.clone()),
-                        right: Box::new(right.clone()),
-                    }
+                if operator.compound_op().is_some() {
+                    left = Expr::Binary {
+                        op: operator,
+                        left: Box::new(left),
+                        right: Box::new(right),
+                    };
                 } else {
-                    right
-                };
-                left = Expr::Assignment {
-                    lvalue: Box::new(left),
-                    rvalue: Box::new(right),
-                };
+                    left = Expr::Assignment {
+                        lvalue: Box::new(left),
+                        rvalue: Box::new(right),
+                    };
+                }
                 tokens = tokens_inner;
             } else if operator == BinaryOp::Ternary {
                 let parse_conditional_middle =
@@ -819,18 +830,28 @@ impl Factor {
                     Ok((Expr::Constant(lit), tokens))
                 }
                 [Token::Ident(s), tokens @ ..] => {
-                    let (expr, tokens) = Self::check_for_postfix(Expr::Var(Rc::clone(s)), tokens);
-                    Self::check_for_call(expr, tokens)
+                    Self::check_for_call(Expr::Var(Rc::clone(s)), tokens)
                 }
                 // Could be parentheses for a type cast or expression precedence
                 [Token::LParen, tokens @ ..] => {
-                    if let Ok((typ, tokens)) = Type::consume(tokens) {
+                    if let Ok((stream_offset, r#type, storage_class)) = TypeBuilder::new()
+                        .get_base(tokens)
+                        .and_then(|b| b.into_type())
+                    {
+                        let tokens = &tokens[stream_offset..];
+                        let (r#type, tokens) =
+                            if let Ok((decl, tokens)) = AbstractDeclarator::consume(tokens) {
+                                (AbstractDeclarator::process(decl, r#type)?, tokens)
+                            } else {
+                                (r#type, tokens)
+                            };
+
                         ensure!(
                             matches!(tokens.first(), Some(Token::RParen)),
                             "Expected closing parentheses in type cast."
                         );
                         ensure!(
-                            typ.storage.is_none(),
+                            storage_class.is_none(),
                             "Cannot have storage specifier in type cast."
                         );
                         let tokens = &tokens[1..];
@@ -838,7 +859,7 @@ impl Factor {
                             .context("Parsing grammer rule: \"(\" <exp> \")\" failed")?;
                         Self::check_for_call(
                             Expr::Cast {
-                                target: typ,
+                                target: r#type,
                                 exp: Box::new(expr),
                             },
                             tokens,
@@ -856,7 +877,8 @@ impl Factor {
                     }
                 }
                 _ => bail!("Could not match valid grammar rule."),
-            },
+            }
+            .map(|(expr, tokens)| Self::check_for_postfix(expr, tokens)),
         }
     }
 }
@@ -869,10 +891,13 @@ pub enum BaseType {
     },
     Float(usize),
     Double(usize),
-    Char,
     Fun {
         ret_t: Box<Type>,
         param_types: Vec<Type>,
+    },
+    Ptr {
+        to: Box<Type>,
+        is_restrict: bool,
     },
     // TODO: Implement later and make this a non unit variant
     Struct,
@@ -910,6 +935,16 @@ impl PartialEq for BaseType {
                     param_types: r_param_types,
                 },
             ) => l_ret_t == r_ret_t && l_param_types == r_param_types,
+            (
+                Self::Ptr {
+                    to: l_to,
+                    is_restrict: l_is_restrict,
+                },
+                Self::Ptr {
+                    to: r_to,
+                    is_restrict: r_is_restrict,
+                },
+            ) => *l_to == *r_to && l_is_restrict == r_is_restrict,
             _ => core::mem::discriminant(self) == core::mem::discriminant(other),
         }
     }
@@ -921,7 +956,7 @@ impl BaseType {
             BaseType::Int { nbytes, .. } => *nbytes,
             BaseType::Float(nbytes) => *nbytes,
             BaseType::Double(nbytes) => *nbytes,
-            BaseType::Char => 1,
+            BaseType::Ptr { .. } => core::mem::size_of::<usize>(),
             BaseType::Fun { .. } => unreachable!(),
             BaseType::Struct => unreachable!(),
             BaseType::Void => unreachable!(),
@@ -934,9 +969,9 @@ impl BaseType {
 
     pub fn float(double: bool) -> Self {
         if double {
-            Self::Double(8)
+            Self::Double(core::mem::size_of::<f64>())
         } else {
-            Self::Float(4)
+            Self::Float(core::mem::size_of::<f32>())
         }
     }
 
@@ -975,8 +1010,9 @@ impl BaseType {
             Self::Int { nbytes, .. } => NonZeroUsize::new(*nbytes).unwrap(),
             Self::Float(nbytes) => NonZeroUsize::new(*nbytes).unwrap(),
             Self::Double(nbytes) => NonZeroUsize::new(*nbytes).unwrap(),
-            Self::Char => NonZeroUsize::new(1).unwrap(),
-            Self::Fun { .. } => NonZeroUsize::new(8).unwrap(), // This is for when we have function pointers
+            Self::Fun { .. } | Self::Ptr { .. } => {
+                NonZeroUsize::new(core::mem::size_of::<usize>()).unwrap()
+            }
             Self::Struct => todo!(),
             Self::Void => todo!(),
         }
@@ -996,7 +1032,7 @@ impl BaseType {
     fn default_promote(self) -> Self {
         match self {
             // Integer types get promoted to a basic signed int by default
-            Self::Int { .. } | Self::Char => {
+            Self::Int { .. } => {
                 let int = Self::default();
                 let int_rank = int.rank().expect("Integer does not have a rank?");
                 if self.rank().expect("Integer does not have a rank?") >= int_rank {
@@ -1024,6 +1060,35 @@ impl BaseType {
             Ok(other.clone())
         }
     }
+
+    fn consume(tokens: &[Token]) -> Result<(BaseType, &[Token])> {
+        if let Some(t) = tokens.first() {
+            // TODO: Add parsing for function type signatures here too:
+            // <ret_t> (*<optional name>)(<arg>*)
+            // - Name and asterisk can have parens around them
+            // - Types cannot have parens
+            // - No trailing commas
+            match t {
+                Token::Void => Ok((Self::Void, &tokens[1..])),
+                // Use this as a default, fix it up where this gets called
+                // if there are specifiers which change this
+                Token::Int => Ok((
+                    Self::Int {
+                        nbytes: std::mem::size_of::<i32>(),
+                        signed: None,
+                    },
+                    &tokens[1..],
+                )),
+                Token::Float => Ok((Self::Float(std::mem::size_of::<f32>()), &tokens[1..])),
+                Token::Double => Ok((Self::Double(std::mem::size_of::<f64>()), &tokens[1..])),
+                // TODO: Recursive parsing logic for structs
+                Token::Struct => Ok((Self::Struct, &tokens[1..])),
+                _ => bail!("Could not parse base type."),
+            }
+        } else {
+            bail!("No more tokens to parse a base type from.")
+        }
+    }
 }
 
 impl From<&Constant> for BaseType {
@@ -1045,104 +1110,7 @@ impl From<&Constant> for BaseType {
 
 impl Default for BaseType {
     fn default() -> Self {
-        Self::int(4, None)
-    }
-}
-
-impl AstNode for BaseType {
-    fn consume(tokens: &[Token]) -> Result<(BaseType, &[Token])> {
-        if let Some(t) = tokens.first() {
-            // TODO: Add parsing for function type signatures here too:
-            // <ret_t> (*<optional name>)(<arg>*)
-            // - Name and asterisk can have parens around them
-            // - Types cannot have parens
-            // - No trailing commas
-            match t {
-                Token::Void => Ok((Self::Void, &tokens[1..])),
-                // Use this as a default, fix it up where this gets called
-                // if there are specifiers which change this
-                Token::Int => Ok((
-                    Self::Int {
-                        nbytes: std::mem::size_of::<i32>(),
-                        signed: None,
-                    },
-                    &tokens[1..],
-                )),
-                Token::Float => Ok((Self::Float(std::mem::size_of::<f32>()), &tokens[1..])),
-                Token::Double => Ok((Self::Double(std::mem::size_of::<f64>()), &tokens[1..])),
-                Token::Char => Ok((Self::Char, &tokens[1..])),
-                // TODO: Recursive parsing logic for structs
-                Token::Struct => Ok((Self::Struct, &tokens[1..])),
-                _ => bail!("Could not parse base type."),
-            }
-        } else {
-            bail!("No more tokens to parse a base type from.")
-        }
-    }
-}
-
-#[derive(Debug, PartialEq, Clone)]
-pub struct TypePtr {
-    // Hardcoded to prevent >255 pointer depths (sorry pointer fans)
-    depth: NonZeroU8,
-    // Bit vectors for whether each depth of pointer can alias/is const
-    is_restrict: [u8; Self::BITVEC_LENGTH],
-    is_const: [u8; Self::BITVEC_LENGTH],
-}
-
-impl TypePtr {
-    const BITVEC_LENGTH: usize = (u8::MAX / 8) as usize;
-
-    #[allow(dead_code)]
-    fn get(arr: &[u8], depth: NonZeroU8, max_depth: NonZeroU8) -> Result<bool> {
-        if depth.gt(&max_depth) {
-            bail!("Requested depth exceeds maximum pointer depth.")
-        } else {
-            let byte_index: usize = ((depth.get() - 1) / 8).into();
-            let bit_index = Into::<usize>::into(depth.get() - 1) - (byte_index * 8);
-            let mask = 1 << bit_index;
-            Ok(arr[byte_index] & mask > 0)
-        }
-    }
-
-    #[allow(dead_code)]
-    fn get_const(&self, depth: NonZeroU8) -> Result<bool> {
-        Self::get(&self.is_const, depth, self.depth)
-    }
-
-    #[allow(dead_code)]
-    fn get_restrict(&self, depth: NonZeroU8) -> Result<bool> {
-        Self::get(&self.is_restrict, depth, self.depth)
-    }
-
-    fn set(arr: &mut [u8], depth: NonZeroU8, max_depth: NonZeroU8) -> Result<()> {
-        if depth.gt(&max_depth) {
-            bail!("Requested depth exceeds maximum pointer depth.")
-        } else {
-            let byte_index: usize = ((depth.get() - 1) / 8).into();
-            let bit_index = Into::<usize>::into(depth.get() - 1) - (byte_index * 8);
-            let mask = 1 << bit_index;
-            arr[byte_index] |= mask;
-            Ok(())
-        }
-    }
-
-    fn set_const(&mut self, depth: NonZeroU8) -> Result<()> {
-        Self::set(&mut self.is_const, depth, self.depth)
-    }
-
-    fn set_restrict(&mut self, depth: NonZeroU8) -> Result<()> {
-        Self::set(&mut self.is_restrict, depth, self.depth)
-    }
-}
-
-impl Default for TypePtr {
-    fn default() -> Self {
-        Self {
-            depth: NonZeroU8::new(1).unwrap(),
-            is_restrict: Default::default(),
-            is_const: Default::default(),
-        }
+        Self::int(core::mem::size_of::<i32>(), None)
     }
 }
 
@@ -1150,28 +1118,26 @@ impl Default for TypePtr {
 pub struct Type {
     pub base: BaseType,
     pub alignment: NonZeroUsize,
-    pub ptr: Option<TypePtr>,
-    pub storage: Option<StorageClass>,
     pub is_const: bool,
 }
 
 impl PartialEq for Type {
     fn eq(&self, other: &Self) -> bool {
-        self.base == other.base && self.alignment == other.alignment && self.ptr == other.ptr
+        self.base == other.base && self.alignment == other.alignment
     }
 }
 
 impl Type {
+    pub const PTR_ALIGNMENT: NonZeroUsize =
+        NonZeroUsize::new(core::mem::size_of::<usize>()).unwrap();
     pub fn bool() -> Self {
-        Self::int(4, None)
+        Self::int(core::mem::size_of::<i32>(), None)
     }
 
     pub fn int(nbytes: usize, signed: Option<bool>) -> Self {
         Self {
             base: BaseType::int(nbytes, signed),
             alignment: NonZeroUsize::new(nbytes).unwrap(),
-            ptr: None,
-            storage: None,
             is_const: true,
         }
     }
@@ -1180,176 +1146,79 @@ impl Type {
         Self {
             base: BaseType::float(nbytes == core::mem::size_of::<f64>()),
             alignment: NonZeroUsize::new(nbytes).unwrap(),
-            ptr: None,
-            storage: None,
             is_const: true,
         }
     }
 
     pub fn size_of(&self) -> usize {
-        match self.ptr {
-            Some(..) => core::mem::size_of::<usize>(),
-            None => self.base.nbytes(),
-        }
+        self.base.nbytes()
+    }
+
+    pub fn is_pointer(&self) -> bool {
+        matches!(self.base, BaseType::Ptr { .. })
+    }
+
+    pub fn is_arithmetic(&self) -> bool {
+        matches!(
+            self.base,
+            BaseType::Int { .. } | BaseType::Float(_) | BaseType::Double(_)
+        )
+    }
+
+    pub fn is_float(&self) -> bool {
+        matches!(self.base, BaseType::Float(_) | BaseType::Double(_))
+    }
+
+    pub fn is_function(&self) -> bool {
+        matches!(self.base, BaseType::Fun { .. })
+    }
+
+    pub fn deref(self) -> Self {
+        assert!(self.is_pointer(), "Cannot derefrence non-pointer type");
+        let BaseType::Ptr { to, is_restrict: _ } = self.base else {
+            unreachable!()
+        };
+        *to
     }
 }
 
-impl AstNode for Type {
-    fn consume<'a>(tokens: &'a [Token]) -> Result<(Self, &'a [Token])> {
+impl std::fmt::Display for Type {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.is_const {
+            write!(f, "const ")?;
+        }
+        self.base.fmt(f)?;
+
+        Ok(())
+    }
+}
+
+#[derive(Debug, Default, Clone, PartialEq)]
+struct TypeBuilder {
+    stream_offset: usize,
+    n_longs: usize,
+    is_signed: Option<bool>,
+    is_short: bool,
+    is_const: bool,
+    alignment: Option<NonZeroUsize>,
+    storage: Option<StorageClass>,
+    base: Option<BaseType>,
+}
+
+impl TypeBuilder {
+    fn new() -> Self {
+        Self::default()
+    }
+
+    fn get_base(mut self, tokens: &[Token]) -> Result<Self> {
         let mut remaining = tokens;
-
-        // Integers have these specifiers attached to them, and double can
-        // have up to a single "long" in its specifier
-        let mut n_longs = 0;
-        let mut is_signed = None;
-        let mut is_short = false;
-        // See if there is a specifier, ok result is boolean for if a token was found
-        let mut check_for_specifier = |t: &Token| match t {
-            Token::Short => {
-                is_short = true;
-                if is_short && n_longs > 0 {
-                    bail!("Found \"short\" and \"long\" in same type declaration.");
-                }
-                Ok(true)
-            }
-            Token::Long => {
-                n_longs += 1;
-                if is_short && n_longs > 0 {
-                    bail!("Found \"short\" and \"long\" in same type declaration.");
-                }
-                Ok(true)
-            }
-            Token::Unsigned => {
-                if is_signed.is_some_and(|signed| signed) {
-                    bail!("Type cannot be both signed and unsigned.");
-                } else if is_signed.is_some() {
-                    bail!("Error: duplicate unsigned");
-                }
-                is_signed = Some(false);
-                Ok(true)
-            }
-            Token::Signed => {
-                if is_signed.is_some_and(|signed| !signed) {
-                    bail!("Type cannot be both signed and unsigned.");
-                } else if is_signed.is_some() {
-                    bail!("Error: duplicate nsigned");
-                }
-                is_signed = Some(true);
-                Ok(true)
-            }
-            _ => Ok(false),
-        };
-
-        // Anything can be const
-        let mut is_const = false;
-        let mut check_for_const = |t: &Token| {
-            if *t == Token::Const {
-                // We can have multiple constants
-                is_const = true;
-                true
-            } else {
-                false
-            }
-        };
-
-        let mut storage = None;
-        let mut check_for_storage = |t: &Token| {
-            if storage.is_some() {
-                bail!("Error: Multiple storage class specifiers.");
-            }
-            storage = match t {
-                Token::Static => Some(StorageClass::Static),
-                Token::Extern => Some(StorageClass::Extern),
-                Token::Auto => Some(StorageClass::Auto),
-                Token::Register => Some(StorageClass::Register),
-                _ => None,
-            };
-            Ok(storage.is_some())
-        };
-
-        let mut base: Option<BaseType> = None;
-        let mut check_for_base_type = |tokens| {
-            if let Ok((r#type, tokens)) = BaseType::consume(tokens) {
-                if base.is_some() {
-                    bail!("Error: Found two conflicting types.");
-                }
-                base = Some(r#type);
-                Ok((true, tokens))
-            } else {
-                Ok((false, tokens))
-            }
-        };
-
-        // Only a pointer can be marked as "restrict"
-        let mut is_restrict = false;
-        let mut check_for_restrict = |t: &Token| {
-            if *t == Token::Restrict {
-                // We can have multiple restricts
-                is_restrict = true;
-                true
-            } else {
-                false
-            }
-        };
-
-        let mut ptr: Option<TypePtr> = None;
-        let mut check_for_ptr = |ptr: Option<TypePtr>, tokens: &'a [Token]| {
-            let mut remaining = tokens;
-            if let Some(Token::Star) = remaining.first() {
-                // Entering a new depth, reset const and restrict flags
-                let mut inner_ptr = if let Some(p) = ptr {
-                    let _ = p.depth.checked_add(1);
-                    p
-                } else {
-                    TypePtr::default()
-                };
-                // Eat up any const or restrict keywords
-                // Ignore the result type from set_const since we are using
-                // the type's own depth to set it
-                while let Some(t) = remaining.first() {
-                    if check_for_const(t) {
-                        let _ = inner_ptr.set_const(inner_ptr.depth);
-                        remaining = &remaining[1..];
-                    } else if check_for_restrict(t) {
-                        let _ = inner_ptr.set_restrict(inner_ptr.depth);
-                        remaining = &remaining[1..];
-                    } else {
-                        break;
-                    }
-                    let _ = inner_ptr.depth.checked_add(1);
-                }
-                (true, Some(inner_ptr), remaining)
-            } else {
-                (false, ptr, remaining)
-            }
-        };
-
-        // Continue eating tokens with aditional type specifiers, updating
-        // flags and enforcing type specifier rules along the way
-        // Requirements:
-        //  1. Needs to find a valid "base type" (defined as primitives or
-        //  a user defined struct). As part of this, specifiers for an integer
-        //  must be kept track of.
-        //  2. Optionally attach a storage class and const specification.
-        //  3. Parse up to some maximum pointer depth (256) and for each
-        //  pointer check whether it has a restrict or const keyword.
         while let Some(t) = remaining.first() {
-            if check_for_specifier(t).is_ok_and(|found| found)
-                || check_for_storage(t).is_ok_and(|found| found)
+            if self.check_for_specifier(t)? || self.check_for_storage(t)? || self.check_for_const(t)
             {
                 remaining = &remaining[1..];
-            } else if let Ok((true, tokens)) = check_for_base_type(remaining) {
+            } else if let (true, tokens) = self.check_for_base_type(remaining)? {
                 remaining = tokens;
             } else {
-                // We could not find anything else, but the type could be
-                // a pointer. Parse as many levels of pointer depth as possible
-                // until we no longer find another level or hit the maximum.
-                while let (true, new_ptr, tokens) = check_for_ptr(ptr.take(), remaining) {
-                    ptr = new_ptr;
-                    remaining = tokens;
-                }
-                // Once we have exhausted all the pointer indirections exit
-                // the loop
                 break;
             }
         }
@@ -1357,24 +1226,25 @@ impl AstNode for Type {
         // Integer checks
         // 1. If any of the integer flags changed, the base type either has
         // to be explicitly declared as an integer or have been elided
-        if n_longs > 0 && is_short {
+        if self.n_longs > 0 && self.is_short {
             bail!("Integer cannot be both a long and a short.");
         }
-        if n_longs > 0 && matches!(base, Some(BaseType::Double { .. })) {
-            base.replace(BaseType::Double(std::mem::size_of::<f64>()));
-        } else if n_longs > 0 || is_signed.is_some() || is_short {
-            match base {
+        if self.n_longs > 0 && matches!(&self.base, Some(BaseType::Double { .. })) {
+            self.base
+                .replace(BaseType::Double(std::mem::size_of::<f64>()));
+        } else if self.n_longs > 0 || self.is_signed.is_some() || self.is_short {
+            match self.base {
                 Some(BaseType::Int { .. }) | None => {
-                    let nbytes = if n_longs > 0 {
+                    let nbytes = if self.n_longs > 0 {
                         std::mem::size_of::<i64>()
-                    } else if is_short {
+                    } else if self.is_short {
                         std::mem::size_of::<i16>()
                     } else {
                         std::mem::size_of::<i32>()
                     };
-                    base.replace(BaseType::Int {
+                    self.base.replace(BaseType::Int {
                         nbytes,
-                        signed: is_signed,
+                        signed: self.is_signed,
                     });
                 }
                 _ => bail!(
@@ -1383,53 +1253,340 @@ impl AstNode for Type {
             }
         }
 
-        if let Some(base) = base {
+        // SAFETY: `remaining` is constructed from within `tokens` slice of
+        // memory. This will always be valid, and was a whole lot easier to do
+        // than reworking all our parsing logic :^)
+        self.stream_offset =
+            unsafe { remaining.as_ptr().offset_from(tokens.as_ptr()) }.try_into()?;
+
+        Ok(self)
+    }
+
+    fn check_for_base_type<'a>(&mut self, tokens: &'a [Token]) -> Result<(bool, &'a [Token])> {
+        if let Ok((r#type, tokens)) = BaseType::consume(tokens) {
+            if self.base.is_some() {
+                bail!("Error: Found two conflicting types.");
+            }
+            self.base = Some(r#type);
+            Ok((true, tokens))
+        } else {
+            Ok((false, tokens))
+        }
+    }
+
+    fn check_for_const(&mut self, t: &Token) -> bool {
+        if *t == Token::Const {
+            // More `const` won't make it more constant but still allow it
+            self.is_const = true;
+            true
+        } else {
+            false
+        }
+    }
+
+    fn check_for_specifier(&mut self, t: &Token) -> Result<bool> {
+        match t {
+            Token::Short => {
+                self.is_short = true;
+                if self.is_short && self.n_longs > 0 {
+                    bail!("Found \"short\" and \"long\" in same type declaration.");
+                }
+                Ok(true)
+            }
+            Token::Long => {
+                self.n_longs += 1;
+                if self.is_short && self.n_longs > 0 {
+                    bail!("Found \"short\" and \"long\" in same type declaration.");
+                }
+                Ok(true)
+            }
+            Token::Unsigned => {
+                if self.is_signed.is_some_and(|signed| signed) {
+                    bail!("Type cannot be both signed and unsigned.");
+                } else if self.is_signed.is_some() {
+                    bail!("Error: duplicate unsigned");
+                }
+                self.is_signed = Some(false);
+                Ok(true)
+            }
+            Token::Signed => {
+                if self.is_signed.is_some_and(|signed| !signed) {
+                    bail!("Type cannot be both signed and unsigned.");
+                } else if self.is_signed.is_some() {
+                    bail!("Error: duplicate nsigned");
+                }
+                self.is_signed = Some(true);
+                Ok(true)
+            }
+            _ => Ok(false),
+        }
+    }
+
+    fn check_for_storage(&mut self, t: &Token) -> Result<bool> {
+        let storage = match t {
+            Token::Static => Some(StorageClass::Static),
+            Token::Extern => Some(StorageClass::Extern),
+            Token::Auto => Some(StorageClass::Auto),
+            Token::Register => Some(StorageClass::Register),
+            _ => None,
+        };
+        match (self.storage.is_some(), storage.is_some()) {
+            (true, true) => bail!("Error: Multiple storage class specifiers."),
+            (false, true) => {
+                self.storage = storage;
+                Ok(true)
+            }
+            (_, false) => Ok(false),
+        }
+    }
+
+    fn into_type(self) -> Result<(usize, Type, Option<StorageClass>)> {
+        if let Some(base) = self.base {
+            let alignment = self.alignment.unwrap_or(base.default_alignment());
+            if !alignment.is_power_of_two() {
+                bail!("Alignment must be a power of 2");
+            }
+
             Ok((
-                Self {
-                    alignment: base.default_alignment(),
+                self.stream_offset,
+                Type {
                     base,
-                    ptr,
-                    storage,
-                    is_const,
+                    alignment,
+                    is_const: self.is_const,
                 },
-                remaining,
+                self.storage,
             ))
         } else {
-            bail!("Did not find any base type.");
+            bail!("Type builder has not parsed a base type yet");
         }
     }
 }
 
-impl std::fmt::Display for Type {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        if let Some(storage) = self.storage {
-            write!(f, "{storage} ")?;
-        }
-        if self.is_const {
-            write!(f, "const ")?;
-        }
-        self.base.fmt(f)?;
+#[derive(Debug, Clone, PartialEq)]
+enum AbstractDeclarator {
+    Pointer {
+        decl: Option<Box<Self>>,
+        is_const: bool,
+    },
+}
 
-        if let Some(ref ptr) = self.ptr {
-            for depth in 1..=ptr.depth.into() {
-                let byte_index: usize = (depth / 8).into();
-                let bit_index = Into::<usize>::into(depth) - byte_index * 8;
-                let mask = 1 << bit_index;
-                if ptr.is_const[byte_index] & mask > 0 {
-                    write!(f, "const ")?;
-                }
-                if ptr.is_restrict[byte_index] & mask > 0 {
-                    write!(f, "restrict ")?;
-                }
-                if depth == ptr.depth.into() {
-                    write!(f, "*")?;
+impl AbstractDeclarator {
+    fn consume(tokens: &[Token]) -> Result<(Self, &[Token])> {
+        match tokens {
+            [Token::LParen, tokens @ ..] => {
+                let (decl, tokens) =
+                    Self::consume(tokens).context("Failed to parse abstract declarator.")?;
+                ensure!(
+                    tokens.first().is_some_and(|t| *t == Token::RParen),
+                    "Expected closing \")\" in abstract declarator."
+                );
+                Ok((decl, &tokens[1..]))
+            }
+            [Token::Star, tokens @ ..] => {
+                let (is_const, is_restrict, tokens) = consume_pointer_modifiers(tokens);
+                ensure!(
+                    !is_restrict,
+                    "Cannot use \"restrict\" keyword in abstract declarator."
+                );
+                if let Ok((decl, tokens)) = Self::consume(tokens) {
+                    Ok((
+                        Self::Pointer {
+                            decl: Some(Box::new(decl)),
+                            is_const,
+                        },
+                        tokens,
+                    ))
                 } else {
-                    write!(f, "* ")?;
+                    Ok((
+                        Self::Pointer {
+                            decl: None,
+                            is_const,
+                        },
+                        tokens,
+                    ))
+                }
+            }
+            _ => bail!("Failed to parse abstract declarator"),
+        }
+    }
+
+    fn process(declarator: Self, base: Type) -> Result<Type> {
+        match declarator {
+            Self::Pointer { decl, is_const } => {
+                let derived_type = Type {
+                    base: BaseType::Ptr {
+                        to: Box::new(base),
+                        is_restrict: false,
+                    },
+                    alignment: NonZeroUsize::new(core::mem::size_of::<usize>()).expect(
+                        "ast.Declarator.process(): Pointers always have word-sized alignment.",
+                    ),
+                    is_const,
+                };
+                if let Some(decl) = decl {
+                    Self::process(*decl, derived_type)
+                } else {
+                    Ok(derived_type)
                 }
             }
         }
+    }
+}
 
-        Ok(())
+#[derive(Debug, Clone, PartialEq)]
+enum Declarator {
+    Ident(Option<Rc<String>>),
+    Pointer {
+        decl: Box<Self>,
+        is_restrict: bool,
+        is_const: bool,
+    },
+    Fun {
+        decl: Box<Self>,
+        params: RawParameterList,
+    },
+}
+
+fn consume_pointer_modifiers(tokens: &[Token]) -> (bool, bool, &[Token]) {
+    let mut remaining = tokens;
+    let mut is_restrict = false;
+    let mut is_const = false;
+    while match remaining.first() {
+        Some(Token::Restrict) => {
+            is_restrict = true;
+            true
+        }
+        Some(Token::Const) => {
+            is_const = true;
+            true
+        }
+        _ => false,
+    } {
+        remaining = &remaining[1..];
+    }
+    (is_const, is_restrict, remaining)
+}
+
+impl Declarator {
+    fn consume(tokens: &[Token]) -> Result<(Self, &[Token])> {
+        let (mut decl, mut tokens) = match tokens {
+            [Token::Ident(s), tokens @ ..] => Ok::<(Declarator, &[Token]), anyhow::Error>((
+                Self::Ident(Some(Rc::clone(s))),
+                tokens,
+            )),
+            [Token::LParen, tokens @ ..] => {
+                let (decl, tokens) = Self::consume(tokens)?;
+                ensure!(
+                    tokens.first().is_some_and(|t| *t == Token::RParen),
+                    "Expected closing parentheses in declarator."
+                );
+                Ok((decl, &tokens[1..]))
+            }
+            [Token::Star, tokens @ ..] => {
+                let (is_const, is_restrict, remaining) = consume_pointer_modifiers(tokens);
+                let (decl, tokens) = Self::consume(remaining)?;
+                Ok((
+                    Self::Pointer {
+                        decl: Box::new(decl),
+                        is_restrict,
+                        is_const,
+                    },
+                    tokens,
+                ))
+            }
+            _ => bail!("ast.Declarator.consume(): Error parsing declarator."),
+        }?;
+
+        while let Some(t) = tokens.first() {
+            match t {
+                // Disallow returning a function
+                Token::LParen if !matches!(decl, Self::Fun { .. }) => {
+                    let (params, left) = RawParameterList::consume(tokens)?;
+                    decl = Self::Fun {
+                        decl: Box::new(decl),
+                        params,
+                    };
+                    tokens = left;
+                }
+                Token::LBracket => {
+                    unimplemented!("Implement this when we get to arrays!");
+                }
+                _ => {
+                    break;
+                }
+            }
+        }
+        Ok((decl, tokens))
+    }
+}
+
+impl Declarator {
+    fn name(&self) -> Option<Rc<String>> {
+        match self {
+            Declarator::Ident(name) => name.clone(),
+            Declarator::Pointer { decl, .. } => decl.name(),
+            Declarator::Fun { decl, .. } => decl.name(),
+        }
+    }
+
+    #[allow(clippy::type_complexity)]
+    fn process(
+        declarator: Self,
+        base: Type,
+    ) -> Result<(Option<Rc<String>>, Type, Vec<Option<Rc<String>>>)> {
+        match declarator {
+            Declarator::Ident(name) => Ok((name, base, vec![])),
+            Declarator::Pointer {
+                decl,
+                is_const,
+                is_restrict,
+            } => {
+                let derived_type = Type {
+                    base: BaseType::Ptr {
+                        to: Box::new(base),
+                        is_restrict,
+                    },
+                    alignment: NonZeroUsize::new(core::mem::size_of::<usize>()).expect(
+                        "ast.Declarator.process(): Pointers always have word-sized alignment.",
+                    ),
+                    is_const,
+                };
+                Declarator::process(*decl, derived_type)
+            }
+            Declarator::Fun { decl, params } => {
+                let mut param_types = vec![];
+                let mut param_names = vec![];
+                for (param_base_type, param_declarator) in params.0.into_iter() {
+                    let (param_name, param_type, _) =
+                        Self::process(param_declarator, param_base_type).context(
+                            "ast.Declarator.process(): Error processing function signature.",
+                        )?;
+                    if matches!(param_type.base, BaseType::Fun { .. }) {
+                        bail!(
+                            "ast.Declarator.process(): Function pointers as parameters is not yet supported."
+                        );
+                    }
+                    param_types.push(param_type);
+                    param_names.push(param_name);
+                }
+                let name = decl.name();
+                ensure!(
+                    name.is_some(),
+                    "ast.Declarator.process(): Function must have identifier in declarator."
+                );
+                let derived_type = Type {
+                    base: BaseType::Fun {
+                        ret_t: Box::new(base),
+                        param_types,
+                    },
+                    alignment: NonZeroUsize::new(core::mem::size_of::<usize>()).expect(
+                        "ast.Declarator.process(): Pointers always have word-sized alignment.",
+                    ),
+                    is_const: true,
+                };
+                Ok((name, derived_type, param_names))
+            }
+        }
     }
 }
 
@@ -1451,9 +1608,15 @@ impl std::fmt::Display for BaseType {
                 // bending the knee to the wobbly-sized integers
                 write!(f, "{sign}{nbits}")
             }
+            Self::Ptr { to, is_restrict } => {
+                write!(f, "{to}")?;
+                if *is_restrict {
+                    write!(f, " restrict")?;
+                }
+                write!(f, "*")
+            }
             Self::Float(_) => write!(f, "float"),
             Self::Double(_) => write!(f, "double"),
-            Self::Char => write!(f, "char"),
             Self::Struct => todo!(),
             Self::Fun { ret_t, param_types } => {
                 write!(f, "(")?;
@@ -1587,26 +1750,7 @@ impl Constant {
             _ => bail!("Could not create a constant with type {type} and value {value}"),
         }
     }
-}
 
-impl std::fmt::Display for Constant {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Constant::I8(v) => write!(f, "{v}"),
-            Constant::I16(v) => write!(f, "{v}"),
-            Constant::I32(v) => write!(f, "{v}"),
-            Constant::I64(v) => write!(f, "{v}"),
-            Constant::U8(v) => write!(f, "{v}"),
-            Constant::U16(v) => write!(f, "{v}"),
-            Constant::U32(v) => write!(f, "{v}"),
-            Constant::U64(v) => write!(f, "{v}"),
-            Constant::F32(v) => write!(f, "{v}"),
-            Constant::F64(v) => write!(f, "{v}"),
-        }
-    }
-}
-
-impl AstNode for Constant {
     fn consume(tokens: &[Token]) -> Result<(Constant, &[Token])> {
         // FIXME: Is this how we would like to handle integer overflow?
         if let Some(token) = tokens.first() {
@@ -1708,6 +1852,23 @@ impl AstNode for Constant {
             }
         } else {
             bail!("No remaining tokens.")
+        }
+    }
+}
+
+impl std::fmt::Display for Constant {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Constant::I8(v) => write!(f, "{v}"),
+            Constant::I16(v) => write!(f, "{v}"),
+            Constant::I32(v) => write!(f, "{v}"),
+            Constant::I64(v) => write!(f, "{v}"),
+            Constant::U8(v) => write!(f, "{v}"),
+            Constant::U16(v) => write!(f, "{v}"),
+            Constant::U32(v) => write!(f, "{v}"),
+            Constant::U64(v) => write!(f, "{v}"),
+            Constant::F32(v) => write!(f, "{v}"),
+            Constant::F64(v) => write!(f, "{v}"),
         }
     }
 }
@@ -1892,6 +2053,8 @@ pub enum UnaryOp {
     PreDec,
     PostInc,
     PostDec,
+    AddrOf,
+    Deref,
 }
 
 impl UnaryOp {
@@ -1914,12 +2077,14 @@ impl UnaryOp {
         !matches!(
             self,
             UnaryOp::PreInc | UnaryOp::PreDec | UnaryOp::PostInc | UnaryOp::PostDec
-        ) || matches!(expr, Expr::Var(_))
+        ) || expr.is_lvalue()
     }
 
     fn consume_prefix(tokens: &[Token]) -> Result<(Self, &[Token])> {
         if let Some(token) = tokens.first() {
             match tokens {
+                [Token::Ampersand, tokens @ ..] => Ok((Self::AddrOf, tokens)),
+                [Token::Star, tokens @ ..] => Ok((Self::Deref, tokens)),
                 [Token::Minus, tokens @ ..] => Ok((Self::Negate, tokens)),
                 [Token::BitNot, tokens @ ..] => Ok((Self::Complement, tokens)),
                 [Token::Not, tokens @ ..] => Ok((Self::Not, tokens)),

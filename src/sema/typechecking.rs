@@ -1,7 +1,9 @@
-use std::cmp;
 use std::collections::HashSet;
+use std::{cmp, num::NonZeroUsize};
 
 use anyhow::{Context, Error};
+
+use crate::ast::{Expr, Type};
 
 use super::*;
 
@@ -31,7 +33,8 @@ impl Attribute {
         scope: Scope,
         symbols: &mut SymbolTable,
     ) -> Result<Self> {
-        if matches!(scope, Scope::Local(..)) && var.typ.storage == Some(ast::StorageClass::Extern) {
+        if matches!(scope, Scope::Local(..)) && var.storage_class == Some(ast::StorageClass::Extern)
+        {
             ensure!(
                 var.init.is_none(),
                 "Local var \"{}\" is extern but has an initial value",
@@ -44,16 +47,16 @@ impl Attribute {
             init_val
         } else {
             match scope {
-                Scope::Global => match var.typ.storage {
+                Scope::Global => match var.storage_class {
                     Some(ast::StorageClass::Static) | None => InitialValue::Tentative, // Global non-externals with no initilizer are marked as tentative
                     Some(ast::StorageClass::Extern) => InitialValue::None,
                     _ => unreachable!(
                         "Earlier passes of the compiler should have reduced \"auto\" and \"register\" storage classes to be None"
                     ),
                 },
-                Scope::Local(..) => match var.typ.storage {
+                Scope::Local(..) => match var.storage_class {
                     Some(ast::StorageClass::Static) => {
-                        InitialValue::Initial(vec![0; var.typ.base.nbytes()].into())
+                        InitialValue::Initial(vec![0; var.r#type.base.nbytes()].into())
                     } // Local Statics with no initilizer get defaulted to zero
                     Some(ast::StorageClass::Extern) | None => InitialValue::None,
                     _ => unreachable!(
@@ -64,21 +67,21 @@ impl Attribute {
         };
 
         if initial_value == InitialValue::None
-            && var.typ.storage.is_none()
+            && var.storage_class.is_none()
             && matches!(scope, Scope::Local(..))
         {
             return Ok(Attribute::Local);
         }
 
         let external_linkage = match scope {
-            Scope::Global => match var.typ.storage {
+            Scope::Global => match var.storage_class {
                 Some(ast::StorageClass::Static) => false,
                 Some(ast::StorageClass::Extern) | None => true,
                 _ => unreachable!(
                     "Earlier passes of the compiler should have reduced \"auto\" and \"register\" storage classes to be None"
                 ),
             },
-            Scope::Local(..) => match var.typ.storage {
+            Scope::Local(..) => match var.storage_class {
                 Some(ast::StorageClass::Static) | None => false,
                 Some(ast::StorageClass::Extern) => true,
                 _ => unreachable!(
@@ -153,9 +156,12 @@ impl PartialOrd for InitialValue {
 impl InitialValue {
     // TODO: Make this not dependent on host computer byte ordering
     fn from_expr(r#type: &ast::Type, expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<Self> {
-        let expr = try_implicit_cast(r#type, expr, symbols).context(
+        let expr = convert_by_assignment(expr, r#type, symbols).context(
             "Failed to perform implicit casting when constructing initial value for declaration",
         )?;
+        if is_null_pointer_constant(&expr) {
+            return Ok(InitialValue::Initial(0usize.to_ne_bytes().to_vec().into()));
+        }
         let val = const_eval::eval(expr.clone()).context("Failed to const eval expression")?;
         match val {
             ast::Constant::I8(val) => Ok(InitialValue::Initial(val.to_ne_bytes().to_vec().into())),
@@ -178,13 +184,13 @@ impl InitialValue {
     ) -> Result<Option<Self>> {
         match (scope, var.init.as_ref()) {
             (Scope::Global, Some(expr)) => {
-                let init = Self::from_expr(&var.typ, expr, symbols)
+                let init = Self::from_expr(&var.r#type, expr, symbols)
                     .context(format!("Evaluating expression for \"{}\" failed", var.name))?;
                 Ok(Some(init))
             }
-            (Scope::Local(..), Some(expr)) => match var.typ.storage {
+            (Scope::Local(..), Some(expr)) => match var.storage_class {
                 Some(ast::StorageClass::Static) => Ok(Some(
-                    Self::from_expr(&var.typ, expr, symbols)
+                    Self::from_expr(&var.r#type, expr, symbols)
                         .context(format!("Evaluating expression for \"{}\" failed", var.name))?,
                 )),
                 None => Ok(None), // Locals technically dont have initial values
@@ -193,17 +199,17 @@ impl InitialValue {
                     "Earlier passes of the compiler should have reduced \"auto\" and \"register\" storage classes to be None"
                 ),
             },
-            (Scope::Global, None) => match var.typ.storage {
+            (Scope::Global, None) => match var.storage_class {
                 Some(ast::StorageClass::Static) | None => Ok(Some(InitialValue::Tentative)), // Global non-externals with no initilizer are marked as tentative
                 Some(ast::StorageClass::Extern) => Ok(Some(InitialValue::None)),
                 _ => unreachable!(
                     "Earlier passes of the compiler should have reduced \"auto\" and \"register\" storage classes to be None"
                 ),
             },
-            (Scope::Local(..), None) => match var.typ.storage {
+            (Scope::Local(..), None) => match var.storage_class {
                 // Local Statics with no initilizer get defaulted to zero
                 Some(ast::StorageClass::Static) => Ok(Some(InitialValue::Initial(
-                    vec![0; var.typ.base.nbytes()].into(),
+                    vec![0; var.r#type.base.nbytes()].into(),
                 ))),
                 // Resolve any existing declaration's initial value
                 Some(ast::StorageClass::Extern) => {
@@ -306,16 +312,27 @@ impl SymbolTable {
         self.global.get(key)
     }
 
-    fn get_decl_info(decl: &ast::Declaration) -> (Rc<String>, ast::Type, bool) {
+    fn get_decl_info(
+        decl: &ast::Declaration,
+    ) -> (Rc<String>, ast::Type, Option<ast::StorageClass>, bool) {
         match decl {
             ast::Declaration::FunDecl(fun) => (
                 Rc::clone(&fun.name),
                 ast::Type::from(fun),
+                fun.storage_class.as_ref().copied(),
                 fun.block.is_some(),
             ),
-            ast::Declaration::VarDecl(ast::VarDecl { typ, name, init }) => {
-                (Rc::clone(name), typ.clone(), init.is_some())
-            }
+            ast::Declaration::VarDecl(ast::VarDecl {
+                r#type,
+                name,
+                init,
+                storage_class,
+            }) => (
+                Rc::clone(name),
+                r#type.clone(),
+                storage_class.as_ref().copied(),
+                init.is_some(),
+            ),
         }
     }
 
@@ -386,7 +403,7 @@ impl SymbolTable {
     }
 
     fn declare_in_scope(&mut self, decl: &ast::Declaration, scope: Scope) -> Result<SymbolEntry> {
-        let (name, new_type, defining_ident) = Self::get_decl_info(decl);
+        let (name, new_type, storage_class, defining_ident) = Self::get_decl_info(decl);
 
         let entry = if let Some(entry) = self.get(&name) {
             // FIXME: Lazy way to make rust shutup about the immutable borrow
@@ -422,7 +439,7 @@ impl SymbolTable {
                     bail!("Redefining \"{name}\" when it is already defined.")
                 }
                 let mut attribute =
-                    Self::check_attribute(&old_attrib, &name, new_type.storage, scope)?;
+                    Self::check_attribute(&old_attrib, &name, storage_class, scope)?;
                 match decl {
                     ast::Declaration::FunDecl(..) => {}
                     ast::Declaration::VarDecl(var) => {
@@ -483,12 +500,15 @@ impl SymbolTable {
         if let scope @ Scope::Local(_) = self.scope() {
             // Declare function and all its params into local scope
             self.declare_in_scope(&wrapped_decl, scope)?;
-            for (typ, name) in decl.signature.iter() {
+            for (r#type, name) in decl.signature()
+                .context("sema.typechecking.declare_fun(): Error getting function declaration in signature.")?
+                .into_iter() {
                 if let Some(name) = name {
                     let param_decl = ast::Declaration::VarDecl(ast::VarDecl {
                         name: Rc::clone(name),
                         init: None,
-                        typ: typ.clone(),
+                        r#type: r#type.clone(),
+                        storage_class: None,
                     });
                     self.declare_in_scope(&param_decl, scope)?;
                 }
@@ -498,7 +518,7 @@ impl SymbolTable {
     }
     fn declare_var(&mut self, decl: &ast::VarDecl) -> Result<SymbolEntry> {
         let key = decl.name.clone();
-        let storage_class = decl.typ.storage;
+        let storage_class = decl.storage_class;
         let decl = ast::Declaration::VarDecl(decl.clone());
 
         match storage_class {
@@ -529,6 +549,72 @@ impl SymbolTable {
     }
 }
 
+fn is_null_pointer_constant(e: &ast::Expr) -> bool {
+    if let ast::Expr::Cast { target, exp } = e {
+        if target.is_pointer() && is_null_pointer_constant(exp) {
+            return true;
+        }
+    }
+    let Ok(c) = const_eval::eval(e.clone()) else {
+        return false;
+    };
+    matches!(
+        c,
+        ast::Constant::I8(0)
+            | ast::Constant::I16(0)
+            | ast::Constant::I32(0)
+            | ast::Constant::I64(0)
+            | ast::Constant::U8(0)
+            | ast::Constant::U16(0)
+            | ast::Constant::U32(0)
+            | ast::Constant::U64(0)
+    )
+}
+
+fn get_common_pointer_type(
+    e1: &ast::Expr,
+    e2: &ast::Expr,
+    symbols: &mut SymbolTable,
+) -> Result<ast::Type> {
+    let TypedExpr {
+        expr: e1,
+        r#type: e1_t,
+    } = typecheck_expr(e1, symbols).context("Failed to typecheck expression 1 argument.")?;
+    let TypedExpr {
+        expr: e2,
+        r#type: e2_t,
+    } = typecheck_expr(e2, symbols).context("Failed to typecheck expression 2 argument.")?;
+    if e1_t == e2_t {
+        Ok(e1_t)
+    } else if is_null_pointer_constant(&e1) {
+        Ok(e2_t)
+    } else if is_null_pointer_constant(&e2) {
+        Ok(e1_t)
+    } else {
+        bail!(format!(
+            "{e1:#?} and {e2:#?} are not compatable pointer types."
+        ))
+    }
+}
+
+fn convert_by_assignment(
+    e: &ast::Expr,
+    target: &ast::Type,
+    symbols: &mut SymbolTable,
+) -> Result<ast::Expr> {
+    let TypedExpr { expr, r#type } = typecheck_expr(e, symbols)?;
+    if r#type == *target {
+        Ok(expr)
+    } else if r#type.is_arithmetic() && target.is_arithmetic()
+        || is_null_pointer_constant(e) && target.is_pointer()
+    {
+        try_implicit_cast(target, &expr, symbols)
+    } else {
+        bail!("Cannot convert type for assignment.")
+    }
+}
+
+#[derive(Debug)]
 struct TypedExpr {
     expr: ast::Expr,
     r#type: ast::Type,
@@ -595,11 +681,10 @@ fn typecheck_block_item(
 ) -> Result<ast::BlockItem> {
     match item {
         ast::BlockItem::Stmt(stmt) => Ok(ast::BlockItem::Stmt(
-            typecheck_stmt(stmt, symbols, function)
-                .context("Failed to typecheck block item: {item:#?}")?,
+            typecheck_stmt(stmt, symbols, function).context("Failed to typecheck block item")?,
         )),
         ast::BlockItem::Decl(decl) => Ok(ast::BlockItem::Decl(
-            typecheck_decl(decl, symbols).context("Failed to typecheck block item: {item:#?}")?,
+            typecheck_decl(decl, symbols).context("Failed to typecheck block item")?,
         )),
     }
 }
@@ -617,7 +702,6 @@ fn typecheck_stmt(
             ),
         ast::Stmt::Return(Some(expr)) => {
                 if let Some(function) = function {
-                    let TypedExpr { r#type: found, expr } = typecheck_expr(&expr, symbols)?;
                     if let Some(SymbolEntry {
                         r#type:
                             ast::Type {
@@ -627,14 +711,9 @@ fn typecheck_stmt(
                         ..
                     }) = symbols.get(&function)
                     {
-                        // TODO: Fix this once we add pointers
-                        if !found.base.can_assign_to(&expected.base) {
-                            bail!("Found return type: \"{found}\" in function \"{function}\" but expected return type: \"{expected}\"");
-                        } else {
-                            Ok(ast::Stmt::Return(Some(try_implicit_cast(&expected.clone(), &expr, symbols)
-                                        .context(format!("Unable to implicitly cast return value to expected return type in \"{}\"", function))?
-                                        )))
-                        }
+                        Ok(ast::Stmt::Return(Some(convert_by_assignment(&expr, &expected.clone(), symbols)
+                                    .context(format!("Unable to implicitly cast return value to expected return type in \"{}\"", function))?
+                                    )))
                     } else {
                         bail!("Could not find function {function} in symbol table.")
                     }
@@ -686,7 +765,7 @@ fn typecheck_stmt(
             } => {
                 let init = match *init {
                     ast::ForInit::Decl(decl) => {
-                        if decl.typ.storage.is_some() {
+                        if decl.storage_class.is_some() {
                             bail!(
                                 "For-loop counter var \"{}\" cannot have storage class specifier",
                                 decl.name
@@ -745,7 +824,7 @@ fn typecheck_stmt(
                 let cases = cases.as_ref().expect("At this point there should be cases or an empty vector, but never a None variant.");
                 let mut case_values = HashSet::new();
                 for (val, s) in cases.iter() {
-                    let expr = try_implicit_cast(&condition_type, &ast::Expr::Constant(*val), symbols)
+                    let expr = convert_by_assignment( &ast::Expr::Constant(*val),&condition_type, symbols)
                         .context(format!("Unable to implicitly case constant to type {condition_type:#?}"))?;
                     let constant = const_eval::eval(expr)
                         .context("Unable to convert case expression into constant value.")?;
@@ -778,27 +857,38 @@ fn try_implicit_cast(
     from: &ast::Expr,
     symbols: &mut SymbolTable,
 ) -> Result<ast::Expr> {
-    let TypedExpr {
-        expr: right,
-        r#type: right_t,
-    } = typecheck_expr(from, symbols)
+    let TypedExpr { expr, r#type } = typecheck_expr(from, symbols)
         .context("Failed to typecheck from argument in implicit cast.")?;
-    ensure!(
-        right_t.base.can_assign_to(&target.base),
-        "Incompatible types. Cannot assign value of type {right_t:#?} to value of type {target:#?}"
-    );
 
-    if right_t != *target {
+    if r#type.is_pointer() && target.is_float() || target.is_pointer() && r#type.is_float() {
+        bail!("Cannot convert between double and pointer.");
+    }
+
+    if r#type != *target {
         Ok(ast::Expr::Cast {
             target: ast::Type {
-                storage: None,
                 is_const: true,
                 ..target.clone()
             },
-            exp: Box::new(right),
+            exp: Box::new(expr),
         })
     } else {
-        Ok(right)
+        Ok(expr)
+    }
+}
+
+/// Try to implicitly cast into a boolean or, if the type is a floating point
+/// value, convert into into a comparison against zero.
+fn boolify(expr: Expr, r#type: &Type, symbols: &mut SymbolTable) -> Result<Expr> {
+    if r#type.is_float() {
+        let zero = ast::Expr::Constant(ast::Constant::const_from_type(r#type, 0)?);
+        Ok(Expr::Binary {
+            op: ast::BinaryOp::NotEqual,
+            left: Box::new(expr),
+            right: Box::new(zero),
+        })
+    } else {
+        try_implicit_cast(&ast::Type::bool(), &expr, symbols)
     }
 }
 
@@ -834,7 +924,7 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
                 expr: ast::Expr::Assignment {
                     lvalue: lvalue.clone(),
                     rvalue: Box::new(
-                        try_implicit_cast(&left_t, rvalue, symbols).context(
+                        convert_by_assignment(rvalue, &left_t, symbols).context(
                             "Failed to implicitly cast righthand side during assignment.",
                         )?,
                     ),
@@ -850,13 +940,50 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
                     && matches!(
                         r#type,
                         ast::Type {
-                            base: ast::BaseType::Float(_) | ast::BaseType::Double(_),
-                            ptr: None,
+                            base: ast::BaseType::Float(_)
+                                | ast::BaseType::Double(_)
+                                | ast::BaseType::Ptr { .. },
                             ..
                         }
                     )),
                 "Cannot perform a bitwise unary operation on a floating point value."
             );
+            let r#type = match op {
+                ast::UnaryOp::AddrOf if expr.is_lvalue() => ast::Type {
+                    base: ast::BaseType::Ptr {
+                        to: Box::new(r#type),
+                        is_restrict: false,
+                    },
+                    alignment: NonZeroUsize::new(core::mem::size_of::<usize>()).unwrap(),
+                    is_const: false,
+                },
+                ast::UnaryOp::AddrOf => bail!("Cannot take the address of a non-lvalue"),
+                ast::UnaryOp::Deref => {
+                    let ast::Type {
+                        base: ast::BaseType::Ptr { to: inner, .. },
+                        ..
+                    } = r#type
+                    else {
+                        bail!("Trying to dereference non-pointer operand!")
+                    };
+                    *inner
+                }
+                ast::UnaryOp::Negate if r#type.is_pointer() => {
+                    bail!("Cannot apply unary negate operation to pointer.")
+                }
+                ast::UnaryOp::Complement if r#type.is_pointer() => {
+                    bail!("Cannot apply unary complement operation to pointer.")
+                }
+                op @ ast::UnaryOp::PostInc
+                | op @ ast::UnaryOp::PostDec
+                | op @ ast::UnaryOp::PreInc
+                | op @ ast::UnaryOp::PreDec
+                    if r#type.is_function() =>
+                {
+                    bail!("Cannot apply unary {op:?} operator to function")
+                }
+                _ => r#type,
+            };
             Ok(TypedExpr {
                 expr: ast::Expr::Unary {
                     op: *op,
@@ -865,7 +992,6 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
                 r#type,
             })
         }
-        // TODO: Fix once we get to pointers
         ast::Expr::Binary { op, left, right } => {
             let TypedExpr {
                 expr: left,
@@ -878,19 +1004,44 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
             } = typecheck_expr(right, symbols)
                 .context("Failed to typecheck righthand argument of binary operation.")?;
 
-            let (lifted_left_t, lifted_right_t) =
-                ast::BaseType::lift(left_t.base.clone(), right_t.base.clone())
-                    .context("Unable to promote {left_t:#?} and {right_t:#?} to a common type.")?;
+            // Evaluate all operands in a boolean context.
+            if op.is_logical() {
+                return Ok(TypedExpr {
+                    expr: ast::Expr::Binary {
+                        op: *op,
+                        left: Box::new(boolify(left, &left_t, symbols)?),
+                        right: Box::new(boolify(right, &right_t, symbols)?),
+                    },
+                    r#type: ast::Type::bool(),
+                });
+            }
 
-            // With a binary expression, we force both operands to be of
-            // the same type so the decision between left or right is
-            // arbitrary
-            let common_t = ast::Type {
-                base: lifted_left_t.clone(),
-                storage: None,
-                is_const: true,
-                alignment: std::cmp::max(left_t.alignment, right_t.alignment),
-                ..right_t
+            let common_t = if left_t.is_pointer() || right_t.is_pointer() {
+                ensure!(
+                    !matches!(
+                        op,
+                        ast::BinaryOp::Multiply
+                            | ast::BinaryOp::Divide
+                            | ast::BinaryOp::Remainder
+                            | ast::BinaryOp::MultAssign
+                            | ast::BinaryOp::DivAssign
+                            | ast::BinaryOp::ModAssign
+                    ) && !op.is_bitwise(),
+                    format!(
+                        "Attempted to perform binary operation other than addition or subtraction on pointer type."
+                    )
+                );
+                get_common_pointer_type(&left, &right, symbols)?
+            } else {
+                let (lifted_left_t, _) =
+                    ast::BaseType::lift(left_t.base.clone(), right_t.base.clone()).context(
+                        "Unable to promote {left_t:#?} and {right_t:#?} to a common type.",
+                    )?;
+                ast::Type {
+                    base: lifted_left_t.clone(),
+                    is_const: true,
+                    alignment: std::cmp::max(left_t.alignment, right_t.alignment),
+                }
             };
 
             ensure!(
@@ -900,60 +1051,75 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
                         common_t,
                         ast::Type {
                             base: ast::BaseType::Float(_) | ast::BaseType::Double(_),
-                            ptr: None,
                             ..
                         }
                     )),
-                "Cannot perform a bitwise or reaminder binary operation on a floating point value."
+                "Cannot perform a bitwise or remainder binary operation on a floating point value."
             );
 
             // Bitshifts do not upcast, and are just the type of the LHS
             // assuming that it is a valid shift (not a float)
             if matches!(op, ast::BinaryOp::LShift | ast::BinaryOp::RShift) {
-                return Ok(TypedExpr {
+                Ok(TypedExpr {
                     expr: ast::Expr::Binary {
                         op: *op,
                         left: Box::new(left),
                         right: Box::new(right),
                     },
                     r#type: left_t,
-                });
-            }
-
-            if op.is_logical() {
-                Ok(TypedExpr {
-                    expr: ast::Expr::Binary {
-                        op: *op,
-                        left: Box::new(left),
-                        right: Box::new(right),
-                    },
-                    r#type: ast::Type::bool(),
                 })
             } else {
-                let left = if lifted_left_t != left_t.base {
-                    ast::Expr::Cast {
+                let casted_left = if common_t != left_t {
+                    Some(ast::Expr::Cast {
                         target: common_t.clone(),
-                        exp: Box::new(left),
-                    }
+                        exp: Box::new(left.clone()),
+                    })
                 } else {
-                    left
+                    None
                 };
-                let right = if lifted_right_t != right_t.base {
-                    ast::Expr::Cast {
+                let casted_right = if common_t != right_t {
+                    Some(ast::Expr::Cast {
                         target: common_t.clone(),
-                        exp: Box::new(right),
-                    }
+                        exp: Box::new(right.clone()),
+                    })
                 } else {
-                    right
+                    None
                 };
-                Ok(TypedExpr {
-                    expr: ast::Expr::Binary {
-                        op: *op,
-                        left: Box::new(left),
-                        right: Box::new(right),
-                    },
-                    r#type: common_t,
-                })
+                match op.compound_op() {
+                    Some(_) => {
+                        ensure!(
+                            left.is_lvalue(),
+                            "Compound operations are only vaid on lvalues."
+                        );
+                        Ok(TypedExpr {
+                            expr: ast::Expr::Assignment {
+                                lvalue: Box::new(left.clone()),
+                                rvalue: Box::new(ast::Expr::Binary {
+                                    op: *op,
+                                    left: Box::new(casted_left.unwrap_or(left)),
+                                    right: Box::new(casted_right.unwrap_or(right)),
+                                }),
+                            },
+                            r#type: if op.is_relational() {
+                                ast::Type::int(4, None)
+                            } else {
+                                common_t
+                            },
+                        })
+                    }
+                    _ => Ok(TypedExpr {
+                        expr: ast::Expr::Binary {
+                            op: *op,
+                            left: Box::new(casted_left.unwrap_or(left)),
+                            right: Box::new(casted_right.unwrap_or(right)),
+                        },
+                        r#type: if op.is_relational() {
+                            ast::Type::int(4, None)
+                        } else {
+                            common_t
+                        },
+                    }),
+                }
             }
         }
         ast::Expr::Conditional {
@@ -961,7 +1127,6 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
             then,
             r#else,
         } => {
-            // TODO: Make two branches have same output type
             let target = ast::Type::bool();
             let condition = Box::new(try_implicit_cast(&target, condition, symbols).context(
                 "Unable to implicitly cast ternary expression condition into a boolean value.",
@@ -971,35 +1136,38 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
                 expr: then_expr,
                 r#type: then_type,
             } = typecheck_expr(then, symbols)
-                .context("Failed to typecheck ternay expression then branch.")?;
+                .context("Failed to typecheck ternary expression then branch.")?;
 
             let TypedExpr {
                 expr: else_expr,
                 r#type: else_type,
             } = typecheck_expr(r#else, symbols)
-                .context("Failed to typecheck ternay expression else branch.")?;
+                .context("Failed to typecheck ternary expression else branch.")?;
 
-            let (then_base, _) = ast::BaseType::lift(then_type.base.clone(), else_type.base)
-                .context("Ternary expression branches evaluate to different types.")?;
-            let common_type = ast::Type {
-                base: then_base,
-                alignment: std::cmp::max(then_type.alignment, else_type.alignment),
-                ..then_type.clone()
+            let common_t = if then_type.is_pointer() || else_type.is_pointer() {
+                get_common_pointer_type(&then_expr, &else_expr, symbols)?
+            } else {
+                let (then_base, _) = ast::BaseType::lift(then_type.base.clone(), else_type.base)
+                    .context("Ternary expression branches evaluate to different types.")?;
+                ast::Type {
+                    base: then_base,
+                    alignment: std::cmp::max(then_type.alignment, else_type.alignment),
+                    ..then_type.clone()
+                }
             };
 
-            let then = try_implicit_cast(&common_type, &then_expr, symbols)
+            let then = convert_by_assignment( &then_expr,&common_t, symbols)
                 .context("Unable to implicitly cast \"then\" branch of ternary expression to its common type {common_type:?}")?;
-            let r#else = try_implicit_cast(&common_type, &else_expr, symbols)
+            let r#else = convert_by_assignment( &else_expr,&common_t, symbols)
                 .context("Unable to implicitly cast \"else\" branch of ternary expression to its common type {common_type:?}")?;
 
-            // Find common type between then and else
             Ok(TypedExpr {
                 expr: ast::Expr::Conditional {
                     condition,
                     then: Box::new(then),
                     r#else: Box::new(r#else),
                 },
-                r#type: then_type,
+                r#type: common_t,
             })
         }
         ast::Expr::FunCall { name, args } => match symbols.get(name) {
@@ -1025,7 +1193,7 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
                 let args = args
                     .iter()
                     .zip(param_types.iter())
-                    .map(|(arg, exp_t)| try_implicit_cast(exp_t, arg, symbols))
+                    .map(|(arg, exp_t)| convert_by_assignment(arg, exp_t, symbols))
                     .collect::<Result<Vec<_>>>()?;
                 Ok(TypedExpr {
                     expr: ast::Expr::FunCall {
@@ -1043,10 +1211,14 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
         ast::Expr::Cast { target, exp } => {
             let TypedExpr { expr, r#type } =
                 typecheck_expr(exp, symbols).context("Failed to typecheck casted expression.")?;
-            ensure!(
-                r#type.base.can_assign_to(&target.base) && r#type.ptr == target.ptr,
-                "Unable to cast from {type:?} to {target:?}"
-            );
+
+            if target.is_pointer() && r#type.is_float() {
+                bail!("Cannot cast floating point number to pointer")
+            }
+
+            if target.is_float() && r#type.is_pointer() {
+                bail!("Cannot cast pointer to floating point number")
+            }
 
             let expr = if *target != r#type {
                 ast::Expr::Cast {
@@ -1067,8 +1239,6 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
             r#type: ast::Type {
                 base: ast::BaseType::from(constant),
                 alignment: ast::BaseType::from(constant).default_alignment(),
-                ptr: None,
-                storage: None,
                 is_const: true,
             },
         }),
@@ -1138,10 +1308,12 @@ fn typecheck_var_decl(decl: ast::VarDecl, symbols: &mut SymbolTable) -> Result<a
     ))?;
     let target = entry.r#type;
     let init = if let Some(init) = decl.init {
-        Some(try_implicit_cast(&target, &init, symbols).context(format!(
-            "Failed to typecheck initialization for variable \"{}\": {init:#?}",
-            decl.name
-        ))?)
+        Some(
+            convert_by_assignment(&init, &target, symbols).context(format!(
+                "Failed to typecheck initialization for variable \"{}\": {init:#?}",
+                decl.name
+            ))?,
+        )
     } else {
         None
     };

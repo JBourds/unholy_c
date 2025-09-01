@@ -121,15 +121,13 @@ pub mod x64 {
 
     fn get_specifier<'a>(src: Option<&Operand>, dst: &Operand) -> &'a str {
         let size = match (src, dst) {
-            (None, Operand::StackOffset { size, .. } | Operand::Data { size, .. })
-            | (
-                Some(Operand::Imm(_)),
-                Operand::StackOffset { size, .. } | Operand::Data { size, .. },
-            ) => Some(*size),
-            (
-                Some(Operand::StackOffset { size, .. } | Operand::Data { size, .. }),
-                Operand::Imm(_),
-            ) => Some(*size),
+            (None, Operand::Memory { size, .. } | Operand::Data { size, .. })
+            | (Some(Operand::Imm(_)), Operand::Memory { size, .. } | Operand::Data { size, .. }) => {
+                Some(*size)
+            }
+            (Some(Operand::Memory { size, .. } | Operand::Data { size, .. }), Operand::Imm(_)) => {
+                Some(*size)
+            }
             _ => None,
         };
         match size {
@@ -238,13 +236,17 @@ pub mod x64 {
                     codegen::Operand::Reg(r) => {
                         codegen::Operand::Reg(r.as_section(codegen::RegSection::LowByte))
                     }
-                    codegen::Operand::StackOffset { offset, r#type, .. } => {
-                        codegen::Operand::StackOffset {
-                            offset,
-                            size: 1,
-                            r#type,
-                        }
-                    }
+                    codegen::Operand::Memory {
+                        reg,
+                        offset,
+                        r#type,
+                        ..
+                    } => codegen::Operand::Memory {
+                        reg,
+                        offset,
+                        size: 1,
+                        r#type,
+                    },
                     _ => dst,
                 };
                 let specifier = get_specifier(None, &dst);
@@ -268,7 +270,7 @@ pub mod x64 {
                 w.write_fmt(format_args!("\tpush {specifier}{op}\n",))?;
             }
             codegen::InstructionType::Pop(op) => match op {
-                codegen::Operand::Reg(_) | codegen::Operand::StackOffset { .. } => {
+                codegen::Operand::Reg(_) | codegen::Operand::Memory { .. } => {
                     let op = if let codegen::Operand::Reg(r) = op {
                         codegen::Operand::Reg(r.as_section(codegen::RegSection::Qword))
                     } else {
@@ -299,6 +301,9 @@ pub mod x64 {
                 w.write_fmt(format_args!("\tdiv{suffix} {specifier}{dst}, {src}\n"))?;
             }
             codegen::InstructionType::MovZeroExtend { .. } => unreachable!(),
+            codegen::InstructionType::Lea { src, dst } => {
+                w.write_fmt(format_args!("\tlea {dst}, {src}\n"))?;
+            }
         }
         Ok(())
     }

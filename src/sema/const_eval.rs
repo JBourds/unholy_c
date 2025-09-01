@@ -40,6 +40,8 @@ fn eval_constant(expr: ast::Expr) -> Result<Constant> {
                 .context("Unable to const-evaluate expression inside of cast.")?;
             let casted = match target.base {
                 ast::BaseType::Int { nbytes, signed } => match (nbytes, signed) {
+                    (1, None | Some(true)) => Constant::I8(exp.cast::<i8>()),
+                    (1, Some(false)) => Constant::U8(exp.cast::<u8>()),
                     (2, None | Some(true)) => Constant::I16(exp.cast::<i16>()),
                     (2, Some(false)) => Constant::U16(exp.cast::<u16>()),
                     (4, None | Some(true)) => Constant::I32(exp.cast::<i32>()),
@@ -50,13 +52,16 @@ fn eval_constant(expr: ast::Expr) -> Result<Constant> {
                 },
                 ast::BaseType::Float(_) => Constant::F32(exp.cast::<f32>()),
                 ast::BaseType::Double(_) => Constant::F64(exp.cast::<f64>()),
-                // FIXME: Should not be hardcoded whether chars are signed or not
-                ast::BaseType::Char => unimplemented!(),
-                _ => unreachable!(),
+                _ => bail!(format!(
+                    "Non constant base type cannot be const evaluated: {:#?}",
+                    target.base
+                )),
             };
             Ok(casted)
         }
-        _ => unimplemented!(),
+        _ => bail!(format!(
+            "Constant evaluation is unimplemented for expression like: {expr:#?}"
+        )),
     }
 }
 
@@ -430,6 +435,8 @@ fn eval_unary(op: ast::UnaryOp, expr: ast::Expr) -> Result<Constant> {
         ast::UnaryOp::Not => !val,
         ast::UnaryOp::PreInc
         | ast::UnaryOp::PreDec
+        | ast::UnaryOp::AddrOf
+        | ast::UnaryOp::Deref
         | ast::UnaryOp::PostInc
         | ast::UnaryOp::PostDec => bail!("{op:#?} is not allowed in const expresion"),
     };

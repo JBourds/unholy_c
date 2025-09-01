@@ -104,7 +104,7 @@ impl From<&Operand> for AssemblyType {
                 },
             },
             Operand::Pseudo { r#type, .. } => r#type.clone(),
-            Operand::StackOffset { r#type, .. } => r#type.clone(),
+            Operand::Memory { r#type, .. } => r#type.clone(),
             Operand::Data { r#type, .. } => r#type.clone(),
         }
     }
@@ -121,7 +121,6 @@ impl AssemblyType {
 
     fn from_ast_type(r#type: ast::Type) -> Self {
         match r#type {
-            ast::Type { ptr: Some(_), .. } => Self::Pointer,
             ast::Type {
                 base: ast::BaseType::Float(_),
                 ..
@@ -131,18 +130,19 @@ impl AssemblyType {
                 ..
             } => Self::Double,
             ast::Type {
-                base: ast::BaseType::Char,
-                ..
-            } => Self::Byte,
-            ast::Type {
                 base: ast::BaseType::Int { nbytes, .. },
                 ..
             } => match nbytes {
+                1 => Self::Byte,
                 2 => Self::Word,
                 4 => Self::Longword,
                 8 => Self::Quadword,
                 _ => unreachable!(),
             },
+            ast::Type {
+                base: ast::BaseType::Ptr { .. },
+                ..
+            } => Self::Quadword,
             _ => unimplemented!(),
         }
     }
@@ -389,7 +389,8 @@ impl Function {
         for (arg_type, arg) in stack_args.into_iter() {
             stack_bound += 8;
             instructions.push(Instruction::<Initial>::new(InstructionType::Mov {
-                src: Operand::StackOffset {
+                src: Operand::Memory {
+                    reg: Reg::RBP,
                     offset: stack_bound,
                     size: arg_type.size_bytes(),
                     r#type: arg_type.clone(),
@@ -654,6 +655,14 @@ pub enum Reg {
 }
 
 impl Reg {
+    const RBP: Self = Self::X86 {
+        reg: X86Reg::Bp,
+        section: RegSection::Qword,
+    };
+    const RAX: Self = Self::X86 {
+        reg: X86Reg::Ax,
+        section: RegSection::Qword,
+    };
     pub fn size(&self) -> usize {
         match self {
             Self::X86 { reg: _, section } => section.size(),
@@ -858,6 +867,11 @@ pub enum InstructionType {
         src: Operand,
         dst: Operand,
     },
+    Lea {
+        // Must be a memory operand!
+        src: Operand,
+        dst: Operand,
+    },
 }
 
 impl InstructionType {
@@ -938,7 +952,8 @@ impl Instruction<WithStorage> {
                         .or_insert_with(|| {
                             *stack_bound = align_up(*stack_bound, size);
                             *stack_bound += size;
-                            Operand::StackOffset {
+                            Operand::Memory {
+                                reg: Reg::RBP,
                                 offset: -(*stack_bound as isize),
                                 size,
                                 r#type,
@@ -1002,6 +1017,10 @@ impl Instruction<WithStorage> {
                     dst: convert_operand_offset(dst),
                 },
                 InstructionType::DivDouble { src, dst } => InstructionType::DivDouble {
+                    src: convert_operand_offset(src),
+                    dst: convert_operand_offset(dst),
+                },
+                InstructionType::Lea { src, dst } => InstructionType::Lea {
                     src: convert_operand_offset(src),
                     dst: convert_operand_offset(dst),
                 },
@@ -1113,10 +1132,7 @@ impl Instruction<WithStorage> {
             dst_type.size_bytes()
         };
 
-        // Step 1. Rewrite immediate values which are not allowed to be immediates
-
-        // Rewrite the `src` and `dst` operands if they cannot be immediates
-        // but are by using the designated rewrite registers
+        // Step 1. Figure out what register should be used for the rewrite
         let src_rewrite_reg = if src_type.uses_xmm_regs() {
             Operand::Reg(Reg::Xmm {
                 reg: XmmReg::XMM14,
@@ -1143,10 +1159,9 @@ impl Instruction<WithStorage> {
 
         let mut instrs = vec![];
 
-        // Step 1. Rewrite immediate values which are not allowed to be immediates
-
-        // Rewrite the `src` and `dst` operands if they cannot be immediates
-        // but are by using the designated rewrite registers
+        // Step 2. Rewrite immediate values which are not allowed to be
+        // immediates for `src` and `dst` and make sure what remains in `src`
+        // will have the correct value regardless of if it is rewritten.
         let src = if src_rewrites.imm_rule.requires_rewrite(&src) {
             instrs.push(Self::from_op(InstructionType::Mov {
                 src,
@@ -1167,7 +1182,7 @@ impl Instruction<WithStorage> {
             dst
         };
 
-        // Step 2. Rewrite memory address values where they are not allowed
+        // Step 3. Rewrite memory address values where they are not allowed
 
         // Happy path: Always good
         if dst.is_reg() {
@@ -1279,7 +1294,7 @@ impl Instruction<WithStorage> {
             }
             InstructionType::MovZeroExtend {
                 src,
-                dst: dst @ Operand::StackOffset { .. },
+                dst: dst @ Operand::Memory { .. },
             } => {
                 vec![
                     Self::from_op(InstructionType::Mov {
@@ -1310,6 +1325,13 @@ impl Instruction<WithStorage> {
                         dst,
                     })
                 },
+            ),
+            InstructionType::Lea { src, dst } => Self::rewrite_move(
+                src,
+                dst,
+                RewriteRule::new(ImmRewrite::Ignore, MemRewrite::Default, true),
+                RewriteRule::new(ImmRewrite::Error, MemRewrite::UseAndStore, false),
+                |src, dst| Self::from_op(InstructionType::Lea { src, dst }),
             ),
             InstructionType::Idiv(src @ Operand::Imm(_)) => {
                 let r10 = Operand::Reg(Reg::X64 {
@@ -1428,7 +1450,7 @@ impl Instruction<WithStorage> {
             }
             InstructionType::Mov {
                 src: imm @ Operand::Imm(..),
-                dst: dst @ Operand::StackOffset { .. } | dst @ Operand::Data { .. },
+                dst: dst @ Operand::Memory { .. } | dst @ Operand::Data { .. },
             } if imm.size() > 4 => {
                 let r10 = Operand::Reg(Reg::X64 {
                     reg: X64Reg::R10,
@@ -1548,7 +1570,10 @@ impl Instruction<Initial> {
                 match val_type {
                     ast::Type {
                         base: ast::BaseType::Int { .. },
-                        ptr: None,
+                        ..
+                    }
+                    | ast::Type {
+                        base: ast::BaseType::Ptr { .. },
                         ..
                     } => {
                         vec![
@@ -1565,7 +1590,6 @@ impl Instruction<Initial> {
                     }
                     ast::Type {
                         base: ast::BaseType::Float(_) | ast::BaseType::Double(_),
-                        ptr: None,
                         ..
                     } => {
                         vec![
@@ -2045,6 +2069,55 @@ impl Instruction<Initial> {
                 src: Operand::from_tacky(src, symbols, float_constants),
                 dst: Operand::from_tacky(dst, symbols, float_constants),
             })],
+            tacky::Instruction::GetAddress { src, dst } => {
+                let src = Operand::from_tacky(src, symbols, float_constants);
+                let dst = Operand::from_tacky(dst, symbols, float_constants);
+                assert!(
+                    matches!(src, Operand::Memory { .. } | Operand::Pseudo { .. }),
+                    "Can only call `lea` on memory operands! Found: {src:#?}"
+                );
+                vec![new_instr(InstructionType::Lea { src, dst })]
+            }
+            tacky::Instruction::Load { src_ptr, dst } => {
+                let dst = Operand::from_tacky(dst, symbols, float_constants);
+                let src = Operand::from_tacky(src_ptr, symbols, float_constants);
+                vec![
+                    new_instr(InstructionType::Mov {
+                        src,
+                        dst: Operand::Reg(Reg::RAX),
+                    }),
+                    new_instr(InstructionType::Mov {
+                        src: Operand::Memory {
+                            reg: Reg::RAX,
+                            offset: 0,
+                            size: dst.size(),
+                            r#type: AssemblyType::from(&dst),
+                        },
+                        dst,
+                    }),
+                ]
+            }
+            tacky::Instruction::Store { src, dst_ptr } => {
+                let dst = Operand::from_tacky(dst_ptr, symbols, float_constants);
+                let src = Operand::from_tacky(src, symbols, float_constants);
+                let src_type = AssemblyType::from(&src);
+                let src_size = src.size();
+                vec![
+                    new_instr(InstructionType::Mov {
+                        src: dst,
+                        dst: Operand::Reg(Reg::RAX),
+                    }),
+                    new_instr(InstructionType::Mov {
+                        src,
+                        dst: Operand::Memory {
+                            reg: Reg::RAX,
+                            offset: 0,
+                            size: src_size,
+                            r#type: src_type,
+                        },
+                    }),
+                ]
+            }
             tacky::Instruction::Label(label) => {
                 vec![new_instr(InstructionType::Label(label))]
             }
@@ -2087,7 +2160,7 @@ impl Instruction<Initial> {
                         Operand::Reg(r) => {
                             v.push(new_instr(InstructionType::Push(Operand::Reg(r))))
                         }
-                        src @ Operand::StackOffset { .. }
+                        src @ Operand::Memory { .. }
                         | src @ Operand::Pseudo { .. }
                         | src @ Operand::Data { .. } => {
                             let size = src.size();
@@ -2127,7 +2200,10 @@ impl Instruction<Initial> {
                 match dst_type {
                     ast::Type {
                         base: ast::BaseType::Int { .. },
-                        ptr: None,
+                        ..
+                    }
+                    | ast::Type {
+                        base: ast::BaseType::Ptr { .. },
                         ..
                     } => {
                         let ax = Operand::Reg(Reg::X86 {
@@ -2139,7 +2215,6 @@ impl Instruction<Initial> {
                     }
                     ast::Type {
                         base: ast::BaseType::Float(_) | ast::BaseType::Double(_),
-                        ptr: None,
                         ..
                     } => {
                         let xmm0 = Operand::Reg(Reg::Xmm {
@@ -2360,7 +2435,6 @@ fn is_float(val: &tacky::Val, symbols: &tacky::SymbolTable) -> bool {
         val.get_type(symbols),
         ast::Type {
             base: ast::BaseType::Float(_) | ast::BaseType::Double(_),
-            ptr: None,
             ..
         }
     )
@@ -2370,7 +2444,6 @@ fn is_signed(val: &tacky::Val, symbols: &tacky::SymbolTable) -> bool {
     match val.get_type(symbols) {
         ast::Type {
             base: ast::BaseType::Int { signed, .. },
-            ptr: None,
             ..
         } => signed.is_none_or(|signed| signed),
         _ => true,
@@ -2403,7 +2476,8 @@ pub enum Operand {
         size: usize,
         r#type: AssemblyType,
     },
-    StackOffset {
+    Memory {
+        reg: Reg,
         offset: isize,
         size: usize,
         r#type: AssemblyType,
@@ -2422,7 +2496,7 @@ impl Operand {
             Self::Imm(c) => c.get_type().size_of(),
             Self::Reg(r) => r.size(),
             Self::Pseudo { size, .. } => *size,
-            Self::StackOffset { size, .. } => *size,
+            Self::Memory { size, .. } => *size,
             Self::Data { size, .. } => *size,
         }
     }
@@ -2489,8 +2563,8 @@ impl fmt::Display for Operand {
         match self {
             Self::Imm(v) => write!(f, "{v}"),
             Self::Reg(r) => write!(f, "{r}"),
-            Self::StackOffset { offset, .. } => {
-                write!(f, "[rbp{offset:+}]")
+            Self::Memory { reg, offset, .. } => {
+                write!(f, "[{reg}{offset:+}]")
             }
             Self::Data { name, is_const, .. } => {
                 if *is_const {

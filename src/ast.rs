@@ -666,6 +666,10 @@ pub enum Expr {
         name: Rc<String>,
         args: Vec<Expr>,
     },
+    Subscript {
+        expr: Box<Expr>,
+        index: Box<Expr>,
+    },
 }
 
 impl Expr {

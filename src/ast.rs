@@ -899,6 +899,10 @@ pub enum BaseType {
         to: Box<Type>,
         is_restrict: bool,
     },
+    Array {
+        element: Box<Type>,
+        size: usize,
+    },
     // TODO: Implement later and make this a non unit variant
     Struct,
     Void,
@@ -957,6 +961,7 @@ impl BaseType {
             BaseType::Float(nbytes) => *nbytes,
             BaseType::Double(nbytes) => *nbytes,
             BaseType::Ptr { .. } => core::mem::size_of::<usize>(),
+            BaseType::Array { .. } => unimplemented!(),
             BaseType::Fun { .. } => unreachable!(),
             BaseType::Struct => unreachable!(),
             BaseType::Void => unreachable!(),
@@ -1013,6 +1018,7 @@ impl BaseType {
             Self::Fun { .. } | Self::Ptr { .. } => {
                 NonZeroUsize::new(core::mem::size_of::<usize>()).unwrap()
             }
+            Self::Array { element, .. } => element.base.default_alignment(),
             Self::Struct => todo!(),
             Self::Void => todo!(),
         }
@@ -1615,6 +1621,7 @@ impl std::fmt::Display for BaseType {
                 }
                 write!(f, "*")
             }
+            Self::Array { element, size } => write!(f, "{element}[{size}]"),
             Self::Float(_) => write!(f, "float"),
             Self::Double(_) => write!(f, "double"),
             Self::Struct => todo!(),

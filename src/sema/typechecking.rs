@@ -1242,6 +1242,7 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
                 is_const: true,
             },
         }),
+        ast::Expr::Subscript { expr, index } => todo!(),
     }
 }
 

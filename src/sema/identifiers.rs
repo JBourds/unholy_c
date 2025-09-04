@@ -415,5 +415,6 @@ fn resolve_expr(expr: ast::Expr, ident_map: &HashMap<Rc<String>, IdentEntry>) ->
             target,
             exp: Box::new(resolve_expr(*exp, ident_map)?),
         }),
+        ast::Expr::Subscript { expr, index } => todo!(),
     }
 }

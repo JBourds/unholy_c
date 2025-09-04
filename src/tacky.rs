@@ -1401,6 +1401,7 @@ impl Expr {
                 instructions.extend(cast_instrs);
                 ExprResult::PlainOperand(Self { instructions, val })
             }
+            ast::Expr::Subscript { expr, index } => todo!(),
         }
     }
 

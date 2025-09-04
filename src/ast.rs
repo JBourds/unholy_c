@@ -195,6 +195,12 @@ impl BlockItem {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+pub enum Initializer {
+    SingleInit(Box<Expr>),
+    CompundInit(Vec<Initializer>),
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub struct VarDecl {
     pub r#type: Type,
     pub name: Rc<String>,

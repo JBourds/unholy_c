@@ -1871,6 +1871,29 @@ impl Constant {
             bail!("No remaining tokens.")
         }
     }
+
+    pub fn as_array_size(&self) -> Result<usize> {
+        match self {
+            Constant::I8(v) => {
+                usize::try_from(*v).context("failed to convert {v} to positive size")
+            }
+            Constant::I16(v) => {
+                usize::try_from(*v).context("failed to convert {v} to positive size")
+            }
+            Constant::I32(v) => {
+                usize::try_from(*v).context("failed to convert {v} to positive size")
+            }
+            Constant::I64(v) => {
+                usize::try_from(*v).context("failed to convert {v} to positive size")
+            }
+            Constant::U8(v) => Ok(*v as usize),
+            Constant::U16(v) => Ok(*v as usize),
+            Constant::U32(v) => Ok(*v as usize),
+            Constant::U64(v) => Ok(*v as usize),
+            Constant::F32(..) => bail!("Floats cannot be used as constants in array declaration"),
+            Constant::F64(..) => bail!("Floats cannot be used as constants in array declaration"),
+        }
+    }
 }
 
 impl std::fmt::Display for Constant {

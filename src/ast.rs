@@ -1457,6 +1457,10 @@ enum Declarator {
         is_restrict: bool,
         is_const: bool,
     },
+    Array {
+        decl: Box<Self>,
+        size: usize,
+    },
     Fun {
         decl: Box<Self>,
         params: RawParameterList,
@@ -1486,18 +1490,7 @@ fn consume_pointer_modifiers(tokens: &[Token]) -> (bool, bool, &[Token]) {
 impl Declarator {
     fn consume(tokens: &[Token]) -> Result<(Self, &[Token])> {
         let (mut decl, mut tokens) = match tokens {
-            [Token::Ident(s), tokens @ ..] => Ok::<(Declarator, &[Token]), anyhow::Error>((
-                Self::Ident(Some(Rc::clone(s))),
-                tokens,
-            )),
-            [Token::LParen, tokens @ ..] => {
-                let (decl, tokens) = Self::consume(tokens)?;
-                ensure!(
-                    tokens.first().is_some_and(|t| *t == Token::RParen),
-                    "Expected closing parentheses in declarator."
-                );
-                Ok((decl, &tokens[1..]))
-            }
+            // declarator
             [Token::Star, tokens @ ..] => {
                 let (is_const, is_restrict, remaining) = consume_pointer_modifiers(tokens);
                 let (decl, tokens) = Self::consume(remaining)?;
@@ -1510,7 +1503,8 @@ impl Declarator {
                     tokens,
                 ))
             }
-            _ => bail!("ast.Declarator.consume(): Error parsing declarator."),
+            _ => Self::consume_direct_declarator(tokens)
+                .context("ast.Declarator.consume(): Error parsing declarator."),
         }?;
 
         while let Some(t) = tokens.first() {
@@ -1524,8 +1518,58 @@ impl Declarator {
                     };
                     tokens = left;
                 }
+                _ => {
+                    break;
+                }
+            }
+        }
+        Ok((decl, tokens))
+    }
+
+    fn consume_direct_declarator(tokens: &[Token]) -> Result<(Self, &[Token])> {
+        // Simple declarator
+        let (mut decl, mut tokens) = match tokens {
+            [Token::Ident(s), tokens @ ..] => Ok::<(Declarator, &[Token]), anyhow::Error>((
+                Self::Ident(Some(Rc::clone(s))),
+                tokens,
+            )),
+            [Token::LParen, tokens @ ..] => {
+                let (decl, tokens) = Self::consume(tokens)?;
+                ensure!(
+                    tokens.first().is_some_and(|t| *t == Token::RParen),
+                    "Expected closing parentheses in declarator."
+                );
+                Ok((decl, &tokens[1..]))
+            }
+            _ => bail!(
+                "ast.Declarator.consume_direct_declarator(): Error parsing direct declarator."
+            ),
+        }?;
+
+        // Optional declarator suffix
+        while let Some(t) = tokens.first() {
+            match t {
+                // Disallow returning a function
+                Token::LParen if !matches!(decl, Self::Fun { .. }) => {
+                    let (params, left) = RawParameterList::consume(tokens)?;
+                    decl = Self::Fun {
+                        decl: Box::new(decl),
+                        params,
+                    };
+                    tokens = left;
+                }
                 Token::LBracket => {
-                    unimplemented!("Implement this when we get to arrays!");
+                    let (constant, left) = Constant::consume(tokens)?;
+                    if left.first() != Some(&Token::RBracket) {
+                        bail!(
+                            "ast.Declarator.consume_direct_declarator(): Did not find matching right bracket when parsing direct declarator"
+                        );
+                    }
+                    tokens = &left[1..];
+                    decl = Self::Array {
+                        decl: Box::new(decl),
+                        size: constant.as_array_size()?,
+                    };
                 }
                 _ => {
                     break;
@@ -1541,6 +1585,7 @@ impl Declarator {
         match self {
             Declarator::Ident(name) => name.clone(),
             Declarator::Pointer { decl, .. } => decl.name(),
+            Declarator::Array { decl, .. } => decl.name(),
             Declarator::Fun { decl, .. } => decl.name(),
         }
     }
@@ -1566,6 +1611,17 @@ impl Declarator {
                         "ast.Declarator.process(): Pointers always have word-sized alignment.",
                     ),
                     is_const,
+                };
+                Declarator::process(*decl, derived_type)
+            }
+            Declarator::Array { decl, size } => {
+                let derived_type = Type {
+                    alignment: base.alignment,
+                    base: BaseType::Array {
+                        element: Box::new(base),
+                        size,
+                    },
+                    is_const: false, // FIXME: not sure whats supposed to go here
                 };
                 Declarator::process(*decl, derived_type)
             }

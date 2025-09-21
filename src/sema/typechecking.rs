@@ -184,13 +184,13 @@ impl InitialValue {
     ) -> Result<Option<Self>> {
         match (scope, var.init.as_ref()) {
             (Scope::Global, Some(expr)) => {
-                let init = Self::from_expr(&var.r#type, expr, symbols)
+                let init = Self::from_expr(&var.r#type, todo!() /* expr*/, symbols)
                     .context(format!("Evaluating expression for \"{}\" failed", var.name))?;
                 Ok(Some(init))
             }
             (Scope::Local(..), Some(expr)) => match var.storage_class {
                 Some(ast::StorageClass::Static) => Ok(Some(
-                    Self::from_expr(&var.r#type, expr, symbols)
+                    Self::from_expr(&var.r#type, todo!() /* expr */, symbols)
                         .context(format!("Evaluating expression for \"{}\" failed", var.name))?,
                 )),
                 None => Ok(None), // Locals technically dont have initial values
@@ -1310,7 +1310,7 @@ fn typecheck_var_decl(decl: ast::VarDecl, symbols: &mut SymbolTable) -> Result<a
     let target = entry.r#type;
     let init = if let Some(init) = decl.init {
         Some(
-            convert_by_assignment(&init, &target, symbols).context(format!(
+            convert_by_assignment(todo!() /* &init */, &target, symbols).context(format!(
                 "Failed to typecheck initialization for variable \"{}\": {init:#?}",
                 decl.name
             ))?,
@@ -1318,5 +1318,8 @@ fn typecheck_var_decl(decl: ast::VarDecl, symbols: &mut SymbolTable) -> Result<a
     } else {
         None
     };
-    Ok(ast::VarDecl { init, ..decl })
+    Ok(ast::VarDecl {
+        init: todo!(), /* init */
+        ..decl
+    })
 }

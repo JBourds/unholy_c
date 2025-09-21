@@ -110,7 +110,7 @@ fn resolve_local_var_decl(
     } else {
         let unique_name = resolve_automatic(decl.name, ident_map, make_temporary)?;
         let init = match decl.init {
-            Some(expr) => Some(resolve_expr(expr, ident_map)?),
+            Some(expr) => todo!(), // Some(resolve_expr(expr, ident_map)?),
             None => None,
         };
 

@@ -344,7 +344,7 @@ impl Instruction {
             let Expr {
                 mut instructions,
                 val: src,
-            } = Expr::parse_with_and_convert(init, symbols, make_temp_var);
+            } = Expr::parse_with_and_convert(todo!() /* init */, symbols, make_temp_var);
             let dst = Val::Var(Rc::clone(&decl.name));
             instructions.push(Instruction::Copy {
                 src,

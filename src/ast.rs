@@ -1384,20 +1384,15 @@ enum AbstractDeclarator {
         decl: Option<Box<Self>>,
         is_const: bool,
     },
+    Array {
+        decl: Option<Box<Self>>,
+        size: usize,
+    },
 }
 
 impl AbstractDeclarator {
     fn consume(tokens: &[Token]) -> Result<(Self, &[Token])> {
         match tokens {
-            [Token::LParen, tokens @ ..] => {
-                let (decl, tokens) =
-                    Self::consume(tokens).context("Failed to parse abstract declarator.")?;
-                ensure!(
-                    tokens.first().is_some_and(|t| *t == Token::RParen),
-                    "Expected closing \")\" in abstract declarator."
-                );
-                Ok((decl, &tokens[1..]))
-            }
             [Token::Star, tokens @ ..] => {
                 let (is_const, is_restrict, tokens) = consume_pointer_modifiers(tokens);
                 ensure!(
@@ -1422,8 +1417,75 @@ impl AbstractDeclarator {
                     ))
                 }
             }
+            _ => {
+                Self::consume_direct_abstract(tokens).context("Failed to parse abstract declarator")
+            }
+        }
+    }
+
+    fn consume_direct_abstract(tokens: &[Token]) -> Result<(Self, &[Token])> {
+        match tokens {
+            [Token::LParen, tokens @ ..] => {
+                let (decl, tokens) =
+                    Self::consume(tokens).context("Failed to parse abstract declarator.")?;
+                ensure!(
+                    tokens.first().is_some_and(|t| *t == Token::RParen),
+                    "Expected closing \")\" in abstract declarator."
+                );
+
+                let (decl, tokens, _) = Self::consume_subscript(Some(decl), tokens)?;
+
+                Ok((decl, &tokens[1..]))
+            }
+            [Token::LBracket, ..] => {
+                let (decl, tokens, consumed) = Self::consume_subscript(None, tokens)?;
+                ensure!(
+                    consumed,
+                    "ast.AbstractDeclarator.consume_direct_abstract() requires atleast one subscript in the non-recursive case"
+                );
+                Ok((decl, tokens))
+            }
             _ => bail!("Failed to parse abstract declarator"),
         }
+    }
+
+    fn consume_subscript(
+        decl: Option<Self>,
+        mut tokens: &[Token],
+    ) -> Result<(Self, &[Token], bool)> {
+        const EMPTY_DECL: AbstractDeclarator = AbstractDeclarator::Array {
+            decl: None,
+            size: 0,
+        };
+        let mut decl = match decl {
+            Some(decl) => decl,
+            None => EMPTY_DECL,
+        };
+        let mut consumed = false;
+        while let Some(t) = tokens.first() {
+            match t {
+                Token::LBracket => {
+                    let (constant, left) = Constant::consume(tokens)?;
+                    if left.first() != Some(&Token::RBracket) {
+                        bail!(
+                            "ast.AbstractDeclarator.consume_subscript(): Did not find matching right bracket when parsing direct declarator"
+                        );
+                    }
+                    consumed = true;
+                    tokens = &left[1..];
+                    decl = Self::Array {
+                        decl: if matches!(decl, EMPTY_DECL) {
+                            None
+                        } else {
+                            Some(Box::new(decl))
+                        },
+                        size: constant.as_array_size()?,
+                    };
+                }
+                _ => break,
+            }
+        }
+        Ok((decl, tokens, consumed))
     }
 
     fn process(declarator: Self, base: Type) -> Result<Type> {
@@ -1438,6 +1500,21 @@ impl AbstractDeclarator {
                         "ast.Declarator.process(): Pointers always have word-sized alignment.",
                     ),
                     is_const,
+                };
+                if let Some(decl) = decl {
+                    Self::process(*decl, derived_type)
+                } else {
+                    Ok(derived_type)
+                }
+            }
+            Self::Array { decl, size } => {
+                let derived_type = Type {
+                    alignment: base.alignment,
+                    base: BaseType::Array {
+                        element: Box::new(base),
+                        size,
+                    },
+                    is_const: false, // FIXME: Don't know whats supposed to go here
                 };
                 if let Some(decl) = decl {
                     Self::process(*decl, derived_type)

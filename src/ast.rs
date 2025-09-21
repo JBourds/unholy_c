@@ -203,13 +203,14 @@ pub enum Initializer {
 impl Initializer {
     pub fn consume(tokens: &[Token]) -> Result<(Self, &[Token])> {
         match tokens {
-            [Token::LParen, tokens @ ..] => {
+            [Token::LSquirly, tokens @ ..] => {
                 let mut initializers = Vec::new();
                 let (first_init, mut left) = Self::consume(tokens)?;
                 initializers.push(first_init);
-                while tokens.first() == Some(&Token::Comma) {
+                loop {
                     match left {
-                        [Token::Comma, Token::RParen, tokens @ ..] => {
+                        [Token::RSquirly, tokens @ ..]
+                        | [Token::Comma, Token::RSquirly, tokens @ ..] => {
                             left = tokens;
                             break;
                         }
@@ -221,14 +222,12 @@ impl Initializer {
                         _ => bail!("ast.Initializer.consume() failed to parse compound init"),
                     }
                 }
+
                 Ok((Self::CompundInit(initializers), left))
             }
             _ => {
                 let (expr, tokens) = Expr::parse(tokens, 0)?;
-                if tokens.first().is_some_and(|x| *x != Token::Semi) {
-                    bail!("Semicolon required after expression in variable declaration.")
-                }
-                Ok((Self::SingleInit(Box::new(expr)), &tokens[1..]))
+                Ok((Self::SingleInit(Box::new(expr)), tokens))
             }
         }
     }
@@ -247,6 +246,9 @@ impl VarDecl {
         match tokens {
             [Token::Assign, tokens @ ..] => {
                 let (initializer, tokens) = Initializer::consume(tokens)?;
+                if tokens.first().is_some_and(|x| *x != Token::Semi) {
+                    bail!("Semicolon required after expression in variable declaration.")
+                }
                 self.init = Some(initializer);
                 Ok((self, tokens))
             }
@@ -322,9 +324,9 @@ impl Declaration {
                     Rc::clone(&name),
                 )
                 .check_for_definition(tokens)
-                .context(
-                    "ast.Declaration.consume(): Error parsing variable declaration for \"{name}\".",
-                )?;
+                .context(format!(
+                    "ast.Declaration.consume(): Error parsing variable declaration for \"{name}\"."
+                ))?;
                 Ok((Declaration::VarDecl(decl), tokens))
             }
         }
@@ -360,6 +362,7 @@ impl Block {
                     remaining = tokens;
                     items.push(item);
                 }
+                items = items;
                 match remaining.first() {
                     Some(Token::RSquirly) => Ok((Self(items), &remaining[1..])),
                     Some(token) => bail!("Expected \"}}\" to end block but found {}", token),
@@ -795,16 +798,32 @@ impl Expr {
 struct Factor;
 
 impl Factor {
-    fn check_for_postfix(expr: Expr, tokens: &[Token]) -> (Expr, &[Token]) {
-        match UnaryOp::consume_postfix(tokens) {
-            Ok((op, tokens)) => Self::check_for_postfix(
-                Expr::Unary {
-                    op,
-                    expr: Box::new(expr),
-                },
-                tokens,
-            ),
-            _ => (expr, tokens),
+    fn check_for_postfix(expr: Expr, tokens: &[Token]) -> Result<(Expr, &[Token])> {
+        match tokens {
+            [Token::LBracket, tokens @ ..] => {
+                let (rhs, tokens) = Expr::parse(tokens, 0)?;
+                ensure!(
+                    tokens.first() == Some(&Token::RBracket),
+                    "ast.Factor.check_for_postfix(): subscript expression missing closing bracket"
+                );
+                Self::check_for_postfix(
+                    Expr::Subscript {
+                        expr: expr.into(),
+                        index: rhs.into(),
+                    },
+                    &tokens[1..],
+                )
+            }
+            _ => match UnaryOp::consume_postfix(tokens) {
+                Ok((op, tokens)) => Self::check_for_postfix(
+                    Expr::Unary {
+                        op,
+                        expr: Box::new(expr),
+                    },
+                    tokens,
+                ),
+                _ => Ok((expr, tokens)),
+            },
         }
     }
 
@@ -909,7 +928,7 @@ impl Factor {
                             .context("Parsing grammer rule: \"(\" <exp> \")\" failed")?;
                         match tokens {
                             [Token::RParen, tokens @ ..] => {
-                                let (expr, tokens) = Self::check_for_postfix(expr, tokens);
+                                let (expr, tokens) = Self::check_for_postfix(expr, tokens)?;
                                 Self::check_for_call(expr, tokens)
                             }
                             _ => bail!("Could not find matching right parenthesis"),
@@ -918,7 +937,7 @@ impl Factor {
                 }
                 _ => bail!("Could not match valid grammar rule."),
             }
-            .map(|(expr, tokens)| Self::check_for_postfix(expr, tokens)),
+            .and_then(|(expr, tokens)| Self::check_for_postfix(expr, tokens)),
         }
     }
 }
@@ -1666,7 +1685,7 @@ impl Declarator {
                     tokens = left;
                 }
                 Token::LBracket => {
-                    let (constant, left) = Constant::consume(tokens)?;
+                    let (constant, left) = Constant::consume(&tokens[1..])?;
                     if left.first() != Some(&Token::RBracket) {
                         bail!(
                             "ast.Declarator.consume_direct_declarator(): Did not find matching right bracket when parsing direct declarator"

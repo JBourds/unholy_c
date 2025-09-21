@@ -200,11 +200,45 @@ pub enum Initializer {
     CompundInit(Vec<Initializer>),
 }
 
+impl Initializer {
+    pub fn consume(tokens: &[Token]) -> Result<(Self, &[Token])> {
+        match tokens {
+            [Token::LParen, tokens @ ..] => {
+                let mut initializers = Vec::new();
+                let (first_init, mut left) = Self::consume(tokens)?;
+                initializers.push(first_init);
+                while tokens.first() == Some(&Token::Comma) {
+                    match left {
+                        [Token::Comma, Token::RParen, tokens @ ..] => {
+                            left = tokens;
+                            break;
+                        }
+                        [Token::Comma, tokens @ ..] => {
+                            let (inner, tokens) = Self::consume(tokens)?;
+                            initializers.push(inner);
+                            left = tokens;
+                        }
+                        _ => bail!("ast.Initializer.consume() failed to parse compound init"),
+                    }
+                }
+                Ok((Self::CompundInit(initializers), left))
+            }
+            _ => {
+                let (expr, tokens) = Expr::parse(tokens, 0)?;
+                if tokens.first().is_some_and(|x| *x != Token::Semi) {
+                    bail!("Semicolon required after expression in variable declaration.")
+                }
+                Ok((Self::SingleInit(Box::new(expr)), &tokens[1..]))
+            }
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct VarDecl {
     pub r#type: Type,
     pub name: Rc<String>,
-    pub init: Option<Expr>,
+    pub init: Option<Initializer>,
     pub storage_class: Option<StorageClass>,
 }
 
@@ -212,13 +246,9 @@ impl VarDecl {
     fn check_for_definition(mut self, tokens: &[Token]) -> Result<(Self, &[Token])> {
         match tokens {
             [Token::Assign, tokens @ ..] => {
-                let (expr, tokens) = Expr::parse(tokens, 0)?;
-                if tokens.first().is_some_and(|x| *x != Token::Semi) {
-                    bail!("Semicolon required after expression in variable declaration.")
-                } else {
-                    self.init = Some(expr);
-                    Ok((self, &tokens[1..]))
-                }
+                let (initializer, tokens) = Initializer::consume(tokens)?;
+                self.init = Some(initializer);
+                Ok((self, tokens))
             }
             [Token::Semi, tokens @ ..] => Ok((self, tokens)),
             _ => bail!("Unable to parse valid variable declaration."),

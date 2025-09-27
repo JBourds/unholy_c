@@ -250,7 +250,7 @@ impl VarDecl {
                     bail!("Semicolon required after expression in variable declaration.")
                 }
                 self.init = Some(initializer);
-                Ok((self, tokens))
+                Ok((self, &tokens[1..]))
             }
             [Token::Semi, tokens @ ..] => Ok((self, tokens)),
             _ => bail!("Unable to parse valid variable declaration."),

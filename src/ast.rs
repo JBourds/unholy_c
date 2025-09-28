@@ -1499,22 +1499,18 @@ impl AbstractDeclarator {
     }
 
     fn consume_subscript(
-        decl: Option<Self>,
+        mut decl: Option<Self>,
         mut tokens: &[Token],
     ) -> Result<(Self, &[Token], bool)> {
         const EMPTY_DECL: AbstractDeclarator = AbstractDeclarator::Array {
             decl: None,
             size: 0,
         };
-        let mut decl = match decl {
-            Some(decl) => decl,
-            None => EMPTY_DECL,
-        };
         let mut consumed = false;
         while let Some(t) = tokens.first() {
             match t {
                 Token::LBracket => {
-                    let (constant, left) = Constant::consume(tokens)?;
+                    let (constant, left) = Constant::consume(&tokens[1..])?;
                     if left.first() != Some(&Token::RBracket) {
                         bail!(
                             "ast.AbstractDeclarator.consume_subscript(): Did not find matching right bracket when parsing direct declarator"
@@ -1522,19 +1518,15 @@ impl AbstractDeclarator {
                     }
                     consumed = true;
                     tokens = &left[1..];
-                    decl = Self::Array {
-                        decl: if matches!(decl, EMPTY_DECL) {
-                            None
-                        } else {
-                            Some(Box::new(decl))
-                        },
+                    decl = Some(Self::Array {
+                        decl: decl.map(Box::new),
                         size: constant.as_array_size()?,
-                    };
+                    });
                 }
                 _ => break,
             }
         }
-        Ok((decl, tokens, consumed))
+        Ok((decl.unwrap_or(EMPTY_DECL), tokens, consumed))
     }
 
     fn process(declarator: Self, base: Type) -> Result<Type> {

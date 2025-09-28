@@ -1482,9 +1482,9 @@ impl AbstractDeclarator {
                     "Expected closing \")\" in abstract declarator."
                 );
 
-                let (decl, tokens, _) = Self::consume_subscript(Some(decl), tokens)?;
+                let (decl, tokens, _) = Self::consume_subscript(Some(decl), &tokens[1..])?;
 
-                Ok((decl, &tokens[1..]))
+                Ok((decl, tokens))
             }
             [Token::LBracket, ..] => {
                 let (decl, tokens, consumed) = Self::consume_subscript(None, tokens)?;

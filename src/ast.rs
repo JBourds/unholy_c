@@ -295,6 +295,18 @@ impl Declaration {
             .context("Error building base type from token stream.")?;
         let (declarator, tokens) = Declarator::consume(&tokens[stream_offset..])
             .context("ast.Declaration.consume(): Error while parsing declarator.")?;
+
+        // This is ugly, but the book demands it be a parse error instead of the much
+        // more sensible type error. So here it is...
+        match declarator {
+            Declarator::Array { decl, .. } if matches!(*decl, Declarator::Fun { .. }) => {
+                bail!(
+                    "Arrays declarators cannot hold functions, also known as: annoying test case that should be a type error but is a parse error >:(("
+                )
+            }
+            _ => {}
+        }
+
         let (name, decl_type, params) = Declarator::process(declarator, base)
             .context("ast.Declaration.consume(): Error while processing declarator.")?;
         let name =
@@ -1632,7 +1644,9 @@ impl Declarator {
         while let Some(t) = tokens.first() {
             match t {
                 // Disallow returning a function
-                Token::LParen if !matches!(decl, Self::Fun { .. }) => {
+                Token::LParen
+                    if !matches!(decl, Self::Fun { .. }) && !matches!(decl, Self::Array { .. }) =>
+                {
                     let (params, left) = RawParameterList::consume(tokens)?;
                     decl = Self::Fun {
                         decl: Box::new(decl),
@@ -1672,7 +1686,9 @@ impl Declarator {
         while let Some(t) = tokens.first() {
             match t {
                 // Disallow returning a function
-                Token::LParen if !matches!(decl, Self::Fun { .. }) => {
+                Token::LParen
+                    if !matches!(decl, Self::Fun { .. }) && !matches!(decl, Self::Array { .. }) =>
+                {
                     let (params, left) = RawParameterList::consume(tokens)?;
                     decl = Self::Fun {
                         decl: Box::new(decl),
@@ -1737,6 +1753,7 @@ impl Declarator {
                 Declarator::process(*decl, derived_type)
             }
             Declarator::Array { decl, size } => {
+                ensure!(!base.is_function(), "Array of functions not allowed");
                 let derived_type = Type {
                     alignment: base.alignment,
                     base: BaseType::Array {

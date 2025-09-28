@@ -1334,11 +1334,7 @@ impl TypeBuilder {
             }
         }
 
-        // SAFETY: `remaining` is constructed from within `tokens` slice of
-        // memory. This will always be valid, and was a whole lot easier to do
-        // than reworking all our parsing logic :^)
-        self.stream_offset =
-            unsafe { remaining.as_ptr().offset_from(tokens.as_ptr()) }.try_into()?;
+        self.stream_offset = tokens.len() - remaining.len();
 
         Ok(self)
     }

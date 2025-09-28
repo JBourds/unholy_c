@@ -1238,6 +1238,10 @@ impl Type {
         matches!(self.base, BaseType::Fun { .. })
     }
 
+    pub fn is_array(&self) -> bool {
+        matches!(self.base, BaseType::Array { .. })
+    }
+
     pub fn deref(self) -> Self {
         assert!(self.is_pointer(), "Cannot derefrence non-pointer type");
         let BaseType::Ptr { to, is_restrict: _ } = self.base else {

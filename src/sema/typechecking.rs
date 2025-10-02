@@ -892,6 +892,34 @@ fn boolify(expr: Expr, r#type: &Type, symbols: &mut SymbolTable) -> Result<Expr>
     }
 }
 
+fn typecheck_expr_and_convert(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedExpr> {
+    let TypedExpr { expr, r#type } = typecheck_expr(expr, symbols)?;
+
+    match r#type {
+        ast::Type {
+            base: ast::BaseType::Array { element, .. },
+            is_const,
+            ..
+        } => {
+            let expr = ast::Expr::Unary {
+                op: ast::UnaryOp::AddrOf,
+                expr: expr.into(),
+            };
+
+            let r#type = Type {
+                base: ast::BaseType::Ptr {
+                    to: element,
+                    is_restrict: false,
+                },
+                alignment: Type::PTR_ALIGNMENT,
+                is_const,
+            };
+            Ok(TypedExpr { expr, r#type })
+        }
+        _ => Ok(TypedExpr { expr, r#type }),
+    }
+}
+
 fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedExpr> {
     match expr {
         ast::Expr::Var(var) => {

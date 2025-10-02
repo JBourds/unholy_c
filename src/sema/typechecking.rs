@@ -579,11 +579,13 @@ fn get_common_pointer_type(
     let TypedExpr {
         expr: e1,
         r#type: e1_t,
-    } = typecheck_expr(e1, symbols).context("Failed to typecheck expression 1 argument.")?;
+    } = typecheck_expr_and_convert(e1, symbols)
+        .context("Failed to typecheck expression 1 argument.")?;
     let TypedExpr {
         expr: e2,
         r#type: e2_t,
-    } = typecheck_expr(e2, symbols).context("Failed to typecheck expression 2 argument.")?;
+    } = typecheck_expr_and_convert(e2, symbols)
+        .context("Failed to typecheck expression 2 argument.")?;
     if e1_t == e2_t {
         Ok(e1_t)
     } else if is_null_pointer_constant(&e1) {
@@ -602,7 +604,7 @@ fn convert_by_assignment(
     target: &ast::Type,
     symbols: &mut SymbolTable,
 ) -> Result<ast::Expr> {
-    let TypedExpr { expr, r#type } = typecheck_expr(e, symbols)?;
+    let TypedExpr { expr, r#type } = typecheck_expr_and_convert(e, symbols)?;
     if r#type == *target {
         Ok(expr)
     } else if r#type.is_arithmetic() && target.is_arithmetic()
@@ -721,14 +723,14 @@ fn typecheck_stmt(
                     bail!("Invalid return statement out of function body.");
                 }
             }
-        ast::Stmt::Expr(expr) => Ok(ast::Stmt::Expr(typecheck_expr(&expr, symbols)
+        ast::Stmt::Expr(expr) => Ok(ast::Stmt::Expr(typecheck_expr_and_convert(&expr, symbols)
                 .context("Failed to typecheck expression statement.")?.expr)),
         ast::Stmt::If {
                 condition,
                 then,
                 r#else,
             } => {
-                let condition = typecheck_expr(&condition, symbols)
+                let condition = typecheck_expr_and_convert(&condition, symbols)
                     .context("Failed to typecheck if block condition.")?.expr;
                 let then = typecheck_stmt(*then, symbols, function.clone())
                     .context("Failed to typecheck if branch of conditional.")?;
@@ -741,7 +743,7 @@ fn typecheck_stmt(
         ast::Stmt::While {
                 condition, body, label,
             } => {
-                let condition = typecheck_expr(&condition, symbols)
+                let condition = typecheck_expr_and_convert(&condition, symbols)
                         .context("Failed to typecheck for loop condition.")?.expr;
                 let body = typecheck_stmt(*body, symbols, function)
                     .context("Failed to typecheck for loop body.")?;
@@ -750,7 +752,7 @@ fn typecheck_stmt(
         ast::Stmt::DoWhile {
                 body, condition, label,
             } => {
-                let condition = typecheck_expr(&condition, symbols)
+                let condition = typecheck_expr_and_convert(&condition, symbols)
                         .context("Failed to typecheck for loop condition.")?.expr;
                 let body = typecheck_stmt(*body, symbols, function)
                     .context("Failed to typecheck for loop body.")?;
@@ -777,7 +779,7 @@ fn typecheck_stmt(
                     }
                     ast::ForInit::Expr(Some(ref expr)) => {
                         ast::ForInit::Expr(
-                            Some(typecheck_expr(expr, symbols)
+                            Some(typecheck_expr_and_convert(expr, symbols)
                             .map(|t_expr| t_expr.expr)
                             .context("Failed to typecheck for loop initialization expression.")?)
                         )
@@ -785,11 +787,11 @@ fn typecheck_stmt(
                     _ => ast::ForInit::Expr(None)
                 };
                 let post = if let Some(post) = post {
-                    Some(typecheck_expr(&post, symbols)
+                    Some(typecheck_expr_and_convert(&post, symbols)
                         .context("Failed to typecheck for loop post condition.")?.expr)
                 } else { None };
                 let condition = if let Some(condition) = condition {
-                    Some(typecheck_expr(&condition, symbols)
+                    Some(typecheck_expr_and_convert(&condition, symbols)
                         .context("Failed to typecheck for loop condition.")?.expr)
                 } else { None };
                 let body = typecheck_stmt(*body, symbols, function)
@@ -799,7 +801,7 @@ fn typecheck_stmt(
                 })
             }
         ast::Stmt::Case { value, stmt, label } => {
-                let value = typecheck_expr(&value, symbols)
+                let value = typecheck_expr_and_convert(&value, symbols)
                     .context("Failed to typecheck case value.")?.expr;
                 let stmt = typecheck_stmt(*stmt, symbols, function)
                     .context("Failed to typecheck case statement.")?;
@@ -812,7 +814,7 @@ fn typecheck_stmt(
                 label,
                 default,
             } => {
-                let TypedExpr { expr: condition, r#type: condition_type } = typecheck_expr(&condition, symbols)
+                let TypedExpr { expr: condition, r#type: condition_type } = typecheck_expr_and_convert(&condition, symbols)
                     .context("Failed to typecheck switch expression.")?;
 
                 if matches!(condition_type.base, ast::BaseType::Fun { .. }) {
@@ -857,7 +859,7 @@ fn try_implicit_cast(
     from: &ast::Expr,
     symbols: &mut SymbolTable,
 ) -> Result<ast::Expr> {
-    let TypedExpr { expr, r#type } = typecheck_expr(from, symbols)
+    let TypedExpr { expr, r#type } = typecheck_expr_and_convert(from, symbols)
         .context("Failed to typecheck from argument in implicit cast.")?;
 
     if r#type.is_pointer() && target.is_float() || target.is_pointer() && r#type.is_float() {
@@ -944,7 +946,7 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
             let TypedExpr {
                 expr: _,
                 r#type: left_t,
-            } = typecheck_expr(lvalue, symbols)
+            } = typecheck_expr_and_convert(lvalue, symbols)
                 .context("Failed to typecheck lvalue in assignment.")?;
 
             // FIXME: Lazy clone :(
@@ -961,8 +963,12 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
             })
         }
         ast::Expr::Unary { op, expr } => {
-            let TypedExpr { expr, r#type } = typecheck_expr(expr, symbols)
-                .context("Failed to typecheck nested unary expression.")?;
+            let TypedExpr { expr, r#type } = match op {
+                ast::UnaryOp::AddrOf => typecheck_expr(expr, symbols),
+                _ => typecheck_expr_and_convert(expr, symbols),
+            }
+            .context("Failed to typecheck nested unary expression.")?;
+
             ensure!(
                 !(op.is_bitwise()
                     && matches!(
@@ -1024,12 +1030,12 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
             let TypedExpr {
                 expr: left,
                 r#type: left_t,
-            } = typecheck_expr(left, symbols)
+            } = typecheck_expr_and_convert(left, symbols)
                 .context("Failed to typecheck lefthand argument of binary operation.")?;
             let TypedExpr {
                 expr: right,
                 r#type: right_t,
-            } = typecheck_expr(right, symbols)
+            } = typecheck_expr_and_convert(right, symbols)
                 .context("Failed to typecheck righthand argument of binary operation.")?;
 
             // Evaluate all operands in a boolean context.
@@ -1163,13 +1169,13 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
             let TypedExpr {
                 expr: then_expr,
                 r#type: then_type,
-            } = typecheck_expr(then, symbols)
+            } = typecheck_expr_and_convert(then, symbols)
                 .context("Failed to typecheck ternary expression then branch.")?;
 
             let TypedExpr {
                 expr: else_expr,
                 r#type: else_type,
-            } = typecheck_expr(r#else, symbols)
+            } = typecheck_expr_and_convert(r#else, symbols)
                 .context("Failed to typecheck ternary expression else branch.")?;
 
             let common_t = if then_type.is_pointer() || else_type.is_pointer() {
@@ -1237,8 +1243,8 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
             _ => bail!("Could not find symbol with name {name}."),
         },
         ast::Expr::Cast { target, exp } => {
-            let TypedExpr { expr, r#type } =
-                typecheck_expr(exp, symbols).context("Failed to typecheck casted expression.")?;
+            let TypedExpr { expr, r#type } = typecheck_expr_and_convert(exp, symbols)
+                .context("Failed to typecheck casted expression.")?;
 
             if target.is_pointer() && r#type.is_float() {
                 bail!("Cannot cast floating point number to pointer")

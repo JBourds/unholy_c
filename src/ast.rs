@@ -1040,7 +1040,7 @@ impl BaseType {
         }
     }
 
-    pub fn int(nbytes: usize, signed: Option<bool>) -> Self {
+    pub const fn int(nbytes: usize, signed: Option<bool>) -> Self {
         Self::Int { nbytes, signed }
     }
 
@@ -1208,11 +1208,14 @@ impl PartialEq for Type {
 impl Type {
     pub const PTR_ALIGNMENT: NonZeroUsize =
         NonZeroUsize::new(core::mem::size_of::<usize>()).unwrap();
+
+    pub const PTRDIFF_T: Self = Self::int(8, Some(false));
+
     pub fn bool() -> Self {
         Self::int(core::mem::size_of::<i32>(), None)
     }
 
-    pub fn int(nbytes: usize, signed: Option<bool>) -> Self {
+    pub const fn int(nbytes: usize, signed: Option<bool>) -> Self {
         Self {
             base: BaseType::int(nbytes, signed),
             alignment: NonZeroUsize::new(nbytes).unwrap(),

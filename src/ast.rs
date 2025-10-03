@@ -732,6 +732,7 @@ impl Expr {
                     op: UnaryOp::Deref,
                     ..
                 }
+                | Self::Subscript { .. }
         )
     }
 

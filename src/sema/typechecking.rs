@@ -1049,6 +1049,75 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
                     r#type: ast::Type::bool(),
                 });
             }
+            match (*op, left_t.clone(), right_t.clone()) {
+                // ptr +/- int
+                (op @ ast::BinaryOp::Add | op @ ast::BinaryOp::Subtract, left_t, right_t)
+                    if left_t.is_pointer() && right_t.is_integer() =>
+                {
+                    return Ok(TypedExpr {
+                        expr: ast::Expr::Binary {
+                            op,
+                            left: Box::new(left),
+                            right: Box::new(ast::Expr::Cast {
+                                target: ast::Type::PTRDIFF_T,
+                                exp: Box::new(right.clone()),
+                            }),
+                        },
+                        r#type: left_t,
+                    });
+                }
+                // ptr (+/-)= int
+                (
+                    op @ ast::BinaryOp::AddAssign | op @ ast::BinaryOp::SubAssign,
+                    left_t,
+                    right_t,
+                ) if left_t.is_pointer() && right_t.is_integer() && left.is_lvalue() => {
+                    return Ok(TypedExpr {
+                        expr: ast::Expr::Assignment {
+                            lvalue: Box::new(left.clone()),
+                            rvalue: Box::new(ast::Expr::Binary {
+                                op,
+                                left: Box::new(left),
+                                right: Box::new(ast::Expr::Cast {
+                                    target: ast::Type::PTRDIFF_T,
+                                    exp: Box::new(right.clone()),
+                                }),
+                            }),
+                        },
+                        r#type: left_t,
+                    });
+                }
+                // int + ptr
+                (ast::BinaryOp::Add, left_t, right_t)
+                    if left_t.is_integer() && right_t.is_pointer() =>
+                {
+                    return Ok(TypedExpr {
+                        expr: ast::Expr::Binary {
+                            op: ast::BinaryOp::Add,
+                            left: Box::new(ast::Expr::Cast {
+                                target: ast::Type::PTRDIFF_T,
+                                exp: Box::new(left.clone()),
+                            }),
+                            right: Box::new(right),
+                        },
+                        r#type: right_t,
+                    });
+                }
+                // ptr1 - ptr2
+                (ast::BinaryOp::Subtract, left_t, right_t)
+                    if left_t.is_pointer() && right_t.is_pointer() && left_t == right_t =>
+                {
+                    return Ok(TypedExpr {
+                        expr: ast::Expr::Binary {
+                            op: ast::BinaryOp::Subtract,
+                            left: Box::new(left),
+                            right: Box::new(right),
+                        },
+                        r#type: ast::Type::PTRDIFF_T,
+                    });
+                }
+                _ => {} // Not a 'valid' pointer arithmitic case
+            }
 
             let common_t = if left_t.is_pointer() || right_t.is_pointer() {
                 ensure!(

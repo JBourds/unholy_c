@@ -1243,6 +1243,10 @@ impl Type {
         )
     }
 
+    pub fn is_integer(&self) -> bool {
+        matches!(self.base, BaseType::Int { .. },)
+    }
+
     pub fn is_float(&self) -> bool {
         matches!(self.base, BaseType::Float(_) | BaseType::Double(_))
     }

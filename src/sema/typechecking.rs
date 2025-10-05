@@ -1116,6 +1116,24 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
                         r#type: ast::Type::PTRDIFF_T,
                     });
                 }
+                // ptr1 </<=/>/>= ptr2
+                (
+                    op @ ast::BinaryOp::LessThan
+                    | op @ ast::BinaryOp::LessOrEqual
+                    | op @ ast::BinaryOp::GreaterThan
+                    | op @ ast::BinaryOp::GreaterOrEqual,
+                    left_t,
+                    right_t,
+                ) if left_t.is_pointer() && right_t.is_pointer() => {
+                    return Ok(TypedExpr {
+                        expr: ast::Expr::Binary {
+                            op,
+                            left: Box::new(left),
+                            right: Box::new(right),
+                        },
+                        r#type: ast::Type::bool(),
+                    });
+                }
                 _ => {} // Not a 'valid' pointer arithmitic case
             }
 

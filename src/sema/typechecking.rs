@@ -282,6 +282,15 @@ impl SymbolTable {
         }
     }
 
+    pub fn set(&mut self, key: Rc<String>, entry: SymbolEntry) -> Option<SymbolEntry> {
+        let local = self.get_local(&key);
+        if local.is_some() {
+            self.set_local(key, entry)
+        } else {
+            self.set_global(key, entry)
+        }
+    }
+
     fn insert_scope(&mut self, key: Rc<String>, entry: SymbolEntry) -> Option<SymbolEntry> {
         // Declare local static vars in global scope as well so it is
         // easy to iterate over (unique names make this legal)
@@ -308,8 +317,25 @@ impl SymbolTable {
         None
     }
 
+    fn set_local(&mut self, key: Rc<String>, entry: SymbolEntry) -> Option<SymbolEntry> {
+        for scope in self.scopes.iter_mut().rev() {
+            if let Some(_) = scope.get(&key) {
+                return scope.insert(key, entry);
+            }
+        }
+        None
+    }
+
     fn get_global(&self, key: &Rc<String>) -> Option<&SymbolEntry> {
         self.global.get(key)
+    }
+
+    fn set_global(&mut self, key: Rc<String>, entry: SymbolEntry) -> Option<SymbolEntry> {
+        if let Some(..) = self.global.get(&key) {
+            self.global.insert(key, entry)
+        } else {
+            None
+        }
     }
 
     fn get_decl_info(

@@ -78,7 +78,7 @@ impl StaticVariable {
                 sema::tc::InitialValue::Initial(i) => Some(StaticVariable {
                     identifier: name,
                     external_linkage: *external_linkage,
-                    init: Some(Rc::clone(i)),
+                    init: todo!(), // Some(Rc::clone(i)),
                 }),
                 sema::tc::InitialValue::Tentative => Some(StaticVariable {
                     identifier: name,

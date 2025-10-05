@@ -1363,7 +1363,41 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
                 is_const: true,
             },
         }),
-        ast::Expr::Subscript { expr, index } => todo!(),
+        ast::Expr::Subscript { expr, index } => {
+            let TypedExpr {
+                expr,
+                r#type: expr_t,
+            } = typecheck_expr_and_convert(expr, symbols)?;
+            let TypedExpr {
+                expr: index,
+                r#type: index_t,
+            } = typecheck_expr_and_convert(index, symbols)?;
+            match (expr_t, index_t) {
+                (expr_t, index_t) if expr_t.is_pointer() && index_t.is_integer() => Ok(TypedExpr {
+                    expr: ast::Expr::Subscript {
+                        expr: Box::new(expr),
+                        index: Box::new(ast::Expr::Cast {
+                            target: ast::Type::PTRDIFF_T,
+                            exp: Box::new(index),
+                        }),
+                    },
+                    r#type: expr_t.deref(),
+                }),
+                (expr_t, index_t) if expr_t.is_integer() && index_t.is_pointer() => Ok(TypedExpr {
+                    expr: ast::Expr::Subscript {
+                        expr: Box::new(ast::Expr::Cast {
+                            target: ast::Type::PTRDIFF_T,
+                            exp: Box::new(expr),
+                        }),
+                        index: Box::new(index),
+                    },
+                    r#type: index_t.deref(),
+                }),
+                (expr_t, index_t) => bail!(
+                    "Subscript takes one pointer type and one integer type, got: {expr_t:#?}, {index_t:#?}"
+                ),
+            }
+        }
     }
 }
 

@@ -231,6 +231,24 @@ impl Initializer {
             }
         }
     }
+
+    pub fn zero_initializer(r#type: &Type) -> Result<Self> {
+        if r#type.is_array() {
+            match &r#type.base {
+                BaseType::Array { element, size } => Ok(Self::CompundInit(
+                    (0..*size)
+                        .into_iter()
+                        .map(|_| Self::zero_initializer(element))
+                        .collect::<Result<Vec<Self>>>()?,
+                )),
+                _ => todo!(),
+            }
+        } else {
+            Ok(Self::SingleInit(Box::new(Expr::Constant(
+                Constant::const_from_type(r#type, 0)?,
+            ))))
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]

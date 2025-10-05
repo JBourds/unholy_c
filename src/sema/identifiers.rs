@@ -110,7 +110,7 @@ fn resolve_local_var_decl(
     } else {
         let unique_name = resolve_automatic(decl.name, ident_map, make_temporary)?;
         let init = match decl.init {
-            Some(expr) => todo!(), // Some(resolve_expr(expr, ident_map)?),
+            Some(init) => Some(resolve_init(init, ident_map)?),
             None => None,
         };
 
@@ -119,6 +119,23 @@ fn resolve_local_var_decl(
             init,
             ..decl
         })
+    }
+}
+
+fn resolve_init(
+    init: ast::Initializer,
+    ident_map: &mut HashMap<Rc<String>, IdentEntry>,
+) -> Result<ast::Initializer> {
+    match init {
+        ast::Initializer::SingleInit(expr) => Ok(ast::Initializer::SingleInit(
+            resolve_expr(*expr, &ident_map)?.into(),
+        )),
+        ast::Initializer::CompundInit(inits) => Ok(ast::Initializer::CompundInit(
+            inits
+                .into_iter()
+                .map(|i| resolve_init(i, ident_map))
+                .collect::<Result<Vec<ast::Initializer>>>()?,
+        )),
     }
 }
 
@@ -415,6 +432,9 @@ fn resolve_expr(expr: ast::Expr, ident_map: &HashMap<Rc<String>, IdentEntry>) ->
             target,
             exp: Box::new(resolve_expr(*exp, ident_map)?),
         }),
-        ast::Expr::Subscript { expr, index } => todo!(),
+        ast::Expr::Subscript { expr, index } => Ok(ast::Expr::Subscript {
+            expr: resolve_expr(*expr, ident_map)?.into(),
+            index: resolve_expr(*index, ident_map)?.into(),
+        }),
     }
 }

@@ -56,7 +56,7 @@ impl Attribute {
                 },
                 Scope::Local(..) => match var.storage_class {
                     Some(ast::StorageClass::Static) => {
-                        InitialValue::Initial(vec![0; var.r#type.base.nbytes()].into())
+                        InitialValue::Initial(vec![vec![0; var.r#type.base.nbytes()].into()])
                     } // Local Statics with no initilizer get defaulted to zero
                     Some(ast::StorageClass::Extern) | None => InitialValue::None,
                     _ => unreachable!(
@@ -128,7 +128,7 @@ impl Attribute {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum InitialValue {
-    Initial(Rc<[u8]>),
+    Initial(Vec<Rc<[u8]>>),
     Tentative,
     None,
 }
@@ -154,26 +154,78 @@ impl PartialOrd for InitialValue {
 }
 
 impl InitialValue {
+    fn from_initializer(
+        r#type: &ast::Type,
+        init: &ast::Initializer,
+        symbols: &mut SymbolTable,
+    ) -> Result<Self> {
+        match (r#type, init) {
+            (_, ast::Initializer::SingleInit(init)) => Self::from_expr(r#type, init, symbols),
+            (
+                ast::Type {
+                    base: ast::BaseType::Array { element, size },
+                    ..
+                },
+                ast::Initializer::CompundInit(inits),
+            ) => {
+                ensure!(inits.len() <= *size, "Too many initializers in static init");
+                let mut new_inits = vec![];
+                for init in inits.into_iter() {
+                    match Self::from_initializer(element, init, symbols)? {
+                        Self::Initial(initial) => {
+                            new_inits.extend(initial);
+                        }
+                        _ => unreachable!(),
+                    }
+                }
+
+                Ok(Self::Initial(new_inits))
+            }
+            _ => bail!("Cannot static init non-array with compound initializer"),
+        }
+    }
     // TODO: Make this not dependent on host computer byte ordering
     fn from_expr(r#type: &ast::Type, expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<Self> {
         let expr = convert_by_assignment(expr, r#type, symbols).context(
             "Failed to perform implicit casting when constructing initial value for declaration",
         )?;
         if is_null_pointer_constant(&expr) {
-            return Ok(InitialValue::Initial(0usize.to_ne_bytes().to_vec().into()));
+            return Ok(InitialValue::Initial(vec![
+                0usize.to_ne_bytes().to_vec().into(),
+            ]));
         }
         let val = const_eval::eval(expr.clone()).context("Failed to const eval expression")?;
         match val {
-            ast::Constant::I8(val) => Ok(InitialValue::Initial(val.to_ne_bytes().to_vec().into())),
-            ast::Constant::I16(val) => Ok(InitialValue::Initial(val.to_ne_bytes().to_vec().into())),
-            ast::Constant::I32(val) => Ok(InitialValue::Initial(val.to_ne_bytes().to_vec().into())),
-            ast::Constant::I64(val) => Ok(InitialValue::Initial(val.to_ne_bytes().to_vec().into())),
-            ast::Constant::U8(val) => Ok(InitialValue::Initial(val.to_ne_bytes().to_vec().into())),
-            ast::Constant::U16(val) => Ok(InitialValue::Initial(val.to_ne_bytes().to_vec().into())),
-            ast::Constant::U32(val) => Ok(InitialValue::Initial(val.to_ne_bytes().to_vec().into())),
-            ast::Constant::U64(val) => Ok(InitialValue::Initial(val.to_ne_bytes().to_vec().into())),
-            ast::Constant::F32(val) => Ok(InitialValue::Initial(val.to_ne_bytes().to_vec().into())),
-            ast::Constant::F64(val) => Ok(InitialValue::Initial(val.to_ne_bytes().to_vec().into())),
+            ast::Constant::I8(val) => Ok(InitialValue::Initial(vec![
+                val.to_ne_bytes().to_vec().into(),
+            ])),
+            ast::Constant::I16(val) => Ok(InitialValue::Initial(vec![
+                val.to_ne_bytes().to_vec().into(),
+            ])),
+            ast::Constant::I32(val) => Ok(InitialValue::Initial(vec![
+                val.to_ne_bytes().to_vec().into(),
+            ])),
+            ast::Constant::I64(val) => Ok(InitialValue::Initial(vec![
+                val.to_ne_bytes().to_vec().into(),
+            ])),
+            ast::Constant::U8(val) => Ok(InitialValue::Initial(vec![
+                val.to_ne_bytes().to_vec().into(),
+            ])),
+            ast::Constant::U16(val) => Ok(InitialValue::Initial(vec![
+                val.to_ne_bytes().to_vec().into(),
+            ])),
+            ast::Constant::U32(val) => Ok(InitialValue::Initial(vec![
+                val.to_ne_bytes().to_vec().into(),
+            ])),
+            ast::Constant::U64(val) => Ok(InitialValue::Initial(vec![
+                val.to_ne_bytes().to_vec().into(),
+            ])),
+            ast::Constant::F32(val) => Ok(InitialValue::Initial(vec![
+                val.to_ne_bytes().to_vec().into(),
+            ])),
+            ast::Constant::F64(val) => Ok(InitialValue::Initial(vec![
+                val.to_ne_bytes().to_vec().into(),
+            ])),
         }
     }
 
@@ -183,14 +235,14 @@ impl InitialValue {
         symbols: &mut SymbolTable,
     ) -> Result<Option<Self>> {
         match (scope, var.init.as_ref()) {
-            (Scope::Global, Some(expr)) => {
-                let init = Self::from_expr(&var.r#type, todo!() /* expr*/, symbols)
+            (Scope::Global, Some(init)) => {
+                let init = Self::from_initializer(&var.r#type, init, symbols)
                     .context(format!("Evaluating expression for \"{}\" failed", var.name))?;
                 Ok(Some(init))
             }
-            (Scope::Local(..), Some(expr)) => match var.storage_class {
+            (Scope::Local(..), Some(init)) => match var.storage_class {
                 Some(ast::StorageClass::Static) => Ok(Some(
-                    Self::from_expr(&var.r#type, todo!() /* expr */, symbols)
+                    Self::from_initializer(&var.r#type, init, symbols)
                         .context(format!("Evaluating expression for \"{}\" failed", var.name))?,
                 )),
                 None => Ok(None), // Locals technically dont have initial values
@@ -208,9 +260,9 @@ impl InitialValue {
             },
             (Scope::Local(..), None) => match var.storage_class {
                 // Local Statics with no initilizer get defaulted to zero
-                Some(ast::StorageClass::Static) => Ok(Some(InitialValue::Initial(
+                Some(ast::StorageClass::Static) => Ok(Some(InitialValue::Initial(vec![
                     vec![0; var.r#type.base.nbytes()].into(),
-                ))),
+                ]))),
                 // Resolve any existing declaration's initial value
                 Some(ast::StorageClass::Extern) => {
                     if let Some(entry) = symbols.get(&var.name) {
@@ -1048,7 +1100,7 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
                 | op @ ast::UnaryOp::PostDec
                 | op @ ast::UnaryOp::PreInc
                 | op @ ast::UnaryOp::PreDec
-                    if r#type.is_function() =>
+                    if r#type.is_function() || r#type.is_array() =>
                 {
                     bail!("Cannot apply unary {op:?} operator to function")
                 }
@@ -1469,42 +1521,6 @@ fn typecheck_fun_decl(decl: ast::FunDecl, symbols: &mut SymbolTable) -> Result<a
         !decl.r#type.is_array(),
         "Cannot have functions return array types",
     );
-
-    for param in decl.params.iter() {
-        match param {
-            Some(param) => {
-                let symbol = symbols
-                    .get(param)
-                    .expect("Parameter should have been already declared at this point")
-                    .clone();
-                match symbol.r#type {
-                    ast::Type {
-                        base: ast::BaseType::Array { element, .. },
-                        is_const,
-                        ..
-                    } => {
-                        let r#type = ast::Type {
-                            base: ast::BaseType::Ptr {
-                                to: element,
-                                is_restrict: false,
-                            },
-                            alignment: ast::Type::PTR_ALIGNMENT,
-                            is_const,
-                        };
-                        ensure!(
-                            matches!(
-                                symbols.set(Rc::clone(param), SymbolEntry { r#type, ..symbol }),
-                                Some(..)
-                            ),
-                            "Cannot update parameter with no entry in the symbol table!"
-                        );
-                    }
-                    _ => {}
-                }
-            }
-            _ => {}
-        }
-    }
 
     symbols.declare_fun(&decl)?;
     // Treat parameters as declarations without values

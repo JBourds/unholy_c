@@ -924,8 +924,8 @@ fn boolify(expr: Expr, r#type: &Type, symbols: &mut SymbolTable) -> Result<Expr>
     }
 }
 
-fn typecheck_expr_and_convert(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedExpr> {
-    let TypedExpr { expr, r#type } = typecheck_expr(expr, symbols)?;
+fn maybe_decay_expr(texpr: TypedExpr) -> TypedExpr {
+    let TypedExpr { expr, r#type } = texpr;
 
     match r#type {
         ast::Type {
@@ -946,10 +946,16 @@ fn typecheck_expr_and_convert(expr: &ast::Expr, symbols: &mut SymbolTable) -> Re
                 alignment: Type::PTR_ALIGNMENT,
                 is_const,
             };
-            Ok(TypedExpr { expr, r#type })
+            TypedExpr { expr, r#type }
         }
-        _ => Ok(TypedExpr { expr, r#type }),
+        _ => TypedExpr { expr, r#type },
     }
+}
+
+fn typecheck_expr_and_convert(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedExpr> {
+    let texpr = typecheck_expr(expr, symbols)?;
+
+    Ok(maybe_decay_expr(texpr))
 }
 
 fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedExpr> {
@@ -1458,6 +1464,48 @@ fn typecheck_fun_decl(decl: ast::FunDecl, symbols: &mut SymbolTable) -> Result<a
     // Special case: Push scope and iterate over block items here so the
     // function parameters get put into the same scope as the block items
     symbols.push_scope();
+
+    ensure!(
+        !decl.r#type.is_array(),
+        "Cannot have functions return array types",
+    );
+
+    for param in decl.params.iter() {
+        match param {
+            Some(param) => {
+                let symbol = symbols
+                    .get(param)
+                    .expect("Parameter should have been already declared at this point")
+                    .clone();
+                match symbol.r#type {
+                    ast::Type {
+                        base: ast::BaseType::Array { element, .. },
+                        is_const,
+                        ..
+                    } => {
+                        let r#type = ast::Type {
+                            base: ast::BaseType::Ptr {
+                                to: element,
+                                is_restrict: false,
+                            },
+                            alignment: ast::Type::PTR_ALIGNMENT,
+                            is_const,
+                        };
+                        ensure!(
+                            matches!(
+                                symbols.set(Rc::clone(param), SymbolEntry { r#type, ..symbol }),
+                                Some(..)
+                            ),
+                            "Cannot update parameter with no entry in the symbol table!"
+                        );
+                    }
+                    _ => {}
+                }
+            }
+            _ => {}
+        }
+    }
+
     symbols.declare_fun(&decl)?;
     // Treat parameters as declarations without values
     let block = if let Some(block) = decl.block {

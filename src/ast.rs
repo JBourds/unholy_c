@@ -94,7 +94,7 @@ impl From<&FunDecl> for Type {
 
 impl FunDecl {
     #[allow(clippy::type_complexity)]
-    pub fn signature(&self) -> Result<Vec<(&Type, Option<&Rc<String>>)>> {
+    pub fn signature(&self) -> Result<Vec<(Type, Option<&Rc<String>>)>> {
         if let Type {
             base: BaseType::Fun {
                 ref param_types, ..
@@ -109,7 +109,7 @@ impl FunDecl {
             Ok(param_types
                 .iter()
                 .zip(self.params.iter())
-                .map(|(r#type, name)| (r#type, name.as_ref()))
+                .map(|(r#type, name)| (r#type.clone().maybe_decay(), name.as_ref()))
                 .collect())
         } else {
             bail!("ast.FunDecl.signature(): How did we get here? This match should always work!");
@@ -1051,7 +1051,7 @@ impl BaseType {
             BaseType::Float(nbytes) => *nbytes,
             BaseType::Double(nbytes) => *nbytes,
             BaseType::Ptr { .. } => core::mem::size_of::<usize>(),
-            BaseType::Array { .. } => unimplemented!(),
+            BaseType::Array { element, size } => element.base.nbytes() * size,
             BaseType::Fun { .. } => unreachable!(),
             BaseType::Struct => unreachable!(),
             BaseType::Void => unreachable!(),
@@ -1286,6 +1286,22 @@ impl Type {
             unreachable!()
         };
         *to
+    }
+
+    pub fn maybe_decay(self) -> Self {
+        match self {
+            Self {
+                base: BaseType::Array { element, .. },
+                ..
+            } => Self {
+                base: BaseType::Ptr {
+                    to: element,
+                    is_restrict: false,
+                },
+                ..self
+            },
+            _ => self,
+        }
     }
 }
 

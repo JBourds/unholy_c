@@ -1545,18 +1545,50 @@ fn typecheck_var_decl(decl: ast::VarDecl, symbols: &mut SymbolTable) -> Result<a
         decl.name
     ))?;
     let target = entry.r#type;
-    let init = if let Some(init) = decl.init {
-        Some(
-            convert_by_assignment(todo!() /* &init */, &target, symbols).context(format!(
-                "Failed to typecheck initialization for variable \"{}\": {init:#?}",
-                decl.name
-            ))?,
-        )
-    } else {
-        None
+
+    let init = match decl.init {
+        Some(init) => Some(typecheck_init(&target, init, symbols, &decl.name)?),
+        None => None,
     };
-    Ok(ast::VarDecl {
-        init: todo!(), /* init */
-        ..decl
-    })
+    Ok(ast::VarDecl { init, ..decl })
+}
+
+fn typecheck_init(
+    target: &Type,
+    init: ast::Initializer,
+    symbols: &mut SymbolTable,
+    name: &Rc<String>,
+) -> Result<ast::Initializer> {
+    match (target, init) {
+        (_, ast::Initializer::SingleInit(expr)) => Ok(ast::Initializer::SingleInit(
+            convert_by_assignment(&expr, target, symbols)
+                .context(format!(
+                    "Failed to typecheck initialization for variable \"{}\": {:#?}",
+                    name,
+                    ast::Initializer::SingleInit(expr)
+                ))?
+                .into(),
+        )),
+
+        (
+            ast::Type {
+                base: ast::BaseType::Array { element, size },
+                ..
+            },
+            ast::Initializer::CompundInit(inits),
+        ) => {
+            if inits.len() > *size {
+                bail!("Initializer {inits:#?} has to many elements for array of len {size}");
+            }
+            let mut inits = inits
+                .into_iter()
+                .map(|i| typecheck_init(&element, i, symbols, name))
+                .collect::<Result<Vec<ast::Initializer>>>()?;
+            while inits.len() < *size {
+                inits.push(ast::Initializer::zero_initializer(&element)?);
+            }
+            Ok(ast::Initializer::CompundInit(inits))
+        }
+        _ => bail!("Cannot assign compound initializer to non array var decl"),
+    }
 }

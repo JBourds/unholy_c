@@ -866,6 +866,10 @@ fn try_implicit_cast(
         bail!("Cannot convert between double and pointer.");
     }
 
+    if target.is_array() {
+        bail!("try_implicit_case: Cannot cast to array type");
+    }
+
     if r#type != *target {
         Ok(ast::Expr::Cast {
             target: ast::Type {
@@ -1334,11 +1338,15 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
                 .context("Failed to typecheck casted expression.")?;
 
             if target.is_pointer() && r#type.is_float() {
-                bail!("Cannot cast floating point number to pointer")
+                bail!("Cannot cast floating point number to pointer");
             }
 
             if target.is_float() && r#type.is_pointer() {
-                bail!("Cannot cast pointer to floating point number")
+                bail!("Cannot cast pointer to floating point number");
+            }
+
+            if target.is_array() {
+                bail!("Cannot cast to array");
             }
 
             let expr = if *target != r#type {

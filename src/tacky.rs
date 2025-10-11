@@ -314,6 +314,11 @@ pub enum Instruction {
         scale: usize,
         dst: Val,
     },
+    CopyToOffset {
+        src: Val,
+        dst: Rc<String>,
+        offset: usize,
+    },
 }
 
 impl Instruction {

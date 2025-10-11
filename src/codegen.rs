@@ -2427,6 +2427,7 @@ impl Instruction<Initial> {
                 ]
             }
             tacky::Instruction::AddPtr { .. } => todo!(),
+            tacky::Instruction::CopyToOffset { .. } => todo!(),
         }
     }
 }

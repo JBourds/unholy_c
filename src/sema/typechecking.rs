@@ -901,7 +901,7 @@ fn typecheck_stmt(
                 let TypedExpr { expr: condition, r#type: condition_type } = typecheck_expr_and_convert(&condition, symbols)
                     .context("Failed to typecheck switch expression.")?;
 
-                if matches!(condition_type.base, ast::BaseType::Fun { .. }) {
+                if condition_type.is_function() || condition_type.is_pointer() {
                     bail!("Cannot switch on {condition:#?} as it has type {condition_type:#?}");
                 }
                 let body = typecheck_stmt(*body, symbols, function)

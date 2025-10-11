@@ -2426,6 +2426,7 @@ impl Instruction<Initial> {
                     new_instr(InstructionType::Label(end_label)),
                 ]
             }
+            tacky::Instruction::AddPtr { .. } => todo!(),
         }
     }
 }

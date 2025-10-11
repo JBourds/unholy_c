@@ -308,6 +308,12 @@ pub enum Instruction {
         args: Vec<Val>,
         dst: Val,
     },
+    AddPtr {
+        ptr: Val,
+        index: Val,
+        scale: usize,
+        dst: Val,
+    },
 }
 
 impl Instruction {

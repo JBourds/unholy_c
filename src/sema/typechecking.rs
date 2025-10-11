@@ -1231,6 +1231,12 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
                         r#type: ast::Type::bool(),
                     });
                 }
+                (ast::BinaryOp::Subtract, left_t, right_t)
+                    if !left_t.is_pointer() && right_t.is_pointer() =>
+                {
+                    bail!("Cannot subtract pointer from non pointer type")
+                }
+
                 _ => {} // Not a 'valid' pointer arithmitic case
             }
 

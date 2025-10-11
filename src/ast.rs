@@ -2212,6 +2212,13 @@ impl BinaryOp {
             | Self::GreaterOrEqual)
     }
 
+    pub fn is_add_sub(&self) -> bool {
+        matches!(
+            *self,
+            Self::Add | Self::AddAssign | Self::Subtract | Self::SubAssign
+        )
+    }
+
     pub fn is_bitwise(&self) -> bool {
         matches!(
             self,

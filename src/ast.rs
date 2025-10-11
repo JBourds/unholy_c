@@ -1039,6 +1039,16 @@ impl PartialEq for BaseType {
                     is_restrict: r_is_restrict,
                 },
             ) => *l_to == *r_to && l_is_restrict == r_is_restrict,
+            (
+                Self::Array {
+                    element: l_element,
+                    size: l_size,
+                },
+                Self::Array {
+                    element: r_element,
+                    size: r_size,
+                },
+            ) => *l_element == *r_element && l_size == r_size,
             _ => core::mem::discriminant(self) == core::mem::discriminant(other),
         }
     }

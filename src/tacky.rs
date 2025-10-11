@@ -1145,21 +1145,40 @@ impl Expr {
                     } = Self::parse_with_and_convert(*right, symbols, make_temp_var);
                     instructions.extend(right_instructions);
 
+                    let left_t = left_val.get_type(symbols);
+                    let right_t = right_val.get_type(symbols);
+
                     let dst_type = if op.is_relational() {
                         ast::Type::bool()
                     } else {
-                        left_val.get_type(symbols)
+                        left_t.clone()
                     };
 
                     // FIXME: Same as above, not exactly sure where the type casting happens
                     let dst = Function::make_tacky_temp_var(dst_type, symbols, make_temp_var);
 
-                    instructions.push(Instruction::Binary {
-                        op: op.into(),
-                        src1: left_val,
-                        src2: right_val,
-                        dst: dst.clone(),
-                    });
+                    // pointer arithmetic uses special instruction
+                    // make sure the pointer is always `src`
+                    if left_t.is_pointer() || right_t.is_pointer() && op.is_add_sub() {
+                        let (ptr, index, scale) = if left_t.is_pointer() {
+                            (left_val, right_val, left_t.size_of())
+                        } else {
+                            (right_val, left_val, right_t.size_of())
+                        };
+                        instructions.push(Instruction::AddPtr {
+                            ptr,
+                            index,
+                            scale,
+                            dst: dst.clone(),
+                        });
+                    } else {
+                        instructions.push(Instruction::Binary {
+                            op: op.into(),
+                            src1: left_val,
+                            src2: right_val,
+                            dst: dst.clone(),
+                        });
+                    }
                     ExprResult::PlainOperand(Self {
                         instructions,
                         val: dst,

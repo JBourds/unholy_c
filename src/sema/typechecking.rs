@@ -1108,10 +1108,15 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
                 op @ ast::UnaryOp::PostInc
                 | op @ ast::UnaryOp::PostDec
                 | op @ ast::UnaryOp::PreInc
-                | op @ ast::UnaryOp::PreDec
-                    if r#type.is_function() || r#type.is_array() =>
-                {
-                    bail!("Cannot apply unary {op:?} operator to function")
+                | op @ ast::UnaryOp::PreDec => {
+                    if r#type.is_function() || r#type.is_array() {
+                        bail!("Cannot apply unary {op:?} operator to {type:#?}");
+                    }
+
+                    if !expr.is_lvalue() {
+                        bail!("Cannot apply unary {op:?} to non-lvalues");
+                    }
+                    r#type
                 }
                 _ => r#type,
             };

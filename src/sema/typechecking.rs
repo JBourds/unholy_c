@@ -1597,6 +1597,9 @@ fn typecheck_init(
     name: &Rc<String>,
 ) -> Result<ast::Initializer> {
     match (target, init) {
+        (target, ast::Initializer::SingleInit(..)) if target.is_array() => {
+            bail!("Arrays cannot be initialized with a `SingleInit`")
+        }
         (_, ast::Initializer::SingleInit(expr)) => Ok(ast::Initializer::SingleInit(
             convert_by_assignment(&expr, target, symbols)
                 .context(format!(

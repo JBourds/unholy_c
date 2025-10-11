@@ -987,7 +987,10 @@ fn maybe_decay_expr(texpr: TypedExpr) -> TypedExpr {
         } => {
             let expr = ast::Expr::Unary {
                 op: ast::UnaryOp::AddrOf,
-                expr: expr.into(),
+                expr: Box::new(ast::Expr::Subscript {
+                    expr: expr.into(),
+                    index: Box::new(ast::Expr::Constant(ast::Constant::U64(0))),
+                }),
             };
 
             let r#type = Type {

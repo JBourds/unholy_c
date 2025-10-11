@@ -1534,7 +1534,7 @@ fn typecheck_fun_decl(decl: ast::FunDecl, symbols: &mut SymbolTable) -> Result<a
     symbols.push_scope();
 
     ensure!(
-        !decl.r#type.is_array(),
+        !matches!(decl.r#type.base.clone(), ast::BaseType::Fun { ret_t, .. } if ret_t.is_array()),
         "Cannot have functions return array types",
     );
 

@@ -633,10 +633,11 @@ impl SymbolTable {
 }
 
 fn is_null_pointer_constant(e: &ast::Expr) -> bool {
-    if let ast::Expr::Cast { target, exp } = e {
-        if target.is_pointer() && is_null_pointer_constant(exp) {
-            return true;
-        }
+    if let ast::Expr::Cast { target, exp } = e
+        && target.is_pointer()
+        && is_null_pointer_constant(exp)
+    {
+        return true;
     }
     let Ok(c) = const_eval::eval(e.clone()) else {
         return false;

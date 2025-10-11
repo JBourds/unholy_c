@@ -1298,6 +1298,17 @@ impl Type {
                     to: element,
                     is_restrict: false,
                 },
+                alignment: Self::PTR_ALIGNMENT,
+                ..self
+            },
+            Self {
+                base: BaseType::Fun { ret_t, param_types },
+                ..
+            } => Self {
+                base: BaseType::Fun {
+                    ret_t,
+                    param_types: param_types.into_iter().map(|t| t.maybe_decay()).collect(),
+                },
                 ..self
             },
             _ => self,

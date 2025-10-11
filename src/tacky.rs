@@ -1160,11 +1160,24 @@ impl Expr {
                     // pointer arithmetic uses special instruction
                     // make sure the pointer is always `src`
                     if left_t.is_pointer() || right_t.is_pointer() && op.is_add_sub() {
-                        let (ptr, index, scale) = if left_t.is_pointer() {
+                        let (ptr, mut index, scale) = if left_t.is_pointer() {
                             (left_val, right_val, left_t.size_of())
                         } else {
                             (right_val, left_val, right_t.size_of())
                         };
+                        if op.is_sub() {
+                            let negated_tmp = Function::make_tacky_temp_var(
+                                index.get_type(symbols),
+                                symbols,
+                                make_temp_var,
+                            );
+                            instructions.push(Instruction::Unary {
+                                op: UnaryOp::Negate,
+                                src: index,
+                                dst: negated_tmp.clone(),
+                            });
+                            index = negated_tmp;
+                        }
                         instructions.push(Instruction::AddPtr {
                             ptr,
                             index,

@@ -1251,6 +1251,16 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
                 _ => {} // Not a 'valid' pointer arithmitic case
             }
 
+            // Only allow null pointer constant comparisons with == or !=
+            if op.is_relational() && !matches!(op, ast::BinaryOp::Equal | ast::BinaryOp::NotEqual) {
+                ensure!(
+                    left_t.is_pointer() == right_t.is_pointer(),
+                    format!(
+                        "Error in \"{op:#?}\" comparison: lefthand side with type {left_t:#?} and righthand side with type {right_t:#?}."
+                    )
+                );
+            }
+
             let common_t = if left_t.is_pointer() || right_t.is_pointer() {
                 ensure!(
                     !matches!(

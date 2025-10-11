@@ -230,7 +230,7 @@ impl From<f64> for StaticConstant {
 pub struct StaticVariable {
     pub identifier: Rc<String>,
     pub global: bool,
-    pub init: Option<Rc<[u8]>>,
+    pub init: Vec<Rc<[u8]>>,
 }
 
 impl From<tacky::StaticVariable> for StaticVariable {

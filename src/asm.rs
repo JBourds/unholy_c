@@ -14,7 +14,7 @@ pub mod x64 {
         codegen::{self, Operand},
         tacky,
     };
-    use anyhow::{Result, bail};
+    use anyhow::{Result, bail, ensure};
     use std::fmt::Write;
 
     pub struct Generator;
@@ -64,8 +64,11 @@ pub mod x64 {
         if var.global {
             w.write_fmt(format_args!("\t.globl {}\n", var.identifier))?;
         }
-        let init_value = var.init.expect("all statics have some init after tacky?");
-        let in_bss = init_value.iter().all(|x| *x == 0);
+        ensure!(
+            !var.init.is_empty(),
+            "all statics have some init after tacky?"
+        );
+        let in_bss = var.init.iter().flat_map(|s| s.iter()).all(|x| *x == 0);
         if in_bss {
             w.write_fmt(format_args!("\t.bss\n"))?;
         } else {
@@ -77,17 +80,19 @@ pub mod x64 {
             w.write_fmt(format_args!("\t.zero {}\n", symbol.r#type.size_of()))?;
         } else {
             // FIXME: This is not how this should be done
-            let nbytes = symbol.r#type.size_of();
-            match nbytes {
-                8 => w.write_fmt(format_args!(
-                    "\t.quad {}\n",
-                    i64::from_le_bytes(init_value[0..nbytes].try_into().unwrap())
-                ))?,
-                4 => w.write_fmt(format_args!(
-                    "\t.long {}\n",
-                    i32::from_le_bytes(init_value[0..nbytes].try_into().unwrap())
-                ))?,
-                _ => unreachable!(),
+            for init in var.init.iter() {
+                let nbytes = symbol.r#type.size_of();
+                match nbytes {
+                    8 => w.write_fmt(format_args!(
+                        "\t.quad {}\n",
+                        i64::from_le_bytes(init[0..nbytes].try_into().unwrap())
+                    ))?,
+                    4 => w.write_fmt(format_args!(
+                        "\t.long {}\n",
+                        i32::from_le_bytes(init[0..nbytes].try_into().unwrap())
+                    ))?,
+                    _ => unreachable!(),
+                }
             }
         }
         w.write_char('\n')?;

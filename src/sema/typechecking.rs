@@ -317,8 +317,13 @@ impl SymbolTable {
     }
 
     fn new_entry(&mut self, decl: &ast::Declaration, scope: Scope) -> Result<SymbolEntry> {
+        let mut r#type: ast::Type = decl.into();
+
+        if matches!(decl, &ast::Declaration::FunDecl(..)) {
+            r#type = r#type.maybe_decay();
+        }
         Ok(SymbolEntry {
-            r#type: decl.into(),
+            r#type,
             defined: decl.defining(),
             scope,
             attribute: Attribute::from_decl_with_scope(decl, scope, self)?,
@@ -396,7 +401,7 @@ impl SymbolTable {
         match decl {
             ast::Declaration::FunDecl(fun) => (
                 Rc::clone(&fun.name),
-                ast::Type::from(fun),
+                ast::Type::from(fun).maybe_decay(),
                 fun.storage_class.as_ref().copied(),
                 fun.block.is_some(),
             ),
@@ -683,12 +688,13 @@ fn convert_by_assignment(
     symbols: &mut SymbolTable,
 ) -> Result<ast::Expr> {
     let TypedExpr { expr, r#type } = typecheck_expr_and_convert(e, symbols)?;
-    if r#type == *target {
+    let target = target.clone().maybe_decay();
+    if r#type == target {
         Ok(expr)
     } else if r#type.is_arithmetic() && target.is_arithmetic()
         || is_null_pointer_constant(e) && target.is_pointer()
     {
-        try_implicit_cast(target, &expr, symbols)
+        try_implicit_cast(&target, &expr, symbols)
     } else {
         bail!("Cannot convert type for assignment.")
     }
@@ -1406,7 +1412,8 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
                     .iter()
                     .zip(param_types.iter())
                     .map(|(arg, exp_t)| convert_by_assignment(arg, exp_t, symbols))
-                    .collect::<Result<Vec<_>>>()?;
+                    .collect::<Result<Vec<_>>>()
+                    .context("failed to convert args for function call")?;
                 Ok(TypedExpr {
                     expr: ast::Expr::FunCall {
                         name: Rc::clone(name),

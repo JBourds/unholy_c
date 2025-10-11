@@ -317,7 +317,7 @@ pub enum Instruction {
     CopyToOffset {
         src: Val,
         dst: Rc<String>,
-        offset: usize,
+        offset: isize,
     },
 }
 

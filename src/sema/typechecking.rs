@@ -672,7 +672,7 @@ fn get_common_pointer_type(
         Ok(e1_t)
     } else {
         bail!(format!(
-            "{e1:#?} and {e2:#?} are not compatable pointer types."
+            "[{e1:#?}, {e1_t:#?}] and [{e2:#?}, {e2_t:#?}] are not compatable pointer types."
         ))
     }
 }
@@ -688,7 +688,7 @@ fn convert_by_assignment(
     } else if r#type.is_arithmetic() && target.is_arithmetic()
         || is_null_pointer_constant(e) && target.is_pointer()
     {
-        try_implicit_cast(target, &expr, symbols)
+        Ok(try_implicit_cast_typed(target, TypedExpr { expr, r#type })?.expr)
     } else {
         bail!("Cannot convert type for assignment.")
     }
@@ -936,10 +936,14 @@ fn try_implicit_cast(
     target: &ast::Type,
     from: &ast::Expr,
     symbols: &mut SymbolTable,
-) -> Result<ast::Expr> {
-    let TypedExpr { expr, r#type } = typecheck_expr_and_convert(from, symbols)
+) -> Result<TypedExpr> {
+    let texpr = typecheck_expr_and_convert(from, symbols)
         .context("Failed to typecheck from argument in implicit cast.")?;
+    try_implicit_cast_typed(target, texpr)
+}
 
+fn try_implicit_cast_typed(target: &ast::Type, from: TypedExpr) -> Result<TypedExpr> {
+    let TypedExpr { expr, r#type } = from;
     if r#type.is_pointer() && target.is_float() || target.is_pointer() && r#type.is_float() {
         bail!("Cannot convert between double and pointer.");
     }
@@ -949,21 +953,24 @@ fn try_implicit_cast(
     }
 
     if r#type != *target {
-        Ok(ast::Expr::Cast {
-            target: ast::Type {
-                is_const: true,
-                ..target.clone()
+        Ok(TypedExpr {
+            expr: ast::Expr::Cast {
+                target: ast::Type {
+                    is_const: true,
+                    ..target.clone()
+                },
+                exp: Box::new(expr),
             },
-            exp: Box::new(expr),
+            r#type: target.clone(),
         })
     } else {
-        Ok(expr)
+        Ok(TypedExpr { expr, r#type })
     }
 }
 
 /// Try to implicitly cast into a boolean or, if the type is a floating point
 /// value, convert into into a comparison against zero.
-fn boolify(expr: Expr, r#type: &Type, symbols: &mut SymbolTable) -> Result<Expr> {
+fn boolify(expr: Expr, r#type: &Type, _symbols: &mut SymbolTable) -> Result<Expr> {
     if r#type.is_float() {
         let zero = ast::Expr::Constant(ast::Constant::const_from_type(r#type, 0)?);
         Ok(Expr::Binary {
@@ -972,7 +979,14 @@ fn boolify(expr: Expr, r#type: &Type, symbols: &mut SymbolTable) -> Result<Expr>
             right: Box::new(zero),
         })
     } else {
-        try_implicit_cast(&ast::Type::bool(), &expr, symbols)
+        Ok(try_implicit_cast_typed(
+            &ast::Type::bool(),
+            TypedExpr {
+                expr,
+                r#type: r#type.clone(),
+            },
+        )?
+        .expr)
     }
 }
 
@@ -992,8 +1006,8 @@ fn maybe_decay_expr(texpr: TypedExpr) -> TypedExpr {
 
             let r#type = Type {
                 base: ast::BaseType::Ptr {
-                    to: element,
-                    is_restrict: false,
+                    to: element.into(),
+                    is_restrict: true,
                 },
                 alignment: Type::PTR_ALIGNMENT,
                 is_const,
@@ -1339,7 +1353,7 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
             let target = ast::Type::bool();
             let condition = Box::new(try_implicit_cast(&target, condition, symbols).context(
                 "Unable to implicitly cast ternary expression condition into a boolean value.",
-            )?);
+            )?.expr);
 
             let TypedExpr {
                 expr: then_expr,

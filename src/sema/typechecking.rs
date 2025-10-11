@@ -170,7 +170,7 @@ impl InitialValue {
             ) => {
                 ensure!(inits.len() <= *size, "Too many initializers in static init");
                 let mut new_inits = vec![];
-                for init in inits.into_iter() {
+                for init in inits.iter() {
                     match Self::from_initializer(element, init, symbols)? {
                         Self::Initial(initial) => {
                             new_inits.extend(initial);
@@ -339,15 +339,6 @@ impl SymbolTable {
         }
     }
 
-    pub fn set(&mut self, key: Rc<String>, entry: SymbolEntry) -> Option<SymbolEntry> {
-        let local = self.get_local(&key);
-        if local.is_some() {
-            self.set_local(key, entry)
-        } else {
-            self.set_global(key, entry)
-        }
-    }
-
     fn insert_scope(&mut self, key: Rc<String>, entry: SymbolEntry) -> Option<SymbolEntry> {
         // Declare local static vars in global scope as well so it is
         // easy to iterate over (unique names make this legal)
@@ -374,25 +365,8 @@ impl SymbolTable {
         None
     }
 
-    fn set_local(&mut self, key: Rc<String>, entry: SymbolEntry) -> Option<SymbolEntry> {
-        for scope in self.scopes.iter_mut().rev() {
-            if let Some(_) = scope.get(&key) {
-                return scope.insert(key, entry);
-            }
-        }
-        None
-    }
-
     fn get_global(&self, key: &Rc<String>) -> Option<&SymbolEntry> {
         self.global.get(key)
-    }
-
-    fn set_global(&mut self, key: Rc<String>, entry: SymbolEntry) -> Option<SymbolEntry> {
-        if let Some(..) = self.global.get(&key) {
-            self.global.insert(key, entry)
-        } else {
-            None
-        }
     }
 
     fn get_decl_info(
@@ -1641,10 +1615,10 @@ fn typecheck_init(
             }
             let mut inits = inits
                 .into_iter()
-                .map(|i| typecheck_init(&element, i, symbols, name))
+                .map(|i| typecheck_init(element, i, symbols, name))
                 .collect::<Result<Vec<ast::Initializer>>>()?;
             while inits.len() < *size {
-                inits.push(ast::Initializer::zero_initializer(&element)?);
+                inits.push(ast::Initializer::zero_initializer(element)?);
             }
             Ok(ast::Initializer::CompundInit(inits))
         }

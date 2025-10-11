@@ -237,7 +237,6 @@ impl Initializer {
             match &r#type.base {
                 BaseType::Array { element, size } => Ok(Self::CompundInit(
                     (0..*size)
-                        .into_iter()
                         .map(|_| Self::zero_initializer(element))
                         .collect::<Result<Vec<Self>>>()?,
                 )),
@@ -392,7 +391,6 @@ impl Block {
                     remaining = tokens;
                     items.push(item);
                 }
-                items = items;
                 match remaining.first() {
                     Some(Token::RSquirly) => Ok((Self(items), &remaining[1..])),
                     Some(token) => bail!("Expected \"}}\" to end block but found {}", token),

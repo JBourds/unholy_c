@@ -1037,12 +1037,12 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
         // so invalid assignments (e.g., Struct into an int) fail.
         ast::Expr::Assignment { lvalue, rvalue } => {
             let TypedExpr {
-                expr: _,
+                expr,
                 r#type: left_t,
             } = typecheck_expr_and_convert(lvalue, symbols)
                 .context("Failed to typecheck lvalue in assignment.")?;
             ensure!(
-                lvalue.is_lvalue(),
+                expr.is_lvalue(),
                 "Expected target in assignment but found {lvalue:?}"
             );
 

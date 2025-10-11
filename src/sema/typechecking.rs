@@ -1141,6 +1141,19 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
             } = typecheck_expr_and_convert(right, symbols)
                 .context("Failed to typecheck righthand argument of binary operation.")?;
 
+            // Only allow null pointer constant comparisons with == or !=
+            if left_t.is_pointer()
+                && op.is_relational()
+                && !matches!(op, ast::BinaryOp::Equal | ast::BinaryOp::NotEqual)
+            {
+                ensure!(
+                    left_t == right_t,
+                    format!(
+                        "Error in \"{op:#?}\" comparison: lefthand side with type {left_t:#?} and righthand side with type {right_t:#?}."
+                    )
+                );
+            }
+
             // Evaluate all operands in a boolean context.
             if op.is_logical() {
                 return Ok(TypedExpr {
@@ -1249,16 +1262,6 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
                 }
 
                 _ => {} // Not a 'valid' pointer arithmitic case
-            }
-
-            // Only allow null pointer constant comparisons with == or !=
-            if op.is_relational() && !matches!(op, ast::BinaryOp::Equal | ast::BinaryOp::NotEqual) {
-                ensure!(
-                    left_t.is_pointer() == right_t.is_pointer(),
-                    format!(
-                        "Error in \"{op:#?}\" comparison: lefthand side with type {left_t:#?} and righthand side with type {right_t:#?}."
-                    )
-                );
             }
 
             let common_t = if left_t.is_pointer() || right_t.is_pointer() {

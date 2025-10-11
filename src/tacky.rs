@@ -714,6 +714,42 @@ pub struct Expr {
 }
 
 impl Expr {
+    fn do_pointer_arithmetic(
+        op: ast::BinaryOp,
+        left: Val,
+        right: Val,
+        make_temp_var: &mut impl FnMut() -> String,
+        symbols: &mut SymbolTable,
+    ) -> (Vec<Instruction>, Val) {
+        let mut instructions = vec![];
+        let left_t = left.get_type(symbols);
+        let right_t = right.get_type(symbols);
+        let (ptr, ptr_t, mut index) = if left_t.is_pointer() {
+            (left, left_t, right)
+        } else {
+            (right, right_t, left)
+        };
+        if op.is_sub() {
+            let negated_tmp =
+                Function::make_tacky_temp_var(index.get_type(symbols), symbols, make_temp_var);
+            instructions.push(Instruction::Unary {
+                op: UnaryOp::Negate,
+                src: index,
+                dst: negated_tmp.clone(),
+            });
+            index = negated_tmp;
+        }
+        let scale = ptr_t.size_of();
+        let dst = Function::make_tacky_temp_var(ptr_t, symbols, make_temp_var);
+        instructions.push(Instruction::AddPtr {
+            ptr,
+            index,
+            scale,
+            dst: dst.clone(),
+        });
+        (instructions, dst)
+    }
+
     fn parse_with(
         node: ast::Expr,
         symbols: &mut SymbolTable,
@@ -1154,44 +1190,29 @@ impl Expr {
                         left_t.clone()
                     };
 
-                    // FIXME: Same as above, not exactly sure where the type casting happens
-                    let dst = Function::make_tacky_temp_var(dst_type, symbols, make_temp_var);
-
                     // pointer arithmetic uses special instruction
                     // make sure the pointer is always `src`
-                    if left_t.is_pointer() || right_t.is_pointer() && op.is_add_sub() {
-                        let (ptr, mut index, scale) = if left_t.is_pointer() {
-                            (left_val, right_val, left_t.size_of())
-                        } else {
-                            (right_val, left_val, right_t.size_of())
-                        };
-                        if op.is_sub() {
-                            let negated_tmp = Function::make_tacky_temp_var(
-                                index.get_type(symbols),
-                                symbols,
-                                make_temp_var,
-                            );
-                            instructions.push(Instruction::Unary {
-                                op: UnaryOp::Negate,
-                                src: index,
-                                dst: negated_tmp.clone(),
-                            });
-                            index = negated_tmp;
-                        }
-                        instructions.push(Instruction::AddPtr {
-                            ptr,
-                            index,
-                            scale,
-                            dst: dst.clone(),
-                        });
+                    let dst = if left_t.is_pointer() || right_t.is_pointer() && op.is_add_sub() {
+                        let (new_instructions, dst) = Self::do_pointer_arithmetic(
+                            op,
+                            left_val,
+                            right_val,
+                            make_temp_var,
+                            symbols,
+                        );
+                        instructions.extend(new_instructions);
+                        dst
                     } else {
+                        // FIXME: Same as above, not exactly sure where the type casting happens
+                        let dst = Function::make_tacky_temp_var(dst_type, symbols, make_temp_var);
                         instructions.push(Instruction::Binary {
                             op: op.into(),
                             src1: left_val,
                             src2: right_val,
                             dst: dst.clone(),
                         });
-                    }
+                        dst
+                    };
                     ExprResult::PlainOperand(Self {
                         instructions,
                         val: dst,
@@ -1444,7 +1465,29 @@ impl Expr {
                 instructions.extend(cast_instrs);
                 ExprResult::PlainOperand(Self { instructions, val })
             }
-            ast::Expr::Subscript { expr, index } => todo!(),
+            ast::Expr::Subscript { expr, index } => {
+                let Self {
+                    mut instructions,
+                    val: expr,
+                } = Self::parse_with_and_convert(*expr, symbols, make_temp_var);
+                let Self {
+                    instructions: index_instructions,
+                    val: index,
+                } = Self::parse_with_and_convert(*index, symbols, make_temp_var);
+                instructions.extend(index_instructions);
+                let (new_instructions, dst) = Self::do_pointer_arithmetic(
+                    ast::BinaryOp::Add,
+                    expr,
+                    index,
+                    make_temp_var,
+                    symbols,
+                );
+                instructions.extend(new_instructions);
+                ExprResult::DerefrencedPointer(Self {
+                    instructions,
+                    val: dst,
+                })
+            }
         }
     }
 

@@ -78,7 +78,7 @@ impl StaticVariable {
                 sema::tc::InitialValue::Initial(i) => Some(StaticVariable {
                     identifier: name,
                     external_linkage: *external_linkage,
-                    init: todo!(), // Some(Rc::clone(i)),
+                    init: i.to_vec(),
                 }),
                 sema::tc::InitialValue::Tentative => Some(StaticVariable {
                     identifier: name,
@@ -351,19 +351,21 @@ impl Instruction {
         if decl.storage_class != Some(ast::StorageClass::Extern) {
             symbols.new_entry(Rc::clone(&decl.name), decl.r#type.clone());
         }
-        if let Some(init) = decl.init {
-            let Expr {
-                mut instructions,
-                val: src,
-            } = Expr::parse_with_and_convert(todo!() /* init */, symbols, make_temp_var);
-            let dst = Val::Var(Rc::clone(&decl.name));
-            instructions.push(Instruction::Copy {
-                src,
-                dst: dst.clone(),
-            });
-            instructions
-        } else {
-            vec![]
+        match decl.init {
+            Some(ast::Initializer::SingleInit(init)) => {
+                let Expr {
+                    mut instructions,
+                    val: src,
+                } = Expr::parse_with_and_convert(*init, symbols, make_temp_var);
+                let dst = Val::Var(Rc::clone(&decl.name));
+                instructions.push(Instruction::Copy {
+                    src,
+                    dst: dst.clone(),
+                });
+                instructions
+            }
+            Some(ast::Initializer::CompundInit(_)) => todo!(),
+            _ => vec![],
         }
     }
     fn parse_stmt_with(

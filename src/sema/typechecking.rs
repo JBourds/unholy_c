@@ -1006,7 +1006,7 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
             let TypedExpr {
                 expr,
                 r#type: left_t,
-            } = typecheck_expr_and_convert(lvalue, symbols)
+            } = typecheck_expr(lvalue, symbols)
                 .context("Failed to typecheck lvalue in assignment.")?;
             ensure!(
                 expr.is_modifiable_lvalue(&left_t),

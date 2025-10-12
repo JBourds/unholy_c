@@ -77,6 +77,7 @@ pub enum AssemblyType {
     Pointer,
     Float,
     Double,
+    ByteArray { size: usize, alignment: usize },
 }
 
 impl From<&Operand> for AssemblyType {
@@ -157,6 +158,7 @@ impl AssemblyType {
             AssemblyType::Pointer => core::mem::size_of::<usize>(),
             AssemblyType::Float => core::mem::size_of::<f32>(),
             AssemblyType::Double => core::mem::size_of::<f64>(),
+            AssemblyType::ByteArray { size, .. } => *size,
         }
     }
 }

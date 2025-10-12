@@ -2452,7 +2452,15 @@ impl Instruction<Initial> {
                 ]
             }
             tacky::Instruction::AddPtr { .. } => todo!(),
-            tacky::Instruction::CopyToOffset { .. } => todo!(),
+            tacky::Instruction::CopyToOffset { src, dst, offset } => {
+                vec![new_instr(InstructionType::Mov {
+                    src: Operand::from_tacky(src, symbols, float_constants),
+                    dst: Operand::PseudoMem {
+                        name: dst,
+                        offset: offset.try_into().unwrap(),
+                    },
+                })]
+            }
         }
     }
 }

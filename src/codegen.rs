@@ -7,6 +7,8 @@ use std::fmt;
 use std::marker::PhantomData;
 use std::rc::Rc;
 
+const MAX_AGGREGATE_ALIGNMENT: usize = 16;
+
 const SYSTEM_V_GP_REGS: [Reg; 6] = [
     Reg::X86 {
         reg: X86Reg::Di,
@@ -152,7 +154,7 @@ impl AssemblyType {
                 ..
             } => Self::ByteArray {
                 size: element.size_of() * size,
-                alignment: std::cmp::min(element.size_of(), 16),
+                alignment: std::cmp::min(element.size_of(), MAX_AGGREGATE_ALIGNMENT),
             },
             _ => unimplemented!(),
         }

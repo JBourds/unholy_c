@@ -810,6 +810,17 @@ impl Expr {
         (instructions, dst)
     }
 
+    fn unary_inc_dec_val(t: &ast::Type) -> ast::Constant {
+        // Typechecking will have caught any case where an array is invalid as
+        // a pointer
+        if t.is_pointer() || t.is_array() {
+            ast::Constant::U64(t.base.size_of_base_type().try_into().unwrap())
+        } else {
+            ast::Constant::const_from_type(dbg!(t), 1)
+                .expect("UnaryOp type has an ast::Constant equivalent")
+        }
+    }
+
     fn parse_with(
         node: ast::Expr,
         symbols: &mut SymbolTable,
@@ -873,10 +884,9 @@ impl Expr {
                             instructions.push(Instruction::Binary {
                                 op: BinaryOp::Add,
                                 src1: val.clone(),
-                                src2: Val::Constant(
-                                    ast::Constant::const_from_type(&val.get_type(symbols), 1)
-                                        .expect("UnaryOp type has an ast::Constant equivalent"),
-                                ),
+                                src2: Val::Constant(Self::unary_inc_dec_val(
+                                    &val.get_type(symbols),
+                                )),
                                 dst: val.clone(),
                             });
                             (instructions, val.clone())
@@ -898,13 +908,9 @@ impl Expr {
                                 Instruction::Binary {
                                     op: BinaryOp::Add,
                                     src1: intermediate.clone(),
-                                    src2: Val::Constant(
-                                        ast::Constant::const_from_type(
-                                            &val.get_type(symbols).deref(),
-                                            1,
-                                        )
-                                        .expect("UnaryOp type has an ast::Constant equivalent"),
-                                    ),
+                                    src2: Val::Constant(Self::unary_inc_dec_val(
+                                        &val.get_type(symbols),
+                                    )),
                                     dst: intermediate.clone(),
                                 },
                                 Instruction::Store {
@@ -933,10 +939,9 @@ impl Expr {
                                 instructions.push(Instruction::Binary {
                                     op: BinaryOp::Add,
                                     src1: val.clone(),
-                                    src2: Val::Constant(
-                                        ast::Constant::const_from_type(&val.get_type(symbols), 1)
-                                            .expect("UnaryOp type has an ast::Constant equivalent"),
-                                    ),
+                                    src2: Val::Constant(Self::unary_inc_dec_val(
+                                        &val.get_type(symbols),
+                                    )),
                                     dst: val.clone(),
                                 });
                                 (instructions, dst)
@@ -992,10 +997,9 @@ impl Expr {
                             instructions.push(Instruction::Binary {
                                 op: BinaryOp::Subtract,
                                 src1: val.clone(),
-                                src2: Val::Constant(
-                                    ast::Constant::const_from_type(&val.get_type(symbols), 1)
-                                        .expect("UnaryOp type has an ast::Constant equivalent"),
-                                ),
+                                src2: Val::Constant(Self::unary_inc_dec_val(
+                                    &val.get_type(symbols),
+                                )),
                                 dst: val.clone(),
                             });
                             (instructions, val.clone())
@@ -1052,10 +1056,9 @@ impl Expr {
                                 instructions.push(Instruction::Binary {
                                     op: BinaryOp::Subtract,
                                     src1: val.clone(),
-                                    src2: Val::Constant(
-                                        ast::Constant::const_from_type(&val.get_type(symbols), 1)
-                                            .expect("UnaryOp type has an ast::Constant equivalent"),
-                                    ),
+                                    src2: Val::Constant(Self::unary_inc_dec_val(
+                                        &val.get_type(symbols),
+                                    )),
                                     dst: val.clone(),
                                 });
                                 (instructions, dst)

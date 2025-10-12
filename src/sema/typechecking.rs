@@ -998,7 +998,6 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
                 bail!("Attempted to typecheck {var} but there was no type associated with it.");
             }
         }
-        // TODO: Fix once we get to pointers
         // This case has the semantics of a cast but rather than directly
         // converting to a cast expression frame it as an implicit promotion
         // so invalid assignments (e.g., Struct into an int) fail.
@@ -1100,8 +1099,16 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
             let TypedExpr {
                 expr: left,
                 r#type: left_t,
-            } = typecheck_expr_and_convert(left, symbols)
-                .context("Failed to typecheck lefthand argument of binary operation.")?;
+            } = match op {
+                // Don't allow lvalue conversion when it involves mutating the LHS
+                // as this would change where an array var points to
+                ast::BinaryOp::AddAssign | ast::BinaryOp::SubAssign => {
+                    typecheck_expr(left, symbols)
+                        .context("Failed to typecheck lefthand argument of binary operation.")?
+                }
+                _ => typecheck_expr_and_convert(left, symbols)
+                    .context("Failed to typecheck lefthand argument of binary operation.")?,
+            };
             let TypedExpr {
                 expr: right,
                 r#type: right_t,

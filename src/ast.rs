@@ -1071,6 +1071,20 @@ impl BaseType {
         }
     }
 
+    /// Used by arrays to recursively extract its base type.
+    pub fn size_of_base_type(&self) -> usize {
+        match self {
+            BaseType::Int { nbytes, .. } => *nbytes,
+            BaseType::Float(nbytes) => *nbytes,
+            BaseType::Double(nbytes) => *nbytes,
+            BaseType::Ptr { to, .. } => to.size_of(),
+            BaseType::Array { element, .. } => element.base.size_of_base_type(),
+            BaseType::Fun { .. } => unreachable!(),
+            BaseType::Struct => unreachable!(),
+            BaseType::Void => unreachable!(),
+        }
+    }
+
     pub const fn int(nbytes: usize, signed: Option<bool>) -> Self {
         Self::Int { nbytes, signed }
     }

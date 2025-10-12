@@ -1,4 +1,3 @@
-use anyhow::ensure;
 
 use crate::ast;
 use crate::sema;

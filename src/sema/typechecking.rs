@@ -1028,7 +1028,12 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
         }
         ast::Expr::Unary { op, expr } => {
             let TypedExpr { expr, r#type } = match op {
-                ast::UnaryOp::AddrOf => typecheck_expr(expr, symbols),
+                // Don't lvalue convert in these cases
+                ast::UnaryOp::AddrOf
+                | ast::UnaryOp::PreInc
+                | ast::UnaryOp::PostInc
+                | ast::UnaryOp::PreDec
+                | ast::UnaryOp::PostDec => typecheck_expr(expr, symbols),
                 _ => typecheck_expr_and_convert(expr, symbols),
             }
             .context("Failed to typecheck nested unary expression.")?;

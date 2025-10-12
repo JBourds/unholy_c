@@ -1017,8 +1017,8 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
             } = typecheck_expr_and_convert(lvalue, symbols)
                 .context("Failed to typecheck lvalue in assignment.")?;
             ensure!(
-                expr.is_lvalue(),
-                "Expected target in assignment but found {lvalue:?}"
+                expr.is_modifiable_lvalue(&left_t),
+                "Expected valid lvalue target in assignment but found value {expr:?} with type {left_t:?}"
             );
 
             // FIXME: Lazy clone :(
@@ -1084,11 +1084,7 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
                 | op @ ast::UnaryOp::PostDec
                 | op @ ast::UnaryOp::PreInc
                 | op @ ast::UnaryOp::PreDec => {
-                    if r#type.is_function() || r#type.is_array() {
-                        bail!("Cannot apply unary {op:?} operator to {type:#?}");
-                    }
-
-                    if !expr.is_lvalue() {
+                    if !expr.is_modifiable_lvalue(&r#type) {
                         bail!("Cannot apply unary {op:?} to non-lvalues");
                     }
                     r#type
@@ -1310,8 +1306,8 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
                 match op.compound_op() {
                     Some(_) => {
                         ensure!(
-                            left.is_lvalue(),
-                            "Compound operations are only vaid on lvalues."
+                            left.is_modifiable_lvalue(&left_t),
+                            "Compound operations are only valid on modifiable lvalues."
                         );
                         Ok(TypedExpr {
                             expr: ast::Expr::Assignment {

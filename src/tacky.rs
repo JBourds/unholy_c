@@ -1,3 +1,5 @@
+use anyhow::ensure;
+
 use crate::ast;
 use crate::sema;
 use std::collections::HashMap;
@@ -343,6 +345,51 @@ impl Instruction {
         vec![]
     }
 
+    fn process_initializer(
+        name: Rc<String>,
+        init: ast::Initializer,
+        r#type: &ast::Type,
+        symbols: &mut SymbolTable,
+        make_temp_var: &mut impl FnMut() -> String,
+    ) -> Vec<Self> {
+        match init {
+            ast::Initializer::SingleInit(init) => {
+                let dst = Val::Var(name);
+                let Expr {
+                    mut instructions,
+                    val: src,
+                } = Expr::parse_with_and_convert(*init, symbols, make_temp_var);
+                instructions.push(Instruction::Copy {
+                    src,
+                    dst: dst.clone(),
+                });
+                instructions
+            }
+            ast::Initializer::CompundInit(inits) => {
+                let mut instructions = vec![];
+                let base_type_size = r#type.base.size_of_base_type();
+                for (i, init) in inits.into_iter().enumerate() {
+                    let ast::Initializer::SingleInit(init) = init else {
+                        unreachable!(
+                            "Initializers should have been flattened out in previous stage prior to tacky generation."
+                        );
+                    };
+                    let Expr {
+                        instructions: new_instructions,
+                        val: src,
+                    } = Expr::parse_with_and_convert(*init, symbols, make_temp_var);
+                    instructions.extend(new_instructions);
+                    instructions.push(Instruction::CopyToOffset {
+                        src,
+                        dst: Rc::clone(&name),
+                        offset: (i * base_type_size).try_into().unwrap(),
+                    });
+                }
+                instructions
+            }
+        }
+    }
+
     fn parse_var_decl_with(
         decl: ast::VarDecl,
         symbols: &mut SymbolTable,
@@ -352,22 +399,17 @@ impl Instruction {
             symbols.new_entry(Rc::clone(&decl.name), decl.r#type.clone());
         }
         match decl.init {
-            Some(ast::Initializer::SingleInit(init)) => {
-                let Expr {
-                    mut instructions,
-                    val: src,
-                } = Expr::parse_with_and_convert(*init, symbols, make_temp_var);
-                let dst = Val::Var(Rc::clone(&decl.name));
-                instructions.push(Instruction::Copy {
-                    src,
-                    dst: dst.clone(),
-                });
-                instructions
-            }
-            Some(ast::Initializer::CompundInit(_)) => todo!(),
+            Some(init) => Self::process_initializer(
+                Rc::clone(&decl.name),
+                init,
+                &decl.r#type,
+                symbols,
+                make_temp_var,
+            ),
             _ => vec![],
         }
     }
+
     fn parse_stmt_with(
         stmt: ast::Stmt,
         symbols: &mut SymbolTable,

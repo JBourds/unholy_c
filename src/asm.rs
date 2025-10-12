@@ -309,6 +309,7 @@ pub mod x64 {
             codegen::InstructionType::Lea { src, dst } => {
                 w.write_fmt(format_args!("\tlea {dst}, {src}\n"))?;
             }
+            codegen::InstructionType::Indexed { .. } => todo!(),
         }
         Ok(())
     }

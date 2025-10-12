@@ -106,6 +106,7 @@ impl From<&Operand> for AssemblyType {
             Operand::Pseudo { r#type, .. } => r#type.clone(),
             Operand::Memory { r#type, .. } => r#type.clone(),
             Operand::Data { r#type, .. } => r#type.clone(),
+            Operand::PseudoMem { .. } => todo!(),
         }
     }
 }
@@ -1045,6 +1046,7 @@ impl Instruction<WithStorage> {
                 instr @ InstructionType::Pop(_) => instr,
                 instr @ InstructionType::Call(_) => instr,
                 instr @ InstructionType::Ret => instr,
+                InstructionType::Indexed { .. } => todo!(),
             },
             phantom: PhantomData::<WithStorage>,
         }
@@ -2196,6 +2198,7 @@ impl Instruction<Initial> {
                                 ]);
                             }
                         }
+                        Operand::PseudoMem { .. } => todo!(),
                     }
                 }
                 v.push(new_instr(InstructionType::Call(name)));
@@ -2491,6 +2494,10 @@ pub enum Operand {
         size: usize,
         r#type: AssemblyType,
     },
+    PseudoMem {
+        name: Rc<String>,
+        offset: usize,
+    },
     Memory {
         reg: Reg,
         offset: isize,
@@ -2513,6 +2520,7 @@ impl Operand {
             Self::Pseudo { size, .. } => *size,
             Self::Memory { size, .. } => *size,
             Self::Data { size, .. } => *size,
+            Operand::PseudoMem { .. } => todo!(),
         }
     }
 
@@ -2591,6 +2599,7 @@ impl fmt::Display for Operand {
             Self::Pseudo { .. } => {
                 unreachable!("Cannot create asm representation for a pseudoregister.")
             }
+            Operand::PseudoMem { .. } => todo!(),
         }
     }
 }

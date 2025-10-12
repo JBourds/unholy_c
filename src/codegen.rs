@@ -2580,10 +2580,16 @@ impl Operand {
             tacky::Val::Constant(i) => Self::Imm(i),
             tacky::Val::Var(ref name) => {
                 let val_type = AssemblyType::from_tacky(&val, symbols);
-                Self::Pseudo {
-                    name: Rc::clone(name),
-                    size: val_type.size_bytes(),
-                    r#type: val_type,
+                match val_type {
+                    AssemblyType::ByteArray { .. } => Self::PseudoMem {
+                        name: Rc::clone(name),
+                        offset: 0,
+                    },
+                    _ => Self::Pseudo {
+                        name: Rc::clone(name),
+                        size: val_type.size_bytes(),
+                        r#type: val_type,
+                    },
                 }
             }
         }

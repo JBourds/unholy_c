@@ -4,6 +4,7 @@ use std::{cmp, num::NonZeroUsize};
 use anyhow::{Context, Error};
 
 use crate::ast::{Expr, Type};
+use crate::const_eval;
 
 use super::*;
 

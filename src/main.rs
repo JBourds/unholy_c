@@ -1,6 +1,7 @@
 mod asm;
 mod ast;
 mod codegen;
+mod const_eval;
 mod lexer;
 mod sema;
 mod tacky;

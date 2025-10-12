@@ -1,3 +1,4 @@
+use crate::const_eval;
 use anyhow::{Result, bail};
 
 use crate::{ast, sema, tacky};
@@ -107,7 +108,8 @@ impl From<&Operand> for AssemblyType {
             Operand::Pseudo { r#type, .. } => r#type.clone(),
             Operand::Memory { r#type, .. } => r#type.clone(),
             Operand::Data { r#type, .. } => r#type.clone(),
-            Operand::PseudoMem { .. } => todo!(),
+            Operand::Indexed { .. } => Self::Quadword,
+            Operand::PseudoMem { .. } => unreachable!(),
         }
     }
 }
@@ -673,6 +675,10 @@ impl Reg {
         reg: X86Reg::Ax,
         section: RegSection::Qword,
     };
+    const RDX: Self = Self::X86 {
+        reg: X86Reg::Dx,
+        section: RegSection::Qword,
+    };
     pub fn size(&self) -> usize {
         match self {
             Self::X86 { reg: _, section } => section.size(),
@@ -804,14 +810,6 @@ impl CondCode {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
-pub enum IndexScale {
-    One,
-    Two,
-    Four,
-    Eight,
-}
-
 #[derive(Debug, PartialEq)]
 enum Initial {}
 #[derive(Debug, PartialEq)]
@@ -889,11 +887,6 @@ pub enum InstructionType {
         // Must be a memory operand!
         src: Operand,
         dst: Operand,
-    },
-    Indexed {
-        base: Reg,
-        index: Reg,
-        scale: IndexScale,
     },
 }
 
@@ -1055,7 +1048,6 @@ impl Instruction<WithStorage> {
                 instr @ InstructionType::Pop(_) => instr,
                 instr @ InstructionType::Call(_) => instr,
                 instr @ InstructionType::Ret => instr,
-                InstructionType::Indexed { .. } => todo!(),
             },
             phantom: PhantomData::<WithStorage>,
         }
@@ -2208,6 +2200,7 @@ impl Instruction<Initial> {
                             }
                         }
                         Operand::PseudoMem { .. } => todo!(),
+                        Operand::Indexed { .. } => todo!(),
                     }
                 }
                 v.push(new_instr(InstructionType::Call(name)));
@@ -2451,7 +2444,61 @@ impl Instruction<Initial> {
                     new_instr(InstructionType::Label(end_label)),
                 ]
             }
-            tacky::Instruction::AddPtr { .. } => todo!(),
+            tacky::Instruction::AddPtr {
+                ptr,
+                mut index,
+                scale,
+                dst,
+            } => {
+                let (multiply_index_and_scale, scale_to_use) = match scale {
+                    1 => (false, 1),
+                    2 => (false, 2),
+                    4 => (false, 4),
+                    8 => (false, 8),
+                    _ => (true, 1),
+                };
+                let mut instructions = vec![new_instr(InstructionType::Mov {
+                    src: Operand::from_tacky(ptr, symbols, float_constants),
+                    dst: Operand::Reg(Reg::RAX),
+                })];
+                // Try to const-evaluate index if we can
+                if multiply_index_and_scale {
+                    match &mut index {
+                        tacky::Val::Constant(constant) => {
+                            index = tacky::Val::Constant(
+                                const_eval::eval(ast::Expr::Binary {
+                                    op: ast::BinaryOp::Multiply,
+                                    left: Box::new(ast::Expr::Constant(*constant)),
+                                    right: Box::new(ast::Expr::Constant(ast::Constant::U64(
+                                        scale.try_into().unwrap(),
+                                    ))),
+                                })
+                                .expect("Unable to const evaluate index and scale."),
+                            );
+                        }
+                        tacky::Val::Var(_) => {
+                            instructions.push(new_instr(InstructionType::Binary {
+                                op: BinaryOp::Multiply,
+                                src: Operand::Imm(ast::Constant::U64(scale.try_into().unwrap())),
+                                dst: Operand::Reg(Reg::RAX),
+                            }));
+                        }
+                    }
+                };
+                instructions.push(new_instr(InstructionType::Mov {
+                    src: Operand::from_tacky(index, symbols, float_constants),
+                    dst: Operand::Reg(Reg::RDX),
+                }));
+                instructions.push(new_instr(InstructionType::Lea {
+                    src: Operand::Indexed {
+                        base: Reg::RAX,
+                        index: Reg::RDX,
+                        scale: scale_to_use,
+                    },
+                    dst: Operand::from_tacky(dst, symbols, float_constants),
+                }));
+                instructions
+            }
             tacky::Instruction::CopyToOffset { src, dst, offset } => {
                 vec![new_instr(InstructionType::Mov {
                     src: Operand::from_tacky(src, symbols, float_constants),
@@ -2527,6 +2574,11 @@ pub enum Operand {
         r#type: AssemblyType,
         is_const: bool,
     },
+    Indexed {
+        base: Reg,
+        index: Reg,
+        scale: usize,
+    },
 }
 
 impl Operand {
@@ -2537,7 +2589,8 @@ impl Operand {
             Self::Pseudo { size, .. } => *size,
             Self::Memory { size, .. } => *size,
             Self::Data { size, .. } => *size,
-            Operand::PseudoMem { .. } => todo!(),
+            Operand::Indexed { .. } => core::mem::size_of::<usize>(),
+            Operand::PseudoMem { .. } => unreachable!(),
         }
     }
 
@@ -2619,10 +2672,13 @@ impl fmt::Display for Operand {
                     write!(f, "\"{name}\"[rip]")
                 }
             }
+            Operand::Indexed { base, index, scale } => write!(f, "({base}, {index}, {scale})"),
             Self::Pseudo { .. } => {
                 unreachable!("Cannot create asm representation for a pseudoregister.")
             }
-            Operand::PseudoMem { .. } => todo!(),
+            Operand::PseudoMem { .. } => {
+                unreachable!("Cannot create asm representation for pseudo memory.")
+            }
         }
     }
 }

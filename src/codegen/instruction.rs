@@ -680,6 +680,7 @@ impl Instruction<Initial> {
         symbols: &tacky::SymbolTable,
         float_constants: &mut HashSet<StaticConstant>,
     ) -> Vec<Self> {
+        let dst_t = dst.get_type(symbols);
         let dst = Operand::from_tacky(dst, symbols, float_constants);
         let src = Operand::from_tacky(src_ptr, symbols, float_constants);
         vec![
@@ -691,8 +692,8 @@ impl Instruction<Initial> {
                 src: Operand::Memory {
                     reg: RAX,
                     offset: 0,
-                    size: dst.size(),
-                    r#type: AssemblyType::from(&dst),
+                    size: dst_t.base.size_of_base_type(),
+                    r#type: AssemblyType::from_ast_type(dst_t),
                 },
                 dst,
             }),

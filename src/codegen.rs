@@ -148,11 +148,11 @@ impl AssemblyType {
                 ..
             } => Self::Quadword,
             ast::Type {
-                base: ast::BaseType::Array { .. },
+                base: ast::BaseType::Array { element, size },
                 ..
             } => Self::ByteArray {
-                size: r#type.size_of(),
-                alignment: r#type.alignment.into(),
+                size: element.size_of() * size,
+                alignment: std::cmp::min(element.size_of(), 16),
             },
             _ => unimplemented!(),
         }

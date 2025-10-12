@@ -1294,11 +1294,11 @@ impl Type {
     }
 
     pub fn deref(self) -> Self {
-        assert!(self.is_pointer(), "Cannot derefrence non-pointer type");
-        let BaseType::Ptr { to, is_restrict: _ } = self.base else {
-            unreachable!()
-        };
-        *to
+        match self.base {
+            BaseType::Ptr { to, is_restrict: _ } => *to,
+            BaseType::Array { element, .. } => *element,
+            _ => unreachable!("Cannot dereference non-pointer type."),
+        }
     }
 
     pub fn maybe_decay(self) -> Self {

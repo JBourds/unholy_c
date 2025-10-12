@@ -4,6 +4,8 @@ use std::collections::{HashMap, HashSet};
 use std::marker::PhantomData;
 use std::rc::Rc;
 
+const PTR_SIZE: RegSection = RegSection::Qword;
+
 #[derive(Debug, PartialEq)]
 pub(super) enum Initial {}
 
@@ -260,8 +262,7 @@ impl Instruction<Initial> {
                         src: src.clone(),
                         dst: Operand::Reg(Reg::X86 {
                             reg: X86Reg::Ax,
-                            section: RegSection::from_size(src.size())
-                                .expect("NOT IMPLEMENTED YET :("),
+                            section: PTR_SIZE,
                         }),
                     }),
                     Self::new(InstructionType::Ret),
@@ -706,10 +707,9 @@ impl Instruction<Initial> {
         symbols: &tacky::SymbolTable,
         float_constants: &mut HashSet<StaticConstant>,
     ) -> Vec<Self> {
+        let src_t = src.get_type(symbols);
         let dst = Operand::from_tacky(dst_ptr, symbols, float_constants);
         let src = Operand::from_tacky(src, symbols, float_constants);
-        let src_type = AssemblyType::from(&src);
-        let src_size = src.size();
         vec![
             Self::new(InstructionType::Mov {
                 src: dst,
@@ -720,8 +720,8 @@ impl Instruction<Initial> {
                 dst: Operand::Memory {
                     reg: RAX,
                     offset: 0,
-                    size: src_size,
-                    r#type: src_type,
+                    size: src_t.size_of(),
+                    r#type: AssemblyType::from_ast_type(src_t),
                 },
             }),
         ]
@@ -850,7 +850,13 @@ impl Instruction<Initial> {
         }
 
         for arg in stack_args.into_iter().rev() {
-            let arg_sz = arg.get_type(symbols).size_of();
+            let arg_t = arg.get_type(symbols);
+            // Pointer decay
+            let arg_sz = if arg_t.is_array() {
+                core::mem::size_of::<usize>()
+            } else {
+                arg_t.size_of()
+            };
             let arg = Operand::from_tacky(arg, symbols, float_constants);
             match arg {
                 Operand::Imm(i) => v.push(Self::new(InstructionType::Push(Operand::Imm(i)))),
@@ -869,8 +875,7 @@ impl Instruction<Initial> {
                     } else {
                         let ax = Operand::Reg(Reg::X86 {
                             reg: X86Reg::Ax,
-                            section: RegSection::from_size(src.size())
-                                .expect("NOT IMPLEMENTED YET :("),
+                            section: RegSection::from_size(arg_sz).expect("NOT IMPLEMENTED YET :("),
                         });
 
                         v.extend([

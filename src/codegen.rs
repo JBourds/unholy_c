@@ -145,6 +145,13 @@ impl AssemblyType {
                 base: ast::BaseType::Ptr { .. },
                 ..
             } => Self::Quadword,
+            ast::Type {
+                base: ast::BaseType::Array { .. },
+                ..
+            } => Self::ByteArray {
+                size: r#type.size_of(),
+                alignment: r#type.alignment.into(),
+            },
             _ => unimplemented!(),
         }
     }

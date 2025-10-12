@@ -170,6 +170,13 @@ impl AssemblyType {
             AssemblyType::ByteArray { size, .. } => *size,
         }
     }
+
+    fn alignment(&self) -> usize {
+        match self {
+            AssemblyType::ByteArray { alignment, .. } => *alignment,
+            _ => self.size_bytes(),
+        }
+    }
 }
 
 #[derive(Debug, PartialEq)]

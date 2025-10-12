@@ -987,6 +987,51 @@ impl Instruction<WithStorage> {
                         .clone(),
                 }
             }
+            Operand::PseudoMem { ref name, offset } => {
+                match symbols.get(name) {
+                    // 1. Check for static storage
+                    Some(entry)
+                        if matches!(entry.attribute, sema::tc::Attribute::Static { .. }) =>
+                    {
+                        Operand::Data {
+                            name: Rc::clone(name),
+                            size: entry.r#type.size_of(),
+                            r#type: AssemblyType::ByteArray {
+                                size: entry.r#type.size_of(),
+                                alignment: std::cmp::min(
+                                    entry.r#type.base.size_of_base_type(),
+                                    MAX_AGGREGATE_ALIGNMENT,
+                                ),
+                            },
+                            is_const: false,
+                        }
+                    }
+                    // 2. If it is not static, put it on the stack
+                    Some(entry) => mappings
+                        .entry(Rc::clone(name))
+                        .or_insert_with(|| {
+                            let ast::Type {
+                                base: ast::BaseType::Array { element, size },
+                                ..
+                            } = &entry.r#type
+                            else {
+                                unimplemented!("Add structs once we get here.");
+                            };
+                            let byte_array = AssemblyType::from_ast_type(entry.r#type.clone());
+                            let element_t = AssemblyType::from_ast_type(*element.clone());
+                            *stack_bound = align_up(*stack_bound, byte_array.alignment());
+                            *stack_bound += size;
+                            Operand::Memory {
+                                reg: Reg::RBP,
+                                offset: -(*stack_bound as isize) + offset as isize,
+                                size: element.size_of(),
+                                r#type: element_t,
+                            }
+                        })
+                        .clone(),
+                    _ => unreachable!(),
+                }
+            }
             _ => op,
         };
 

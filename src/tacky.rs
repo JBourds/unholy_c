@@ -816,7 +816,7 @@ impl Expr {
         if t.is_pointer() || t.is_array() {
             ast::Constant::U64(t.base.size_of_base_type().try_into().unwrap())
         } else {
-            ast::Constant::const_from_type(dbg!(t), 1)
+            ast::Constant::const_from_type(t, 1)
                 .expect("UnaryOp type has an ast::Constant equivalent")
         }
     }

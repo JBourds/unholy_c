@@ -345,7 +345,9 @@ impl Instruction {
         vec![]
     }
 
-    fn process_initializer(
+    fn process_initializer_rec(
+        base: usize,
+        in_array: bool,
         name: Rc<String>,
         init: ast::Initializer,
         r#type: &ast::Type,
@@ -354,40 +356,54 @@ impl Instruction {
     ) -> Vec<Self> {
         match init {
             ast::Initializer::SingleInit(init) => {
-                let dst = Val::Var(name);
                 let Expr {
                     mut instructions,
                     val: src,
                 } = Expr::parse_with_and_convert(*init, symbols, make_temp_var);
-                instructions.push(Instruction::Copy {
-                    src,
-                    dst: dst.clone(),
-                });
-                instructions
-            }
-            ast::Initializer::CompundInit(inits) => {
-                let mut instructions = vec![];
-                let base_type_size = r#type.base.size_of_base_type();
-                for (i, init) in inits.into_iter().enumerate() {
-                    let ast::Initializer::SingleInit(init) = init else {
-                        unreachable!(
-                            "Initializers should have been flattened out in previous stage prior to tacky generation."
-                        );
-                    };
-                    let Expr {
-                        instructions: new_instructions,
-                        val: src,
-                    } = Expr::parse_with_and_convert(*init, symbols, make_temp_var);
-                    instructions.extend(new_instructions);
+                if in_array {
                     instructions.push(Instruction::CopyToOffset {
                         src,
                         dst: Rc::clone(&name),
-                        offset: (i * base_type_size).try_into().unwrap(),
+                        offset: base.try_into().unwrap(),
+                    });
+                } else {
+                    let dst = Val::Var(name);
+                    instructions.push(Instruction::Copy {
+                        src,
+                        dst: dst.clone(),
                     });
                 }
                 instructions
             }
+            ast::Initializer::CompundInit(inits) => {
+                let mut instructions = vec![];
+                let per_element_size = r#type.base.size_of_base_type();
+                let mut current_base = base;
+                for init in inits {
+                    instructions.extend(Self::process_initializer_rec(
+                        current_base,
+                        true,
+                        name.clone(),
+                        init,
+                        r#type,
+                        symbols,
+                        make_temp_var,
+                    ));
+                    current_base += per_element_size;
+                }
+                instructions
+            }
         }
+    }
+
+    fn process_initializer(
+        name: Rc<String>,
+        init: ast::Initializer,
+        r#type: &ast::Type,
+        symbols: &mut SymbolTable,
+        make_temp_var: &mut impl FnMut() -> String,
+    ) -> Vec<Self> {
+        Self::process_initializer_rec(0, false, name, init, r#type, symbols, make_temp_var)
     }
 
     fn parse_var_decl_with(

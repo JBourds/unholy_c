@@ -2501,9 +2501,10 @@ impl Instruction<Initial> {
                     new_instr(InstructionType::Label(end_label)),
                 ]
             }
+            // TODO: Allow for const evaluation here with `Memory` operand
             tacky::Instruction::AddPtr {
                 ptr,
-                mut index,
+                index,
                 scale,
                 dst,
             } => {
@@ -2518,29 +2519,12 @@ impl Instruction<Initial> {
                     src: Operand::from_tacky(ptr, symbols, float_constants),
                     dst: Operand::Reg(Reg::RAX),
                 })];
-                // Try to const-evaluate index if we can
                 if multiply_index_and_scale {
-                    match &mut index {
-                        tacky::Val::Constant(constant) => {
-                            index = tacky::Val::Constant(
-                                const_eval::eval(ast::Expr::Binary {
-                                    op: ast::BinaryOp::Multiply,
-                                    left: Box::new(ast::Expr::Constant(*constant)),
-                                    right: Box::new(ast::Expr::Constant(ast::Constant::U64(
-                                        scale.try_into().unwrap(),
-                                    ))),
-                                })
-                                .expect("Unable to const evaluate index and scale."),
-                            );
-                        }
-                        tacky::Val::Var(_) => {
-                            instructions.push(new_instr(InstructionType::Binary {
-                                op: BinaryOp::Multiply,
-                                src: Operand::Imm(ast::Constant::U64(scale.try_into().unwrap())),
-                                dst: Operand::Reg(Reg::RAX),
-                            }));
-                        }
-                    }
+                    instructions.push(new_instr(InstructionType::Binary {
+                        op: BinaryOp::Multiply,
+                        src: Operand::Imm(ast::Constant::U64(scale.try_into().unwrap())),
+                        dst: Operand::Reg(Reg::RAX),
+                    }));
                 };
                 instructions.push(new_instr(InstructionType::Mov {
                     src: Operand::from_tacky(index, symbols, float_constants),

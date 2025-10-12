@@ -740,6 +740,11 @@ pub enum Expr {
 }
 
 impl Expr {
+    pub fn is_modifiable_lvalue(&self, t: &Type) -> bool {
+        let disallowed = [Type::is_array, Type::is_function];
+        self.is_lvalue() && !disallowed.iter().any(|f| f(t))
+    }
+
     pub fn is_lvalue(&self) -> bool {
         matches!(
             self,

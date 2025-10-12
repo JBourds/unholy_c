@@ -794,6 +794,14 @@ impl CondCode {
     }
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub enum IndexScale {
+    One,
+    Two,
+    Four,
+    Eight,
+}
+
 #[derive(Debug, PartialEq)]
 enum Initial {}
 #[derive(Debug, PartialEq)]
@@ -871,6 +879,11 @@ pub enum InstructionType {
         // Must be a memory operand!
         src: Operand,
         dst: Operand,
+    },
+    Indexed {
+        base: Reg,
+        index: Reg,
+        scale: IndexScale,
     },
 }
 

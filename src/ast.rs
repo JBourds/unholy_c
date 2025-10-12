@@ -1158,10 +1158,10 @@ impl BaseType {
     fn promote(self, other: &Self) -> Result<Self> {
         let other_rank = other
             .rank()
-            .context("Could not establish a rank for type {other:#?}.")?;
+            .context(format!("Could not establish a rank for type {other:#?}."))?;
         if self
             .rank()
-            .context("Could not establish a rank for type {self:#?}")?
+            .context(format!("Could not establish a rank for type {self:#?}"))?
             >= other_rank
         {
             Ok(self)

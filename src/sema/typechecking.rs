@@ -1253,7 +1253,7 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
             } else {
                 let (lifted_left_t, _) =
                     ast::BaseType::lift(left_t.base.clone(), right_t.base.clone()).context(
-                        "Unable to promote {left_t:#?} and {right_t:#?} to a common type.",
+                        format!("Unable to promote {left_t:#?} and {right_t:#?} to a common type."),
                     )?;
                 ast::Type {
                     base: lifted_left_t.clone(),

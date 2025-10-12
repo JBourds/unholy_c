@@ -2143,7 +2143,10 @@ impl Instruction<Initial> {
                 let src = Operand::from_tacky(src, symbols, float_constants);
                 let dst = Operand::from_tacky(dst, symbols, float_constants);
                 assert!(
-                    matches!(src, Operand::Memory { .. } | Operand::Pseudo { .. }),
+                    matches!(
+                        src,
+                        Operand::Memory { .. } | Operand::Pseudo { .. } | Operand::PseudoMem { .. }
+                    ),
                     "Can only call `lea` on memory operands! Found: {src:#?}"
                 );
                 vec![new_instr(InstructionType::Lea { src, dst })]

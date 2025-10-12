@@ -252,6 +252,8 @@ impl std::ops::Mul for Constant {
         match (left, right) {
             (Constant::I32(n1), Constant::I32(n2)) => Constant::I32(n1.wrapping_mul(n2)),
             (Constant::I64(n1), Constant::I64(n2)) => Constant::I64(n1.wrapping_mul(n2)),
+            // For const evaluating pointer index
+            (Constant::U64(n1), Constant::U64(n2)) => Constant::U64(n1.wrapping_mul(n2)),
             _ => unreachable!(),
         }
     }

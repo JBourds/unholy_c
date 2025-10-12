@@ -768,7 +768,7 @@ impl Expr {
         let mut instructions = vec![];
         let left_t = left.get_type(symbols);
         let right_t = right.get_type(symbols);
-        let (ptr, ptr_t, mut index) = if left_t.is_pointer() {
+        let (ptr, ptr_t, mut index) = if left_t.is_pointer() || left_t.is_array() {
             (left, left_t, right)
         } else {
             (right, right_t, left)

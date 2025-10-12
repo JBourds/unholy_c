@@ -1643,7 +1643,7 @@ impl Instruction<Initial> {
                         ..
                     }
                     | ast::Type {
-                        base: ast::BaseType::Ptr { .. },
+                        base: ast::BaseType::Ptr { .. } | ast::BaseType::Array { .. },
                         ..
                     } => {
                         vec![

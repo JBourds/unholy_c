@@ -2224,11 +2224,15 @@ impl BinaryOp {
     }
 
     pub fn is_relational(&self) -> bool {
-        matches!(*self, |Self::Equal| Self::NotEqual
-            | Self::LessThan
-            | Self::LessOrEqual
-            | Self::GreaterThan
-            | Self::GreaterOrEqual)
+        matches!(
+            *self,
+            Self::Equal
+                | Self::NotEqual
+                | Self::LessThan
+                | Self::LessOrEqual
+                | Self::GreaterThan
+                | Self::GreaterOrEqual
+        )
     }
 
     pub fn is_add(&self) -> bool {

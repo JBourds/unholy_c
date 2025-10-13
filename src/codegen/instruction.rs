@@ -1098,7 +1098,7 @@ impl Instruction<Initial> {
                     }),
                 }),
                 Self::new(InstructionType::Cvtsi2sd {
-                    src: Operand::Reg(RAX.clone()),
+                    src: Operand::Reg(RAX),
                     dst,
                 }),
             ];
@@ -1125,29 +1125,29 @@ impl Instruction<Initial> {
             Self::new(InstructionType::Label(out_of_range_label)),
             Self::new(InstructionType::Mov {
                 src: src.clone(),
-                dst: Operand::Reg(RAX.clone()),
+                dst: Operand::Reg(RAX),
             }),
             Self::new(InstructionType::Mov {
-                src: Operand::Reg(RAX.clone()),
-                dst: Operand::Reg(RDX.clone()),
+                src: Operand::Reg(RAX),
+                dst: Operand::Reg(RDX),
             }),
             Self::new(InstructionType::Binary {
                 op: BinaryOp::Shr,
                 src: Operand::Imm(ast::Constant::U64(1)),
-                dst: Operand::Reg(RDX.clone()),
+                dst: Operand::Reg(RDX),
             }),
             Self::new(InstructionType::Binary {
                 op: BinaryOp::BitAnd,
                 src: Operand::Imm(ast::Constant::U64(1)),
-                dst: Operand::Reg(RAX.clone()),
+                dst: Operand::Reg(RAX),
             }),
             Self::new(InstructionType::Binary {
                 op: BinaryOp::BitOr,
-                src: Operand::Reg(RAX.clone()),
-                dst: Operand::Reg(RDX.clone()),
+                src: Operand::Reg(RAX),
+                dst: Operand::Reg(RDX),
             }),
             Self::new(InstructionType::Cvtsi2sd {
-                src: Operand::Reg(RDX.clone()),
+                src: Operand::Reg(RDX),
                 dst: dst.clone(),
             }),
             Self::new(InstructionType::Binary {

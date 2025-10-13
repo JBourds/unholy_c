@@ -1086,6 +1086,7 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
                     }
                     r#type
                 }
+                ast::UnaryOp::Not => ast::Type::bool(),
                 _ => r#type,
             };
             Ok(TypedExpr {

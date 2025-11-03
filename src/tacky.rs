@@ -1253,7 +1253,9 @@ impl Expr {
 
                     // pointer arithmetic uses special instruction
                     // make sure the pointer is always `src`
-                    let dst = if left_t.is_pointer() || right_t.is_pointer() && op.is_add_sub() {
+                    let dst = if op.is_add_sub() && left_t.is_pointer()
+                        || right_t.is_pointer() && op.is_add_sub()
+                    {
                         let (new_instructions, dst) = Self::do_pointer_arithmetic(
                             op,
                             left_val,
@@ -1264,7 +1266,6 @@ impl Expr {
                         instructions.extend(new_instructions);
                         dst
                     } else {
-                        // FIXME: Same as above, not exactly sure where the type casting happens
                         let dst = Function::make_tacky_temp_var(dst_type, symbols, make_temp_var);
                         instructions.push(Instruction::Binary {
                             op: op.into(),

@@ -66,7 +66,9 @@ impl AssemblyType {
             AssemblyType::Pointer => core::mem::size_of::<usize>(),
             AssemblyType::Float => core::mem::size_of::<f32>(),
             AssemblyType::Double => core::mem::size_of::<f64>(),
-            AssemblyType::ByteArray { size, .. } => *size,
+            // FIXME: This is kind of lying. The type is the size of the array,
+            // but this function is only called when referencing it as a pointer.
+            AssemblyType::ByteArray { .. } => core::mem::size_of::<usize>(),
         }
     }
 

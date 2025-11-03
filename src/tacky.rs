@@ -906,9 +906,13 @@ impl Expr {
                                 Instruction::Binary {
                                     op: BinaryOp::Add,
                                     src1: intermediate.clone(),
-                                    src2: Val::Constant(Self::unary_inc_dec_val(
-                                        &val.get_type(symbols),
-                                    )),
+                                    src2: Val::Constant(
+                                        ast::Constant::const_from_type(
+                                            &val.get_type(symbols).deref(),
+                                            1,
+                                        )
+                                        .expect("UnaryOp type has an ast::Constant equivalent"),
+                                    ),
                                     dst: intermediate.clone(),
                                 },
                                 Instruction::Store {

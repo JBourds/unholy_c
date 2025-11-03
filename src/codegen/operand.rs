@@ -59,7 +59,7 @@ impl Operand {
             Self::Imm(c) => c.get_type().size_of(),
             Self::Reg(r) => r.size(),
             Self::Pseudo { size, .. } => *size,
-            Self::Memory { size, .. } => *size,
+            Self::Memory { r#type, .. } => r#type.size_bytes(),
             Self::Data { size, .. } => *size,
             Operand::Indexed { .. } => core::mem::size_of::<usize>(),
             Operand::PseudoMem { .. } => unimplemented!(),

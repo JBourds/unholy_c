@@ -947,16 +947,24 @@ impl Instruction<Initial> {
             8 => (false, 8),
             _ => (true, 1),
         };
-        let mut instructions = vec![
-            Self::new(InstructionType::Lea {
-                src: Operand::from_tacky(ptr, symbols, float_constants),
+        let mut instructions = vec![];
+        let ptr_t = ptr.get_type(symbols);
+        let src = Operand::from_tacky(ptr, symbols, float_constants);
+        if ptr_t.is_array() {
+            instructions.push(Self::new(InstructionType::Lea {
+                src,
                 dst: Operand::Reg(RAX),
-            }),
-            Self::new(InstructionType::Mov {
-                src: Operand::from_tacky(index, symbols, float_constants),
-                dst: Operand::Reg(RDX),
-            }),
-        ];
+            }));
+        } else {
+            instructions.push(Self::new(InstructionType::Mov {
+                src,
+                dst: Operand::Reg(RAX),
+            }));
+        }
+        instructions.push(Self::new(InstructionType::Mov {
+            src: Operand::from_tacky(index, symbols, float_constants),
+            dst: Operand::Reg(RDX),
+        }));
         if multiply_index_and_scale {
             instructions.push(Self::new(InstructionType::Binary {
                 op: BinaryOp::Multiply,

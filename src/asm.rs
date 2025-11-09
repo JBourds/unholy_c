@@ -126,10 +126,11 @@ pub mod x64 {
 
     fn get_specifier<'a>(src: Option<&Operand>, dst: &Operand) -> &'a str {
         let size = match (src, dst) {
-            (None, Operand::Memory { size, .. } | Operand::Data { size, .. })
-            | (Some(Operand::Imm(_)), Operand::Memory { size, .. } | Operand::Data { size, .. }) => {
-                Some(*size)
-            }
+            (None, Operand::Memory { r#type, .. } | Operand::Data { r#type, .. })
+            | (
+                Some(Operand::Imm(_)),
+                Operand::Memory { r#type, .. } | Operand::Data { r#type, .. },
+            ) => Some(r#type.size_bytes()),
             (Some(Operand::Memory { size, .. } | Operand::Data { size, .. }), Operand::Imm(_)) => {
                 Some(*size)
             }

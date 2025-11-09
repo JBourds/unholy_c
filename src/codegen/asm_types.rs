@@ -57,7 +57,7 @@ impl AssemblyType {
         }
     }
 
-    pub(super) fn size_bytes(&self) -> usize {
+    pub fn size_bytes(&self) -> usize {
         match self {
             AssemblyType::Byte => core::mem::size_of::<u8>(),
             AssemblyType::Word => core::mem::size_of::<u16>(),

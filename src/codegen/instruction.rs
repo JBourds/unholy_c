@@ -851,12 +851,6 @@ impl Instruction<Initial> {
 
         for arg in stack_args.into_iter().rev() {
             let arg_t = arg.get_type(symbols);
-            // Pointer decay
-            let arg_sz = if arg_t.is_array() {
-                core::mem::size_of::<usize>()
-            } else {
-                arg_t.size_of()
-            };
             let arg = Operand::from_tacky(arg, symbols, float_constants);
             match arg {
                 Operand::Imm(i) => v.push(Self::new(InstructionType::Push(Operand::Imm(i)))),
@@ -864,29 +858,33 @@ impl Instruction<Initial> {
                 // it will need to be rewritten in emission as pushing
                 // the full 64-bit register
                 Operand::Reg(r) => v.push(Self::new(InstructionType::Push(Operand::Reg(r)))),
-                src @ Operand::Memory { .. }
-                | src @ Operand::Pseudo { .. }
-                | src @ Operand::Data { .. }
-                | src @ Operand::Indexed { .. }
-                | src @ Operand::PseudoMem { .. } => {
-                    // FIXME: This should really stop being hardcoded
-                    if arg_sz == 8 {
-                        v.push(Self::new(InstructionType::Push(src)));
-                    } else {
-                        let ax = Operand::Reg(Reg::X86 {
-                            reg: X86Reg::Ax,
-                            section: RegSection::from_size(arg_sz).expect("NOT IMPLEMENTED YET :("),
-                        });
-
-                        v.extend([
-                            Self::new(InstructionType::Mov {
-                                src,
-                                dst: ax.clone(),
-                            }),
-                            Self::new(InstructionType::Push(ax)),
-                        ]);
-                    }
+                src @ Operand::PseudoMem { .. } => {
+                    v.extend([
+                        Self::new(InstructionType::Lea {
+                            src,
+                            dst: Operand::Reg(RAX),
+                        }),
+                        Self::new(InstructionType::Push(Operand::Reg(RAX))),
+                    ]);
                 }
+                src @ Operand::Pseudo { .. }
+                | src @ Operand::Data { .. }
+                | src @ Operand::Indexed { .. } => {
+                    let ax = Operand::Reg(Reg::X86 {
+                        reg: X86Reg::Ax,
+                        section: RegSection::from_size(arg_t.size_of())
+                            .expect("NOT IMPLEMENTED YET :("),
+                    });
+
+                    v.extend([
+                        Self::new(InstructionType::Mov {
+                            src,
+                            dst: ax.clone(),
+                        }),
+                        Self::new(InstructionType::Push(ax)),
+                    ]);
+                }
+                other => unreachable!("{other:?}"),
             }
         }
         v.push(Self::new(InstructionType::Call(name)));

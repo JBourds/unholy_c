@@ -66,6 +66,27 @@ impl Operand {
         }
     }
 
+    pub(super) fn with_offset(self, add: usize) -> Self {
+        match self {
+            Operand::PseudoMem { name, offset } => Operand::PseudoMem {
+                name,
+                offset: offset + add,
+            },
+            Operand::Memory {
+                reg,
+                offset,
+                size,
+                r#type,
+            } => Operand::Memory {
+                reg,
+                offset: offset + add as isize,
+                size,
+                r#type,
+            },
+            _ => unreachable!("{self:#?}"),
+        }
+    }
+
     pub(super) fn is_reg(&self) -> bool {
         matches!(self, Self::Reg(_))
     }

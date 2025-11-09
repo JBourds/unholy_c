@@ -1229,28 +1229,31 @@ impl Instruction<WithStorage> {
                         }
                     }
                     // 2. If it is not static, put it on the stack
-                    Some(entry) => mappings
-                        .entry(Rc::clone(name))
-                        .or_insert_with(|| {
-                            let ast::Type {
-                                base: ast::BaseType::Array { element, .. },
-                                ..
-                            } = &entry.r#type
-                            else {
-                                unimplemented!("Add structs once we get here.");
-                            };
-                            let byte_array = AssemblyType::from_ast_type(entry.r#type.clone());
-                            let element_t = AssemblyType::from_ast_type(*element.clone());
-                            *stack_bound += byte_array.size_bytes();
-                            *stack_bound = align_up(*stack_bound, byte_array.alignment());
-                            Operand::Memory {
-                                reg: RBP,
-                                offset: -(*stack_bound as isize) + offset as isize,
-                                size: byte_array.size_bytes(),
-                                r#type: element_t,
-                            }
-                        })
-                        .clone(),
+                    Some(entry) => {
+                        let entry = mappings
+                            .entry(Rc::clone(name))
+                            .or_insert_with(|| {
+                                let ast::Type {
+                                    base: ast::BaseType::Array { element, .. },
+                                    ..
+                                } = &entry.r#type
+                                else {
+                                    unimplemented!("Add structs once we get here.");
+                                };
+                                let byte_array = AssemblyType::from_ast_type(entry.r#type.clone());
+                                let element_t = AssemblyType::from_ast_type(*element.clone());
+                                *stack_bound += byte_array.size_bytes();
+                                *stack_bound = align_up(*stack_bound, byte_array.alignment());
+                                Operand::Memory {
+                                    reg: RBP,
+                                    offset: -(*stack_bound as isize),
+                                    size: byte_array.size_bytes(),
+                                    r#type: element_t,
+                                }
+                            })
+                            .clone();
+                        entry.with_offset(offset)
+                    }
                     _ => unreachable!(),
                 }
             }

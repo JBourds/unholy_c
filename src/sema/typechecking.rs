@@ -1016,7 +1016,7 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
             // FIXME: Lazy clone :(
             Ok(TypedExpr {
                 expr: ast::Expr::Assignment {
-                    lvalue: lvalue.clone(),
+                    lvalue: Box::new(expr),
                     rvalue: Box::new(
                         convert_by_assignment(rvalue, &left_t, symbols).context(
                             "Failed to implicitly cast righthand side during assignment.",
@@ -1480,6 +1480,7 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
                 expr: index,
                 r#type: index_t,
             } = typecheck_expr_and_convert(index, symbols)?;
+
             match (expr_t, index_t) {
                 (expr_t, index_t) if expr_t.is_pointer() && index_t.is_integer() => Ok(TypedExpr {
                     expr: ast::Expr::Subscript {
@@ -1493,11 +1494,11 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
                 }),
                 (expr_t, index_t) if expr_t.is_integer() && index_t.is_pointer() => Ok(TypedExpr {
                     expr: ast::Expr::Subscript {
-                        expr: Box::new(ast::Expr::Cast {
+                        expr: Box::new(index),
+                        index: Box::new(ast::Expr::Cast {
                             target: ast::Type::PTRDIFF_T,
                             exp: Box::new(expr),
                         }),
-                        index: Box::new(index),
                     },
                     r#type: index_t.deref(),
                 }),

@@ -1416,7 +1416,7 @@ impl Instruction<WithStorage> {
                 src,
                 dst,
                 RewriteRule::new(ImmRewrite::Ignore, MemRewrite::Default, true),
-                RewriteRule::new(ImmRewrite::Error, MemRewrite::UseAndStore, false),
+                RewriteRule::new(ImmRewrite::Error, MemRewrite::StoreNoUse, false),
                 |src, dst| Self::from_op(InstructionType::Lea { src, dst }),
             ),
             InstructionType::Idiv(src @ Operand::Imm(_)) => {

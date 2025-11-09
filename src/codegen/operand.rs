@@ -144,7 +144,7 @@ impl fmt::Display for Operand {
                     write!(f, "\"{name}\"[rip]")
                 }
             }
-            Operand::Indexed { base, index, scale } => write!(f, "({base}, {index}, {scale})"),
+            Operand::Indexed { base, index, scale } => write!(f, "[{base} + {index} * {scale}]"),
             Self::Pseudo { .. } => {
                 unreachable!("Cannot create asm representation for a pseudoregister.")
             }

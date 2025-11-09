@@ -131,9 +131,10 @@ pub mod x64 {
                 Some(Operand::Imm(_)),
                 Operand::Memory { r#type, .. } | Operand::Data { r#type, .. },
             ) => Some(r#type.size_bytes()),
-            (Some(Operand::Memory { size, .. } | Operand::Data { size, .. }), Operand::Imm(_)) => {
-                Some(*size)
-            }
+            (
+                Some(Operand::Memory { r#type, .. } | Operand::Data { r#type, .. }),
+                Operand::Imm(_),
+            ) => Some(r#type.size_bytes()),
             _ => None,
         };
         match size {
@@ -242,16 +243,11 @@ pub mod x64 {
                     codegen::Operand::Reg(r) => {
                         codegen::Operand::Reg(r.as_section(codegen::RegSection::LowByte))
                     }
-                    codegen::Operand::Memory {
-                        reg,
-                        offset,
-                        r#type,
-                        ..
-                    } => codegen::Operand::Memory {
+                    codegen::Operand::Memory { reg, offset, .. } => codegen::Operand::Memory {
                         reg,
                         offset,
                         size: 1,
-                        r#type,
+                        r#type: codegen::AssemblyType::Byte,
                     },
                     _ => dst,
                 };

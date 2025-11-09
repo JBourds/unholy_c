@@ -1,4 +1,5 @@
 use super::{AssemblyType, Reg, StaticConstant};
+use crate::codegen::RegSection;
 use crate::{ast, tacky};
 use std::collections::HashSet;
 use std::fmt;
@@ -63,6 +64,37 @@ impl Operand {
             Self::Data { size, .. } => *size,
             Operand::Indexed { .. } => core::mem::size_of::<usize>(),
             Operand::PseudoMem { .. } => unimplemented!(),
+        }
+    }
+
+    pub(super) fn size_cast(self, r#type: AssemblyType) -> Self {
+        match self {
+            Operand::Reg(reg) => Operand::Reg(
+                reg.as_section(
+                    RegSection::from_size(r#type.size_bytes())
+                        .expect("should be able to get reg section from assembly type"),
+                ),
+            ),
+            Operand::Memory {
+                reg, offset, size, ..
+            } => Operand::Memory {
+                reg,
+                offset,
+                size,
+                r#type,
+            },
+            Operand::Data {
+                name,
+                size,
+                is_const,
+                ..
+            } => Operand::Data {
+                name,
+                size,
+                r#type,
+                is_const,
+            },
+            _ => self,
         }
     }
 

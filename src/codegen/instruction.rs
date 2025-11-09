@@ -1315,9 +1315,10 @@ impl Instruction<WithStorage> {
                     src: convert_operand_offset(src),
                     dst: convert_operand_offset(dst),
                 },
+                // Always has to be a quadword for `dst` since it is a memory address
                 InstructionType::Lea { src, dst } => InstructionType::Lea {
                     src: convert_operand_offset(src),
-                    dst: convert_operand_offset(dst),
+                    dst: convert_operand_offset(dst).size_cast(AssemblyType::Quadword),
                 },
                 instr @ InstructionType::Cdq(_) => instr,
                 instr @ InstructionType::Jmp(_) => instr,

@@ -1078,7 +1078,7 @@ impl BaseType {
             BaseType::Float(nbytes) => *nbytes,
             BaseType::Double(nbytes) => *nbytes,
             BaseType::Ptr { to, .. } => to.size_of(),
-            BaseType::Array { element, .. } => element.base.size_of_base_type(),
+            BaseType::Array { element, .. } => element.size_of(),
             BaseType::Fun { .. } => unreachable!(),
             BaseType::Struct => unreachable!(),
             BaseType::Void => unreachable!(),

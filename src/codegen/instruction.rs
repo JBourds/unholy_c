@@ -1233,7 +1233,7 @@ impl Instruction<WithStorage> {
                         .entry(Rc::clone(name))
                         .or_insert_with(|| {
                             let ast::Type {
-                                base: ast::BaseType::Array { element, size },
+                                base: ast::BaseType::Array { element, .. },
                                 ..
                             } = &entry.r#type
                             else {
@@ -1241,12 +1241,12 @@ impl Instruction<WithStorage> {
                             };
                             let byte_array = AssemblyType::from_ast_type(entry.r#type.clone());
                             let element_t = AssemblyType::from_ast_type(*element.clone());
+                            *stack_bound += byte_array.size_bytes();
                             *stack_bound = align_up(*stack_bound, byte_array.alignment());
-                            *stack_bound += size;
                             Operand::Memory {
                                 reg: RBP,
                                 offset: -(*stack_bound as isize) + offset as isize,
-                                size: element.size_of(),
+                                size: byte_array.size_bytes(),
                                 r#type: element_t,
                             }
                         })

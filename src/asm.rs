@@ -79,19 +79,15 @@ pub mod x64 {
         if in_bss {
             w.write_fmt(format_args!("\t.zero {}\n", symbol.r#type.size_of()))?;
         } else {
-            // FIXME: This is not how this should be done
-            for init in var.init.iter() {
-                let nbytes = symbol.r#type.size_of();
-                match nbytes {
-                    8 => w.write_fmt(format_args!(
-                        "\t.quad {}\n",
-                        i64::from_le_bytes(init[0..nbytes].try_into().unwrap())
-                    ))?,
-                    4 => w.write_fmt(format_args!(
-                        "\t.long {}\n",
-                        i32::from_le_bytes(init[0..nbytes].try_into().unwrap())
-                    ))?,
-                    _ => unreachable!(),
+            for init in &var.init {
+                // 16 is arbitrary, just mean to prevent super long files
+                for chunk in init.chunks(16) {
+                    let bytes = chunk
+                        .iter()
+                        .map(|b| format!("0x{b:02x}"))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    writeln!(w, "\t.byte {}", bytes)?;
                 }
             }
         }

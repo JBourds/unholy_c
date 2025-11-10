@@ -249,16 +249,9 @@ impl Instruction<Initial> {
         let src = Operand::from_tacky(val, symbols, float_constants);
 
         match val_type {
-            ast::Type {
-                base: ast::BaseType::Int { .. },
-                ..
-            }
-            | ast::Type {
-                base: ast::BaseType::Ptr { .. } | ast::BaseType::Array { .. },
-                ..
-            } => {
+            t if t.is_array() => {
                 vec![
-                    Self::new(InstructionType::Mov {
+                    Self::new(InstructionType::Lea {
                         src: src.clone(),
                         dst: Operand::Reg(Reg::X86 {
                             reg: X86Reg::Ax,
@@ -268,10 +261,7 @@ impl Instruction<Initial> {
                     Self::new(InstructionType::Ret),
                 ]
             }
-            ast::Type {
-                base: ast::BaseType::Float(_) | ast::BaseType::Double(_),
-                ..
-            } => {
+            t if t.is_float() => {
                 vec![
                     Self::new(InstructionType::Mov {
                         src: src.clone(),
@@ -279,6 +269,18 @@ impl Instruction<Initial> {
                             reg: XmmReg::XMM0,
                             section: RegSection::from_size(src.size())
                                 .expect("NOT IMPLEMENTED YET :("),
+                        }),
+                    }),
+                    Self::new(InstructionType::Ret),
+                ]
+            }
+            t if t.is_pointer() || t.is_integer() => {
+                vec![
+                    Self::new(InstructionType::Mov {
+                        src: src.clone(),
+                        dst: Operand::Reg(Reg::X86 {
+                            reg: X86Reg::Ax,
+                            section: PTR_SIZE,
                         }),
                     }),
                     Self::new(InstructionType::Ret),

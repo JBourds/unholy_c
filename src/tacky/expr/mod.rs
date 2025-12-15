@@ -16,6 +16,12 @@ use fun_call::*;
 use subscript::*;
 use unary::*;
 
+#[derive(Debug)]
+pub enum ExprResult {
+    PlainOperand(Expr),
+    DerefrencedPointer(Expr),
+}
+
 #[derive(Debug, PartialEq)]
 pub struct Expr {
     pub instructions: Vec<Instruction>,

@@ -5,27 +5,29 @@ use std::rc::Rc;
 
 mod binary_op;
 mod expr;
-mod expr_result;
 mod function;
 mod instruction;
 mod program;
 mod static_variable;
 mod symbol_table;
-mod top_level;
 mod unary_op;
 mod val;
 
 pub use binary_op::*;
 pub use expr::*;
-pub use expr_result::*;
 pub use function::*;
 pub use instruction::*;
 pub use program::*;
 pub use static_variable::*;
 pub use symbol_table::*;
-pub use top_level::*;
 pub use unary_op::*;
 pub use val::*;
+
+#[derive(Debug, PartialEq)]
+pub enum TopLevel {
+    Fun(Function),
+    Static(StaticVariable),
+}
 
 #[cfg(test)]
 mod tests {

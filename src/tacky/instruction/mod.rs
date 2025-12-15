@@ -1,12 +1,10 @@
 use super::*;
 
-mod parse_if;
-mod parse_loops;
-mod parse_switch;
+mod conditionals;
+mod loops;
 
-use parse_if::*;
-use parse_loops::*;
-use parse_switch::*;
+use conditionals::*;
+use loops::*;
 
 #[derive(Debug, PartialEq)]
 pub enum Instruction {

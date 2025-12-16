@@ -20,6 +20,7 @@ pub(crate) fn parse_subscript(
     let (new_instructions, dst) =
         Expr::do_pointer_arithmetic(ast::BinaryOp::Add, expr, index, make_temp_var, symbols);
     instructions.extend(new_instructions);
+    decay_dereferenced_pointer(dst.clone(), symbols);
     ExprResult::DerefrencedPointer(Expr {
         instructions,
         val: dst,

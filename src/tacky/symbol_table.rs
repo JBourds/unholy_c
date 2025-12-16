@@ -35,6 +35,10 @@ impl SymbolTable {
         self.table.get(key)
     }
 
+    pub fn get_mut(&mut self, key: &Rc<String>) -> Option<&mut SymbolEntry> {
+        self.table.get_mut(key)
+    }
+
     pub fn new_entry(&mut self, key: Rc<String>, r#type: ast::Type) {
         let old_key = self.table.insert(
             Rc::clone(&key),

@@ -259,11 +259,8 @@ impl Expr {
                     mut instructions,
                     val,
                 } = expr;
-                let dst = Function::make_tacky_temp_var(
-                    val.get_type(symbols).deref(),
-                    symbols,
-                    make_temp_var,
-                );
+                let dst =
+                    Function::make_tacky_temp_var(val.get_type(symbols), symbols, make_temp_var);
                 instructions.push(Instruction::Load {
                     src_ptr: val,
                     dst: dst.clone(),
@@ -275,4 +272,18 @@ impl Expr {
             }
         }
     }
+}
+
+/// We must preserve the type being pointed to up until the pointer is
+/// dereferenced because we must know things like array sizes to determine scale
+/// for pointer arithmetic. Once the pointer is dereferenced however, it should
+/// immediately be decayed if it has an array type. This is not done within
+/// the assembly, but we can easily do it by just rewriting the type of the
+/// temporary variable within the symbol table when subscripting/dereferencing.
+fn decay_dereferenced_pointer(val: Val, symbols: &mut SymbolTable) {
+    let Val::Var(v) = val else {
+        unreachable!();
+    };
+    let entry = symbols.get_mut(&v).expect("impossible unknown key");
+    entry.r#type = entry.r#type.clone().deref().maybe_decay();
 }

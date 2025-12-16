@@ -27,6 +27,7 @@ pub(crate) fn parse_unary(
                 src: val,
                 dst: dst.clone(),
             });
+            decay_dereferenced_pointer(dst.clone(), symbols);
             ExprResult::PlainOperand(Expr {
                 instructions,
                 val: dst,

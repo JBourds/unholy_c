@@ -958,6 +958,8 @@ fn boolify(expr: Expr, r#type: &Type, symbols: &mut SymbolTable) -> Result<Expr>
     }
 }
 
+/// If the type is an array, wrap it in an `AddrOf` and convert its type into a
+/// pointer to the elements of the array.
 fn maybe_decay_expr(texpr: TypedExpr) -> TypedExpr {
     let TypedExpr { expr, r#type } = texpr;
     if r#type.is_array() {
@@ -1454,6 +1456,7 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
             },
         }),
         ast::Expr::Subscript { expr, index } => {
+            // Figure out which one is the integer
             let TypedExpr {
                 expr,
                 r#type: expr_t,
@@ -1462,32 +1465,29 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
                 expr: index,
                 r#type: index_t,
             } = typecheck_expr_and_convert(index, symbols)?;
-
-            match (expr_t, index_t) {
-                (expr_t, index_t) if expr_t.is_pointer() && index_t.is_integer() => Ok(TypedExpr {
-                    expr: ast::Expr::Subscript {
-                        expr: Box::new(expr),
-                        index: Box::new(ast::Expr::Cast {
-                            target: ast::Type::PTRDIFF_T,
-                            exp: Box::new(index),
-                        }),
-                    },
-                    r#type: expr_t.deref().maybe_decay(),
-                }),
-                (expr_t, index_t) if expr_t.is_integer() && index_t.is_pointer() => Ok(TypedExpr {
-                    expr: ast::Expr::Subscript {
-                        expr: Box::new(index),
-                        index: Box::new(ast::Expr::Cast {
-                            target: ast::Type::PTRDIFF_T,
-                            exp: Box::new(expr),
-                        }),
-                    },
-                    r#type: index_t.deref().maybe_decay(),
-                }),
+            let (ptr, index) = match (&expr_t, &index_t) {
+                (expr_t, index_t) if expr_t.is_pointer() && index_t.is_integer() => (expr, index),
+                (expr_t, index_t) if expr_t.is_integer() && index_t.is_pointer() => (index, expr),
                 (expr_t, index_t) => bail!(
                     "Subscript takes one pointer type and one integer type, got: {expr_t:#?}, {index_t:#?}"
                 ),
-            }
+            };
+            // The type of the subscripted operation is what the pointer's type
+            // is. If that type is an array however, we need to extract it by
+            // dereferencing the pointer then decaying it into a pointer of its
+            // own type.
+            let subscript = ast::Expr::Subscript {
+                expr: Box::new(ptr),
+                index: Box::new(ast::Expr::Cast {
+                    target: ast::Type::PTRDIFF_T,
+                    exp: Box::new(index),
+                }),
+            };
+            let r#type = expr_t.deref().maybe_decay();
+            Ok(maybe_decay_expr(TypedExpr {
+                expr: subscript,
+                r#type,
+            }))
         }
     }
 }

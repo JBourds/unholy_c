@@ -94,10 +94,6 @@ impl Expr {
                 symbols,
                 make_temp_var,
             )),
-            ast::Expr::Unary {
-                op: ast::UnaryOp::AddrOf,
-                ..
-            } => parse_addr_of(node, symbols, make_temp_var),
             ast::Expr::Unary { .. } => parse_unary(node, symbols, make_temp_var),
             ast::Expr::Binary { .. } => parse_binary(node, symbols, make_temp_var),
             ast::Expr::Var(name) => ExprResult::PlainOperand(Self {

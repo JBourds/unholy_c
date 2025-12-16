@@ -115,11 +115,11 @@ impl Instruction {
     }
 
     pub(crate) fn process_initializer_rec(
-        base: usize,
+        base: &mut usize,
         in_array: bool,
         name: Rc<String>,
         init: ast::Initializer,
-        r#type: &ast::Type,
+        per_element_size: usize,
         symbols: &mut SymbolTable,
         make_temp_var: &mut impl FnMut() -> String,
     ) -> Vec<Self> {
@@ -133,8 +133,9 @@ impl Instruction {
                     instructions.push(Instruction::CopyToOffset {
                         src,
                         dst: Rc::clone(&name),
-                        offset: base.try_into().unwrap(),
+                        offset: (*base).try_into().unwrap(),
                     });
+                    *base += per_element_size;
                 } else {
                     let dst = Val::Var(name);
                     instructions.push(Instruction::Copy {
@@ -146,19 +147,16 @@ impl Instruction {
             }
             ast::Initializer::CompundInit(inits) => {
                 let mut instructions = vec![];
-                let per_element_size = r#type.base.size_of_base_type();
-                let mut current_base = base;
                 for init in inits {
                     instructions.extend(Self::process_initializer_rec(
-                        current_base,
+                        base,
                         true,
                         name.clone(),
                         init,
-                        r#type,
+                        per_element_size,
                         symbols,
                         make_temp_var,
                     ));
-                    current_base += per_element_size;
                 }
                 instructions
             }
@@ -172,7 +170,17 @@ impl Instruction {
         symbols: &mut SymbolTable,
         make_temp_var: &mut impl FnMut() -> String,
     ) -> Vec<Self> {
-        Self::process_initializer_rec(0, false, name, init, r#type, symbols, make_temp_var)
+        let mut base = 0;
+        let per_element_size = r#type.base.size_of_base_type();
+        Self::process_initializer_rec(
+            &mut base,
+            false,
+            name,
+            init,
+            per_element_size,
+            symbols,
+            make_temp_var,
+        )
     }
 
     pub(crate) fn parse_var_decl_with(

@@ -298,7 +298,7 @@ impl Instruction<Initial> {
         float_constants: &mut HashSet<StaticConstant>,
     ) -> Vec<Self> {
         if is_float(&src, symbols) && matches!(op, tacky::UnaryOp::Negate) {
-            let float_constant = StaticConstant::from(-0.0).with_alignment(16);
+            let float_constant = StaticConstant::from(-0.0).with_alignment(SSE_ALIGNMENT);
             let neg_zero = float_constant.id();
             // Super special 16-byte alignment needed here for SSE
             float_constants.insert(float_constant);
@@ -313,7 +313,7 @@ impl Instruction<Initial> {
                     op: BinaryOp::Xor,
                     src: Operand::Data {
                         name: neg_zero,
-                        size: 16,
+                        size: SSE_ALIGNMENT,
                         r#type: AssemblyType::Double,
                         is_const: true,
                     },

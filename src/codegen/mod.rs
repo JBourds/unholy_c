@@ -23,6 +23,7 @@ use rewrite::*;
 pub use statics::*;
 
 pub(super) const MAX_AGGREGATE_ALIGNMENT: usize = 16;
+const SSE_ALIGNMENT: usize = 16;
 
 #[derive(Debug, PartialEq)]
 pub enum TopLevel {

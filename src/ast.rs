@@ -1317,17 +1317,21 @@ impl Type {
 
     pub fn maybe_decay(self) -> Self {
         match self {
+            // Array types decay to pointers of their element types
+            // recursively (e.g., 2D array decays to pointer to pointers)
             Self {
                 base: BaseType::Array { element, .. },
                 ..
             } => Self {
                 base: BaseType::Ptr {
-                    to: element,
+                    to: Box::new(element.maybe_decay()),
                     is_restrict: false,
                 },
                 alignment: Self::PTR_ALIGNMENT,
-                ..self
+                is_const: false,
             },
+            // "Decaying" a function type is just making sure all of its
+            // parameters have their types decayed
             Self {
                 base: BaseType::Fun { ret_t, param_types },
                 ..

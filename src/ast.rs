@@ -1350,10 +1350,7 @@ impl Type {
             } => Self {
                 base: BaseType::Fun {
                     ret_t,
-                    param_types: param_types
-                        .into_iter()
-                        .map(|t| dbg!(t.maybe_decay()))
-                        .collect(),
+                    param_types: param_types.into_iter().map(|t| t.maybe_decay()).collect(),
                 },
                 ..self
             },

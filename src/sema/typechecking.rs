@@ -1483,7 +1483,7 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
                     exp: Box::new(index),
                 }),
             };
-            let r#type = expr_t.deref().maybe_decay();
+            let r#type = expr_t.deref();
             Ok(maybe_decay_expr(TypedExpr {
                 expr: subscript,
                 r#type,

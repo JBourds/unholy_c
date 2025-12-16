@@ -1317,7 +1317,7 @@ impl Type {
     }
 
     pub fn is_array(&self) -> bool {
-        matches!(self.base, BaseType::Array { .. })
+        matches!(&self.base, BaseType::Array { .. })
     }
 
     pub fn deref(self) -> Self {
@@ -1331,7 +1331,6 @@ impl Type {
     pub fn maybe_decay(self) -> Self {
         match self {
             // Array types decay to pointers of their element types
-            // recursively (e.g., 2D array decays to pointer to pointers)
             Self {
                 base: BaseType::Array { element, .. },
                 ..
@@ -1351,7 +1350,10 @@ impl Type {
             } => Self {
                 base: BaseType::Fun {
                     ret_t,
-                    param_types: param_types.into_iter().map(|t| t.maybe_decay()).collect(),
+                    param_types: param_types
+                        .into_iter()
+                        .map(|t| dbg!(t.maybe_decay()))
+                        .collect(),
                 },
                 ..self
             },

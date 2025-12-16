@@ -1052,16 +1052,7 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
                     is_const: false,
                 },
                 ast::UnaryOp::AddrOf => bail!("Cannot take the address of a non-lvalue"),
-                ast::UnaryOp::Deref => {
-                    let ast::Type {
-                        base: ast::BaseType::Ptr { to: inner, .. },
-                        ..
-                    } = r#type
-                    else {
-                        bail!("Trying to dereference non-pointer operand!")
-                    };
-                    *inner
-                }
+                ast::UnaryOp::Deref => r#type.deref(),
                 ast::UnaryOp::Negate if r#type.is_pointer() => {
                     bail!("Cannot apply unary negate operation to pointer.")
                 }

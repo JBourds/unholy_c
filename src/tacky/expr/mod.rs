@@ -54,7 +54,11 @@ impl Expr {
             });
             index = negated_tmp;
         }
-        let scale = ptr_t.base.size_of_base_type();
+        let scale = ptr_t
+            .base
+            .nth_child(1)
+            .expect("expected pointer type")
+            .nbytes();
         let dst = Function::make_tacky_temp_var(ptr_t, symbols, make_temp_var);
         instructions.push(Instruction::AddPtr {
             ptr,

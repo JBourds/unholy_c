@@ -1071,6 +1071,19 @@ impl BaseType {
         }
     }
 
+    pub fn nth_child(&self, depth: usize) -> Option<&Self> {
+        fn rec_child_type(t: &BaseType, depth: usize, n: usize) -> Option<&BaseType> {
+            match t {
+                BaseType::Ptr { to: t, .. } if depth == n => Some(&t.base),
+                BaseType::Ptr { to: t, .. } => rec_child_type(&t.base, depth + 1, n),
+                BaseType::Array { element: t, .. } if depth == n => Some(&t.base),
+                BaseType::Array { element: t, .. } => rec_child_type(&t.base, depth + 1, n),
+                _ => unimplemented!(),
+            }
+        }
+        rec_child_type(self, 1, depth)
+    }
+
     /// Used by arrays to recursively extract its base type.
     pub fn size_of_base_type(&self) -> usize {
         match self {

@@ -15,9 +15,9 @@ pub(crate) fn parse_fun_call(
                 ..
             },
         ..
-    } = symbols
-        .get(&name)
-        .expect("Function '{name}' should already be in symbol table, but it was not!")
+    } = symbols.get(&name).unwrap_or_else(|| {
+        panic!("Function '{name}' should already be in symbol table, but it was not!")
+    })
     else {
         unreachable!("Function name '{name}' resulted in non-function type in symbol table");
     };

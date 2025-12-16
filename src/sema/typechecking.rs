@@ -1472,7 +1472,7 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
                             exp: Box::new(index),
                         }),
                     },
-                    r#type: expr_t.deref(),
+                    r#type: expr_t.deref().maybe_decay(),
                 }),
                 (expr_t, index_t) if expr_t.is_integer() && index_t.is_pointer() => Ok(TypedExpr {
                     expr: ast::Expr::Subscript {
@@ -1482,7 +1482,7 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
                             exp: Box::new(expr),
                         }),
                     },
-                    r#type: index_t.deref(),
+                    r#type: index_t.deref().maybe_decay(),
                 }),
                 (expr_t, index_t) => bail!(
                     "Subscript takes one pointer type and one integer type, got: {expr_t:#?}, {index_t:#?}"

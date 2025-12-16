@@ -55,6 +55,7 @@ impl Expr {
             index = negated_tmp;
         }
         let scale = ptr_t
+            .clone()
             .base
             .nth_child(1)
             .expect("expected pointer type")

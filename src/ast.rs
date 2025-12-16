@@ -1336,7 +1336,7 @@ impl Type {
                 ..
             } => Self {
                 base: BaseType::Ptr {
-                    to: Box::new(element.maybe_decay()),
+                    to: Box::new(*element),
                     is_restrict: false,
                 },
                 alignment: Self::PTR_ALIGNMENT,

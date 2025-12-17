@@ -1228,13 +1228,9 @@ impl Instruction<WithStorage> {
                         Operand::Data {
                             name: Rc::clone(name),
                             size: entry.r#type.size_of(),
-                            r#type: AssemblyType::ByteArray {
-                                size: entry.r#type.size_of(),
-                                alignment: std::cmp::min(
-                                    entry.r#type.base.size_of_base_type(),
-                                    MAX_AGGREGATE_ALIGNMENT,
-                                ),
-                            },
+                            r#type: AssemblyType::from_ast_type(
+                                entry.r#type.last_child().clone().deref(),
+                            ),
                             is_const: false,
                         }
                     }
@@ -1243,17 +1239,11 @@ impl Instruction<WithStorage> {
                         let entry = mappings
                             .entry(Rc::clone(name))
                             .or_insert_with(|| {
-                                let ast::Type {
-                                    base: ast::BaseType::Array { element, .. },
-                                    ..
-                                } = &entry.r#type
-                                else {
-                                    unimplemented!("Add structs once we get here.");
-                                };
                                 let byte_array = AssemblyType::from_ast_type(entry.r#type.clone());
-                                let element_t = AssemblyType::from_ast_type(*element.clone());
                                 *stack_bound += byte_array.size_bytes();
                                 *stack_bound = align_up(*stack_bound, byte_array.alignment());
+                                let element_t =
+                                    AssemblyType::from_ast_type(entry.r#type.last_child().clone());
                                 Operand::Memory {
                                     reg: RBP,
                                     offset: -(*stack_bound as isize),

@@ -1281,6 +1281,20 @@ impl Type {
         }
     }
 
+    pub fn last_child(&self) -> &Self {
+        match self {
+            Self {
+                base: BaseType::Array { element, .. },
+                ..
+            } => element.last_child(),
+            Self {
+                base: BaseType::Ptr { to, .. },
+                ..
+            } => to.last_child(),
+            _ => self,
+        }
+    }
+
     pub fn float(nbytes: usize) -> Self {
         Self {
             base: BaseType::float(nbytes == core::mem::size_of::<f64>()),

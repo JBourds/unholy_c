@@ -1044,7 +1044,7 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
                     )),
                 "Cannot perform a bitwise unary operation on a floating point value."
             );
-            let r#type = match dbg!(op) {
+            let r#type = match op {
                 ast::UnaryOp::AddrOf if expr.is_lvalue() => ast::Type {
                     base: ast::BaseType::Ptr {
                         to: Box::new(r#type),

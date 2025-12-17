@@ -1228,9 +1228,7 @@ impl Instruction<WithStorage> {
                         Operand::Data {
                             name: Rc::clone(name),
                             size: entry.r#type.size_of(),
-                            r#type: AssemblyType::from_ast_type(
-                                entry.r#type.last_child().clone().deref(),
-                            ),
+                            r#type: AssemblyType::from_ast_type(entry.r#type.last_child().clone()),
                             is_const: false,
                         }
                     }

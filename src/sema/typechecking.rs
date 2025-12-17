@@ -630,27 +630,19 @@ fn is_null_pointer_constant(e: &ast::Expr) -> bool {
     )
 }
 
+/// Returns `true` if e1, `false` if e2.
 fn get_common_pointer_type(
     e1: &ast::Expr,
+    e1_t: &ast::Type,
     e2: &ast::Expr,
-    symbols: &mut SymbolTable,
-) -> Result<ast::Type> {
-    let TypedExpr {
-        expr: e1,
-        r#type: e1_t,
-    } = typecheck_expr_and_convert(e1, symbols)
-        .context("Failed to typecheck expression 1 argument.")?;
-    let TypedExpr {
-        expr: e2,
-        r#type: e2_t,
-    } = typecheck_expr_and_convert(e2, symbols)
-        .context("Failed to typecheck expression 2 argument.")?;
+    e2_t: &ast::Type,
+) -> Result<bool> {
     if e1_t == e2_t {
-        Ok(e1_t)
-    } else if is_null_pointer_constant(&e1) {
-        Ok(e2_t)
-    } else if is_null_pointer_constant(&e2) {
-        Ok(e1_t)
+        Ok(true)
+    } else if is_null_pointer_constant(e1) {
+        Ok(false)
+    } else if is_null_pointer_constant(e2) {
+        Ok(true)
     } else {
         bail!(format!(
             "{e1:#?} and {e2:#?} are not compatable pointer types."
@@ -962,6 +954,7 @@ fn boolify(expr: Expr, r#type: &Type, symbols: &mut SymbolTable) -> Result<Expr>
 /// pointer to the elements of the array.
 fn maybe_decay_expr(texpr: TypedExpr) -> TypedExpr {
     let TypedExpr { expr, r#type } = texpr;
+
     if r#type.is_array() {
         TypedExpr {
             expr: ast::Expr::Unary {
@@ -1239,7 +1232,13 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
                         "Attempted to perform binary operation other than addition or subtraction on pointer type."
                     )
                 );
-                get_common_pointer_type(&left, &right, symbols)?
+                get_common_pointer_type(&left, &left_t, &right, &right_t).map(|is_left| {
+                    if is_left {
+                        left_t.clone()
+                    } else {
+                        right_t.clone()
+                    }
+                })?
             } else {
                 let (lifted_left_t, _) =
                     ast::BaseType::lift(left_t.base.clone(), right_t.base.clone()).context(
@@ -1353,7 +1352,8 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
                 .context("Failed to typecheck ternary expression else branch.")?;
 
             let common_t = if then_type.is_pointer() || else_type.is_pointer() {
-                get_common_pointer_type(&then_expr, &else_expr, symbols)?
+                get_common_pointer_type(&then_expr, &then_type, &else_expr, &else_type)
+                    .map(|is_then| if is_then { then_type } else { else_type })?
             } else {
                 let (then_base, _) = ast::BaseType::lift(then_type.base.clone(), else_type.base)
                     .context("Ternary expression branches evaluate to different types.")?;

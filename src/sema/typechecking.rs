@@ -1044,7 +1044,7 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
                     )),
                 "Cannot perform a bitwise unary operation on a floating point value."
             );
-            let r#type = match op {
+            let r#type = match dbg!(op) {
                 ast::UnaryOp::AddrOf if expr.is_lvalue() => ast::Type {
                     base: ast::BaseType::Ptr {
                         to: Box::new(r#type),
@@ -1465,9 +1465,13 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
                 expr: index,
                 r#type: index_t,
             } = typecheck_expr_and_convert(index, symbols)?;
-            let (ptr, index) = match (&expr_t, &index_t) {
-                (expr_t, index_t) if expr_t.is_pointer() && index_t.is_integer() => (expr, index),
-                (expr_t, index_t) if expr_t.is_integer() && index_t.is_pointer() => (index, expr),
+            let (ptr, ptr_t, index, _) = match (expr_t, index_t) {
+                (expr_t, index_t) if expr_t.is_pointer() && index_t.is_integer() => {
+                    (expr, expr_t, index, index_t)
+                }
+                (expr_t, index_t) if expr_t.is_integer() && index_t.is_pointer() => {
+                    (index, index_t, expr, expr_t)
+                }
                 (expr_t, index_t) => bail!(
                     "Subscript takes one pointer type and one integer type, got: {expr_t:#?}, {index_t:#?}"
                 ),
@@ -1483,7 +1487,7 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
                     exp: Box::new(index),
                 }),
             };
-            let r#type = expr_t.deref();
+            let r#type = ptr_t.deref();
             Ok(maybe_decay_expr(TypedExpr {
                 expr: subscript,
                 r#type,

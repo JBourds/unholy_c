@@ -1466,15 +1466,12 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
             let TypedExpr {
                 expr,
                 r#type: expr_t,
-            } = typecheck_expr_and_convert(expr, symbols)?;
+            } = typecheck_expr(expr, symbols)?;
             let TypedExpr {
                 expr: index,
                 r#type: index_t,
-            } = typecheck_expr_and_convert(index, symbols)?;
-            let (ptr, ptr_t, index, _) = match (
-                dbg!(expr_t.maybe_decay()),
-                dbg!(index_t.maybe_decay()),
-            ) {
+            } = typecheck_expr(index, symbols)?;
+            let (ptr, ptr_t, index, _) = match (expr_t.maybe_decay(), index_t.maybe_decay()) {
                 (expr_t, index_t) if expr_t.is_pointer() && index_t.is_integer() => {
                     (expr, expr_t, index, index_t)
                 }

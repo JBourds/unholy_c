@@ -637,7 +637,7 @@ fn get_common_pointer_type(
     e2: &ast::Expr,
     e2_t: &ast::Type,
 ) -> Result<bool> {
-    if e1_t == e2_t {
+    if e1_t.is_or_decays_to(e2_t) || e2_t.is_or_decays_to(e1_t) {
         Ok(true)
     } else if is_null_pointer_constant(e1) {
         Ok(false)
@@ -656,12 +656,14 @@ fn convert_by_assignment(
     symbols: &mut SymbolTable,
 ) -> Result<ast::Expr> {
     let TypedExpr { expr, r#type } = typecheck_expr_and_convert(e, symbols)?;
-    if r#type == *target {
+    if r#type.is_or_decays_to(target) {
         Ok(expr)
     } else if r#type.is_arithmetic() && target.is_arithmetic()
         || is_null_pointer_constant(e) && target.is_pointer()
     {
         try_implicit_cast(target, &expr, symbols)
+    } else if r#type.maybe_decay() == *target {
+        Ok(expr)
     } else {
         bail!("Cannot convert type for assignment.")
     }
@@ -952,7 +954,7 @@ fn boolify(expr: Expr, r#type: &Type, symbols: &mut SymbolTable) -> Result<Expr>
 /// If the type is an array, wrap it in an `AddrOf` and convert its type into a
 /// pointer to the elements of the array.
 fn maybe_decay_expr(texpr: TypedExpr) -> TypedExpr {
-    let TypedExpr { expr, r#type } = dbg!(texpr);
+    let TypedExpr { expr, r#type } = texpr;
 
     if r#type.is_array() {
         TypedExpr {
@@ -960,7 +962,7 @@ fn maybe_decay_expr(texpr: TypedExpr) -> TypedExpr {
                 op: ast::UnaryOp::AddrOf,
                 expr: Box::new(expr),
             },
-            r#type: dbg!(dbg!(r#type).maybe_decay()),
+            r#type: r#type.maybe_decay(),
         }
     } else {
         TypedExpr { expr, r#type }
@@ -968,8 +970,8 @@ fn maybe_decay_expr(texpr: TypedExpr) -> TypedExpr {
 }
 
 fn typecheck_expr_and_convert(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedExpr> {
-    let texpr = dbg!(typecheck_expr(expr, symbols)?);
-    Ok(dbg!(maybe_decay_expr(texpr)))
+    let texpr = typecheck_expr(expr, symbols)?;
+    Ok(maybe_decay_expr(texpr))
 }
 
 fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedExpr> {
@@ -991,7 +993,7 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
             let TypedExpr {
                 expr,
                 r#type: left_t,
-            } = typecheck_expr(lvalue, symbols)
+            } = typecheck_expr_and_convert(lvalue, symbols)
                 .context("Failed to typecheck lvalue in assignment.")?;
             ensure!(
                 expr.is_modifiable_lvalue(&left_t),
@@ -1077,16 +1079,8 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
             let TypedExpr {
                 expr: left,
                 r#type: left_t,
-            } = match op {
-                // Don't allow lvalue conversion when it involves mutating the LHS
-                // as this would change where an array var points to
-                ast::BinaryOp::AddAssign | ast::BinaryOp::SubAssign => {
-                    typecheck_expr(left, symbols)
-                        .context("Failed to typecheck lefthand argument of binary operation.")?
-                }
-                _ => typecheck_expr_and_convert(left, symbols)
-                    .context("Failed to typecheck lefthand argument of binary operation.")?,
-            };
+            } = typecheck_expr_and_convert(left, symbols)
+                .context("Failed to typecheck lefthand argument of binary operation.")?;
             let TypedExpr {
                 expr: right,
                 r#type: right_t,
@@ -1341,13 +1335,12 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
             let TypedExpr {
                 expr: then_expr,
                 r#type: then_type,
-            } = dbg!(typecheck_expr_and_convert(then, symbols))
+            } = typecheck_expr_and_convert(then, symbols)
                 .context("Failed to typecheck ternary expression then branch.")?;
-
             let TypedExpr {
                 expr: else_expr,
                 r#type: else_type,
-            } = dbg!(typecheck_expr_and_convert(r#else, symbols))
+            } = typecheck_expr_and_convert(r#else, symbols)
                 .context("Failed to typecheck ternary expression else branch.")?;
 
             let common_t = if then_type.is_pointer() || else_type.is_pointer() {
@@ -1363,9 +1356,9 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
                 }
             };
 
-            let then = convert_by_assignment( &then_expr,&common_t, symbols)
+            let then = convert_by_assignment(&then_expr, &common_t, symbols)
                 .context(format!("Unable to implicitly cast \"then\" branch of ternary expression to its common type {common_t:#?}"))?;
-            let r#else = convert_by_assignment( &else_expr,&common_t, symbols)
+            let r#else = convert_by_assignment(&else_expr, &common_t, symbols)
                 .context(format!("Unable to implicitly cast \"else\" branch of ternary expression to its common type {common_t:#?}"))?;
 
             Ok(TypedExpr {
@@ -1397,16 +1390,18 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
                     );
                 }
                 let ret_t = *ret_t.clone();
-                let args = args
-                    .iter()
-                    .zip(param_types.iter())
-                    .map(|(arg, exp_t)| convert_by_assignment(arg, exp_t, symbols))
-                    .collect::<Result<Vec<_>>>()
-                    .context("failed to convert args for function call")?;
+                let mut converted = vec![];
+                for (arg, exp_t) in args.iter().zip(param_types.iter()) {
+                    let TypedExpr { expr, .. } = typecheck_expr_and_convert(arg, symbols)
+                        .context("failed to typecheck/convert expression in function call.")?;
+                    let expr = convert_by_assignment(&expr, exp_t, symbols)
+                        .context("failed to convert args for function call")?;
+                    converted.push(expr);
+                }
                 Ok(TypedExpr {
                     expr: ast::Expr::FunCall {
                         name: Rc::clone(name),
-                        args,
+                        args: converted,
                     },
                     r#type: ret_t,
                 })
@@ -1459,11 +1454,11 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
             let TypedExpr {
                 expr,
                 r#type: expr_t,
-            } = typecheck_expr(expr, symbols)?;
+            } = typecheck_expr_and_convert(expr, symbols)?;
             let TypedExpr {
                 expr: index,
                 r#type: index_t,
-            } = typecheck_expr(index, symbols)?;
+            } = typecheck_expr_and_convert(index, symbols)?;
             let (ptr, ptr_t, index, _) = match (expr_t.maybe_decay(), index_t.maybe_decay()) {
                 (expr_t, index_t) if expr_t.is_pointer() && index_t.is_integer() => {
                     (expr, expr_t, index, index_t)

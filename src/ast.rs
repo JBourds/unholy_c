@@ -1342,15 +1342,29 @@ impl Type {
         }
     }
 
-    pub fn maybe_decay(self) -> Self {
+    /// Try to find a common type which one element can decay to the other as.
+    pub fn is_or_decays_to(&self, target: &Self) -> bool {
+        if self == target {
+            return true;
+        }
+        let self_decayed = self.maybe_decay();
+        self_decayed == *target
+    }
+
+    pub fn maybe_decay(&self) -> Self {
         match self {
+            // Pointer to an array decays to pointer to its elements
+            Self {
+                base: BaseType::Ptr { to, .. },
+                ..
+            } if to.is_array() => to.maybe_decay(),
             // Array types decay to pointers of their element types
             Self {
                 base: BaseType::Array { element, .. },
                 ..
             } => Self {
                 base: BaseType::Ptr {
-                    to: Box::new(*element),
+                    to: Box::new(*element.clone()),
                     is_restrict: false,
                 },
                 alignment: Self::PTR_ALIGNMENT,
@@ -1363,12 +1377,12 @@ impl Type {
                 ..
             } => Self {
                 base: BaseType::Fun {
-                    ret_t,
-                    param_types: param_types.into_iter().map(|t| t.maybe_decay()).collect(),
+                    ret_t: ret_t.clone(),
+                    param_types: param_types.iter().map(|t| t.maybe_decay()).collect(),
                 },
-                ..self
+                ..self.clone()
             },
-            _ => self,
+            _ => self.clone(),
         }
     }
 }

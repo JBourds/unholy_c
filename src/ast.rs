@@ -1078,7 +1078,7 @@ impl BaseType {
                 BaseType::Ptr { to: t, .. } => rec_child_type(&t.base, depth + 1, n),
                 BaseType::Array { element: t, .. } if depth == n => Some(&t.base),
                 BaseType::Array { element: t, .. } => rec_child_type(&t.base, depth + 1, n),
-                _ => unimplemented!(),
+                _ => unimplemented!("nth_child() called on {t:#?}"),
             }
         }
         rec_child_type(self, 1, depth)

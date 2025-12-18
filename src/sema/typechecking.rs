@@ -656,13 +656,12 @@ fn convert_by_assignment(
     symbols: &mut SymbolTable,
 ) -> Result<ast::Expr> {
     let TypedExpr { expr, r#type } = typecheck_expr_and_convert(e, symbols)?;
-    let target = target.clone().maybe_decay();
-    if r#type == target {
+    if r#type == *target {
         Ok(expr)
     } else if r#type.is_arithmetic() && target.is_arithmetic()
         || is_null_pointer_constant(e) && target.is_pointer()
     {
-        try_implicit_cast(&target, &expr, symbols)
+        try_implicit_cast(target, &expr, symbols)
     } else {
         bail!("Cannot convert type for assignment.")
     }
@@ -953,7 +952,7 @@ fn boolify(expr: Expr, r#type: &Type, symbols: &mut SymbolTable) -> Result<Expr>
 /// If the type is an array, wrap it in an `AddrOf` and convert its type into a
 /// pointer to the elements of the array.
 fn maybe_decay_expr(texpr: TypedExpr) -> TypedExpr {
-    let TypedExpr { expr, r#type } = texpr;
+    let TypedExpr { expr, r#type } = dbg!(texpr);
 
     if r#type.is_array() {
         TypedExpr {
@@ -961,7 +960,7 @@ fn maybe_decay_expr(texpr: TypedExpr) -> TypedExpr {
                 op: ast::UnaryOp::AddrOf,
                 expr: Box::new(expr),
             },
-            r#type: r#type.maybe_decay(),
+            r#type: dbg!(dbg!(r#type).maybe_decay()),
         }
     } else {
         TypedExpr { expr, r#type }
@@ -969,8 +968,8 @@ fn maybe_decay_expr(texpr: TypedExpr) -> TypedExpr {
 }
 
 fn typecheck_expr_and_convert(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedExpr> {
-    let texpr = typecheck_expr(expr, symbols)?;
-    Ok(maybe_decay_expr(texpr))
+    let texpr = dbg!(typecheck_expr(expr, symbols)?);
+    Ok(dbg!(maybe_decay_expr(texpr)))
 }
 
 fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedExpr> {
@@ -1342,13 +1341,13 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
             let TypedExpr {
                 expr: then_expr,
                 r#type: then_type,
-            } = typecheck_expr_and_convert(then, symbols)
+            } = dbg!(typecheck_expr_and_convert(then, symbols))
                 .context("Failed to typecheck ternary expression then branch.")?;
 
             let TypedExpr {
                 expr: else_expr,
                 r#type: else_type,
-            } = typecheck_expr_and_convert(r#else, symbols)
+            } = dbg!(typecheck_expr_and_convert(r#else, symbols))
                 .context("Failed to typecheck ternary expression else branch.")?;
 
             let common_t = if then_type.is_pointer() || else_type.is_pointer() {

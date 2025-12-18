@@ -1257,6 +1257,18 @@ pub struct Type {
     pub is_const: bool,
 }
 
+impl From<&Constant> for Type {
+    fn from(value: &Constant) -> Self {
+        let base = BaseType::from(value);
+        let alignment = base.default_alignment();
+        Self {
+            base,
+            alignment,
+            is_const: false,
+        }
+    }
+}
+
 impl PartialEq for Type {
     fn eq(&self, other: &Self) -> bool {
         self.base == other.base && self.alignment == other.alignment
@@ -1353,11 +1365,6 @@ impl Type {
 
     pub fn maybe_decay(&self) -> Self {
         match self {
-            // Pointer to an array decays to pointer to its elements
-            Self {
-                base: BaseType::Ptr { to, .. },
-                ..
-            } if to.is_array() => to.maybe_decay(),
             // Array types decay to pointers of their element types
             Self {
                 base: BaseType::Array { element, .. },

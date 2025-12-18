@@ -1365,9 +1365,9 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
             };
 
             let then = convert_by_assignment( &then_expr,&common_t, symbols)
-                .context("Unable to implicitly cast \"then\" branch of ternary expression to its common type {common_type:?}")?;
+                .context(format!("Unable to implicitly cast \"then\" branch of ternary expression to its common type {common_t:#?}"))?;
             let r#else = convert_by_assignment( &else_expr,&common_t, symbols)
-                .context("Unable to implicitly cast \"else\" branch of ternary expression to its common type {common_type:?}")?;
+                .context(format!("Unable to implicitly cast \"else\" branch of ternary expression to its common type {common_t:#?}"))?;
 
             Ok(TypedExpr {
                 expr: ast::Expr::Conditional {

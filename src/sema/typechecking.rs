@@ -1004,7 +1004,7 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
             let TypedExpr {
                 expr: lexpr,
                 r#type: left_t,
-            } = typecheck_expr_and_convert(lvalue, symbols)
+            } = typecheck_expr(lvalue, symbols)
                 .context("Failed to typecheck lvalue in assignment.")?;
             ensure!(
                 lexpr.is_modifiable_lvalue(&left_t),
@@ -1016,6 +1016,7 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
                 r#type: right_t,
             } = typecheck_expr_and_convert(rvalue, symbols)
                 .context("Failed to typecheck rvalue in assignment.")?;
+
             let rvalue = Box::new(
                 convert_by_assignment(rexpr, &right_t, &left_t, symbols)
                     .context("Failed to implicitly cast righthand side during assignment.")?,
@@ -1096,8 +1097,16 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
             let TypedExpr {
                 expr: left,
                 r#type: left_t,
-            } = typecheck_expr_and_convert(left, symbols)
-                .context("Failed to typecheck lefthand argument of binary operation.")?;
+            } = match op {
+                // Don't allow lvalue conversion when it involves mutating the LHS
+                // as this would change where an array var points to
+                ast::BinaryOp::AddAssign | ast::BinaryOp::SubAssign => {
+                    typecheck_expr(left, symbols)
+                        .context("Failed to typecheck lefthand argument of binary operation.")?
+                }
+                _ => typecheck_expr_and_convert(left, symbols)
+                    .context("Failed to typecheck lefthand argument of binary operation.")?,
+            };
             let TypedExpr {
                 expr: right,
                 r#type: right_t,

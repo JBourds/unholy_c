@@ -634,25 +634,16 @@ fn is_null_pointer_constant(e: &ast::Expr) -> bool {
 
 fn get_common_pointer_type(
     e1: &ast::Expr,
+    e1_t: &ast::Type,
     e2: &ast::Expr,
-    symbols: &mut SymbolTable,
+    e2_t: &ast::Type,
 ) -> Result<ast::Type> {
-    let TypedExpr {
-        expr: e1,
-        r#type: e1_t,
-    } = typecheck_expr_and_convert(e1, symbols)
-        .context("Failed to typecheck expression 1 argument.")?;
-    let TypedExpr {
-        expr: e2,
-        r#type: e2_t,
-    } = typecheck_expr_and_convert(e2, symbols)
-        .context("Failed to typecheck expression 2 argument.")?;
-    if e1_t.is_or_decays_to(&e2_t) || e2_t.is_or_decays_to(&e1_t) {
-        Ok(e1_t)
-    } else if is_null_pointer_constant(&e1) {
-        Ok(e2_t)
-    } else if is_null_pointer_constant(&e2) {
-        Ok(e1_t)
+    if e1_t.is_or_decays_to(e2_t) || e2_t.is_or_decays_to(e1_t) {
+        Ok(e1_t.clone())
+    } else if is_null_pointer_constant(e1) {
+        Ok(e2_t.clone())
+    } else if is_null_pointer_constant(e2) {
+        Ok(e1_t.clone())
     } else {
         bail!(format!(
             "{e1:#?} and {e2:#?} are not compatable pointer types."
@@ -1004,7 +995,7 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
             let TypedExpr {
                 expr: lexpr,
                 r#type: left_t,
-            } = typecheck_expr(lvalue, symbols)
+            } = typecheck_expr_and_convert(lvalue, symbols)
                 .context("Failed to typecheck lvalue in assignment.")?;
             ensure!(
                 lexpr.is_modifiable_lvalue(&left_t),
@@ -1251,7 +1242,7 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
                         "Attempted to perform binary operation other than addition or subtraction on pointer type."
                     )
                 );
-                get_common_pointer_type(&left, &right, symbols)?
+                get_common_pointer_type(&left, &left_t, &right, &right_t)?
             } else {
                 let (lifted_left_t, _) =
                     ast::BaseType::lift(left_t.base.clone(), right_t.base.clone()).context(
@@ -1348,9 +1339,16 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
             r#else,
         } => {
             let target = ast::Type::bool();
-            let condition = Box::new(try_implicit_cast(&target, condition, symbols).context(
-                "Unable to implicitly cast ternary expression condition into a boolean value.",
-            )?);
+            let TypedExpr {
+                expr: cond_expr,
+                r#type: cond_type,
+            } = typecheck_expr_and_convert(condition, symbols)
+                .context("Failed to typecheck ternary expression then branch.")?;
+            let condition = Box::new(
+                convert_by_assignment(cond_expr, &cond_type, &target, symbols).context(
+                    "Unable to implicitly cast ternary expression condition into a boolean value.",
+                )?,
+            );
 
             let TypedExpr {
                 expr: then_expr,
@@ -1364,7 +1362,7 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
                 .context("Failed to typecheck ternary expression else branch.")?;
 
             let common_t = if then_type.is_pointer() || else_type.is_pointer() {
-                get_common_pointer_type(&then_expr, &else_expr, symbols)?
+                get_common_pointer_type(&then_expr, &then_type, &else_expr, &else_type)?
             } else {
                 let (then_base, _) =
                     ast::BaseType::lift(then_type.base.clone(), else_type.base.clone())
@@ -1475,12 +1473,12 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
             let TypedExpr {
                 expr,
                 r#type: expr_t,
-            } = typecheck_expr(expr, symbols)?;
+            } = typecheck_expr_and_convert(expr, symbols)?;
             let TypedExpr {
                 expr: index,
                 r#type: index_t,
-            } = typecheck_expr(index, symbols)?;
-            let (ptr, ptr_t, index, _) = match (expr_t.maybe_decay(), index_t.maybe_decay()) {
+            } = typecheck_expr_and_convert(index, symbols)?;
+            let (ptr, ptr_t, index, _) = match (expr_t, index_t) {
                 (expr_t, index_t) if expr_t.is_pointer() && index_t.is_integer() => {
                     (expr, expr_t, index, index_t)
                 }
@@ -1504,7 +1502,7 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
             };
             Ok(TypedExpr {
                 expr: subscript,
-                r#type: ptr_t.deref(),
+                r#type: ptr_t.deref().maybe_decay(),
             })
         }
     }

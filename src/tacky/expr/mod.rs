@@ -44,6 +44,11 @@ impl Expr {
         } else {
             (right, right_t.maybe_decay(), left)
         };
+        // pointer subtraction is special- returns number of indices between them
+        if matches!(op, ast::BinaryOp::Subtract) && left_t.is_pointer() && right_t.is_pointer() {
+            unimplemented!();
+        }
+
         if op.is_sub() {
             let negated_tmp =
                 Function::make_tacky_temp_var(index.get_type(symbols), symbols, make_temp_var);
@@ -54,7 +59,7 @@ impl Expr {
             });
             index = negated_tmp;
         }
-        let scale = ptr_t.clone().deref().base.nbytes();
+        let scale = ptr_t.clone().deref().size_of();
         let dst = Function::make_tacky_temp_var(ptr_t, symbols, make_temp_var);
         instructions.push(Instruction::AddPtr {
             ptr,

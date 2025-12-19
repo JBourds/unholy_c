@@ -41,10 +41,9 @@ fn parse_normal_assignment(
             val,
         }) => {
             instructions.extend(rval.instructions);
-
             instructions.push(Instruction::Store {
                 src: rval.val.clone(),
-                dst_ptr: val,
+                dst_ptr: val.clone(),
             });
 
             ExprResult::PlainOperand(Expr {

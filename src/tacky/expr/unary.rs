@@ -294,16 +294,10 @@ fn addr_of(
                 mut instructions,
                 val,
             } = expr;
-            // If we have AddrOf(array), rewrite the type to be a pointer to the
-            // type of the array's elements rather than a pointer to the array
-            let t = {
-                let t = val.get_type(symbols);
-                if t.is_array() { t.deref() } else { t }
-            };
             let dst = Function::make_tacky_temp_var(
                 ast::Type {
                     base: ast::BaseType::Ptr {
-                        to: Box::new(t),
+                        to: Box::new(val.get_type(symbols)),
                         is_restrict: false,
                     },
                     alignment: ast::Type::PTR_ALIGNMENT,

@@ -40,9 +40,9 @@ impl Expr {
         let left_t = left.get_type(symbols);
         let right_t = right.get_type(symbols);
         let (ptr, ptr_t, mut index) = if left_t.is_pointer() || left_t.is_array() {
-            (left, left_t, right)
+            (left, left_t.maybe_decay(), right)
         } else {
-            (right, right_t, left)
+            (right, right_t.maybe_decay(), left)
         };
         if op.is_sub() {
             let negated_tmp =
@@ -254,8 +254,11 @@ impl Expr {
                     mut instructions,
                     val,
                 } = expr;
-                let dst =
-                    Function::make_tacky_temp_var(val.get_type(symbols), symbols, make_temp_var);
+                let dst = Function::make_tacky_temp_var(
+                    val.get_type(symbols).deref(),
+                    symbols,
+                    make_temp_var,
+                );
                 instructions.push(Instruction::Load {
                     src_ptr: val,
                     dst: dst.clone(),

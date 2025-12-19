@@ -70,10 +70,7 @@ fn pre_inc(
                 Instruction::Binary {
                     op: BinaryOp::Add,
                     src1: intermediate.clone(),
-                    src2: Val::Constant(
-                        ast::Constant::const_from_type(&val.get_type(symbols).deref(), 1)
-                            .expect("UnaryOp type has an ast::Constant equivalent"),
-                    ),
+                    src2: Val::Constant(Expr::unary_inc_dec_val(&val.get_type(symbols))),
                     dst: intermediate.clone(),
                 },
                 Instruction::Store {
@@ -135,10 +132,7 @@ fn post_inc(
                 Instruction::Binary {
                     op: BinaryOp::Add,
                     src1: intermediate.clone(),
-                    src2: Val::Constant(
-                        ast::Constant::const_from_type(&val.get_type(symbols).deref(), 1)
-                            .expect("UnaryOp type has an ast::Constant equivalent"),
-                    ),
+                    src2: Val::Constant(Expr::unary_inc_dec_val(&val.get_type(symbols))),
                     dst: intermediate.clone(),
                 },
                 Instruction::Store {
@@ -189,10 +183,7 @@ fn pre_dec(
                 Instruction::Binary {
                     op: BinaryOp::Subtract,
                     src1: intermediate.clone(),
-                    src2: Val::Constant(
-                        ast::Constant::const_from_type(&val.get_type(symbols).deref(), 1)
-                            .expect("UnaryOp type has an ast::Constant equivalent"),
-                    ),
+                    src2: Val::Constant(Expr::unary_inc_dec_val(&val.get_type(symbols))),
                     dst: intermediate.clone(),
                 },
                 Instruction::Store {
@@ -254,10 +245,7 @@ fn post_dec(
                 Instruction::Binary {
                     op: BinaryOp::Subtract,
                     src1: intermediate.clone(),
-                    src2: Val::Constant(
-                        ast::Constant::const_from_type(&val.get_type(symbols).deref(), 1)
-                            .expect("UnaryOp type has an ast::Constant equivalent"),
-                    ),
+                    src2: Val::Constant(Expr::unary_inc_dec_val(&val.get_type(symbols))),
                     dst: intermediate.clone(),
                 },
                 Instruction::Store {

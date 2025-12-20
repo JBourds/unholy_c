@@ -294,18 +294,21 @@ fn addr_of(
                 mut instructions,
                 val,
             } = expr;
-            let dst = Function::make_tacky_temp_var(
+            // array
+            let val_t = val.get_type(symbols);
+            let t = if val_t.is_array() {
+                val_t.maybe_decay()
+            } else {
                 ast::Type {
                     base: ast::BaseType::Ptr {
-                        to: Box::new(val.get_type(symbols)),
+                        to: Box::new(val_t),
                         is_restrict: false,
                     },
                     alignment: ast::Type::PTR_ALIGNMENT,
                     is_const: false,
-                },
-                symbols,
-                make_temp_var,
-            );
+                }
+            };
+            let dst = Function::make_tacky_temp_var(t, symbols, make_temp_var);
             instructions.push(Instruction::GetAddress {
                 src: val,
                 dst: dst.clone(),

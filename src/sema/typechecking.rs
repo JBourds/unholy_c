@@ -963,37 +963,22 @@ fn boolify(expr: Expr, r#type: &Type, symbols: &mut SymbolTable) -> Result<Expr>
 fn maybe_decay_expr(texpr: TypedExpr) -> TypedExpr {
     let TypedExpr { expr, r#type } = texpr;
 
-    match r#type {
-        ast::Type {
-            base: ast::BaseType::Array { element, .. },
-            is_const,
-            ..
-        } => {
-            let expr = ast::Expr::Unary {
-                op: ast::UnaryOp::AddrOf,
-                expr: Box::new(ast::Expr::Subscript {
-                    expr: expr.into(),
-                    index: Box::new(ast::Expr::Constant(ast::Constant::U64(0))),
-                }),
-            };
-
-            let r#type = Type {
-                base: ast::BaseType::Ptr {
-                    to: element,
-                    is_restrict: false,
-                },
-                alignment: Type::PTR_ALIGNMENT,
-                is_const,
-            };
-            TypedExpr { expr, r#type }
+    if r#type.is_array() {
+        let expr = ast::Expr::Unary {
+            op: ast::UnaryOp::AddrOf,
+            expr: Box::new(expr),
+        };
+        TypedExpr {
+            expr,
+            r#type: r#type.maybe_decay(),
         }
-        _ => TypedExpr { expr, r#type },
+    } else {
+        TypedExpr { expr, r#type }
     }
 }
 
 fn typecheck_expr_and_convert(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedExpr> {
     let texpr = typecheck_expr(expr, symbols)?;
-
     Ok(maybe_decay_expr(texpr))
 }
 

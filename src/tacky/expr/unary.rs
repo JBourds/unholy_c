@@ -318,6 +318,16 @@ fn addr_of(
                 val: dst,
             })
         }
-        ExprResult::DerefrencedPointer(expr) => ExprResult::PlainOperand(expr),
+        ExprResult::DerefrencedPointer(expr) => {
+            if let Val::Var(ref name) = expr.val
+                && let Some(ptr) = symbols.get_mut(name)
+            {
+                let dereferenced = ptr.r#type.clone().deref().maybe_decay();
+                ptr.r#type = dereferenced;
+            } else {
+                unreachable!("cannot have constant expression for dereferenced pointer.");
+            }
+            ExprResult::PlainOperand(expr)
+        }
     }
 }

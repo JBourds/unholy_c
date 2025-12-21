@@ -670,7 +670,17 @@ fn convert_by_assignment(
     } else if r#type.is_arithmetic() && target.is_arithmetic()
         || is_null_pointer_constant(e) && target.is_pointer()
     {
-        try_implicit_cast(&target, &expr, symbols)
+        if r#type != target {
+            Ok(ast::Expr::Cast {
+                target: ast::Type {
+                    is_const: true,
+                    ..target.clone()
+                },
+                exp: Box::new(expr),
+            })
+        } else {
+            Ok(expr)
+        }
     } else {
         bail!("Cannot convert type for assignment.")
     }

@@ -574,6 +574,7 @@ impl SymbolTable {
         }
         Ok(())
     }
+
     fn declare_var(&mut self, decl: &ast::VarDecl) -> Result<SymbolEntry> {
         let key = decl.name.clone();
         let storage_class = decl.storage_class;
@@ -1576,17 +1577,23 @@ fn typecheck_global_var_decl(
 }
 
 fn typecheck_var_decl(decl: ast::VarDecl, symbols: &mut SymbolTable) -> Result<ast::VarDecl> {
-    let entry = symbols.declare_var(&decl).context(format!(
+    let target = &decl.r#type;
+    let decl = match decl.init {
+        Some(init) => {
+            let init = typecheck_init(target, init, symbols, &decl.name)?;
+            ast::VarDecl {
+                init: Some(init),
+                ..decl
+            }
+        }
+        None => ast::VarDecl { init: None, ..decl },
+    };
+
+    symbols.declare_var(&decl).context(format!(
         "Failed to typecheck local variable declaration: for {}",
         decl.name
     ))?;
-    let target = entry.r#type;
-
-    let init = match decl.init {
-        Some(init) => Some(typecheck_init(&target, init, symbols, &decl.name)?),
-        None => None,
-    };
-    Ok(ast::VarDecl { init, ..decl })
+    Ok(decl)
 }
 
 fn typecheck_init(
@@ -1621,11 +1628,12 @@ fn typecheck_init(
             }
             let mut inits = inits
                 .into_iter()
-                .map(|i| typecheck_init(&element, i, symbols, name))
+                .map(|i| typecheck_init(element, i, symbols, name))
                 .collect::<Result<Vec<ast::Initializer>>>()?;
             while inits.len() < *size {
-                inits.push(ast::Initializer::zero_initializer(&element)?);
+                inits.push(ast::Initializer::zero_initializer(element)?);
             }
+
             Ok(ast::Initializer::CompundInit(inits))
         }
         _ => bail!("Cannot assign compound initializer to non array var decl"),

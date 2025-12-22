@@ -334,12 +334,11 @@ impl SymbolTable {
     }
 
     pub fn get(&self, key: &Rc<String>) -> Option<&SymbolEntry> {
-        let local = self.get_local(key);
-        if local.is_none() {
-            self.get_global(key)
-        } else {
-            local
-        }
+        Self::get_local(&self.scopes, key).or(Self::get_global(&self.global, key))
+    }
+
+    pub fn get_mut(&mut self, key: &Rc<String>) -> Option<&mut SymbolEntry> {
+        Self::get_local_mut(&mut self.scopes, key).or(Self::get_global_mut(&mut self.global, key))
     }
 
     fn insert_scope(&mut self, key: Rc<String>, entry: SymbolEntry) -> Option<SymbolEntry> {
@@ -359,8 +358,11 @@ impl SymbolTable {
         }
     }
 
-    fn get_local(&self, key: &Rc<String>) -> Option<&SymbolEntry> {
-        for scope in self.scopes.iter().rev() {
+    fn get_local<'a>(
+        scopes: &'a Vec<HashMap<Rc<String>, SymbolEntry>>,
+        key: &Rc<String>,
+    ) -> Option<&'a SymbolEntry> {
+        for scope in scopes.iter().rev() {
             if let Some(entry) = scope.get(key) {
                 return Some(entry);
             }
@@ -368,8 +370,30 @@ impl SymbolTable {
         None
     }
 
-    fn get_global(&self, key: &Rc<String>) -> Option<&SymbolEntry> {
-        self.global.get(key)
+    fn get_local_mut<'a>(
+        scopes: &'a mut Vec<HashMap<Rc<String>, SymbolEntry>>,
+        key: &Rc<String>,
+    ) -> Option<&'a mut SymbolEntry> {
+        for scope in scopes.iter_mut().rev() {
+            if let Some(entry) = scope.get_mut(key) {
+                return Some(entry);
+            }
+        }
+        None
+    }
+
+    fn get_global<'a>(
+        globals: &'a HashMap<Rc<String>, SymbolEntry>,
+        key: &Rc<String>,
+    ) -> Option<&'a SymbolEntry> {
+        globals.get(key)
+    }
+
+    fn get_global_mut<'a>(
+        globals: &'a mut HashMap<Rc<String>, SymbolEntry>,
+        key: &Rc<String>,
+    ) -> Option<&'a mut SymbolEntry> {
+        globals.get_mut(key)
     }
 
     fn get_decl_info(
@@ -587,7 +611,8 @@ impl SymbolTable {
                 self.declare_in_scope(&decl, Scope::Global)?;
             }
             Some(ast::StorageClass::Static)
-                if self.get_global(&key).is_none() && self.scope() != Scope::Global =>
+                if Self::get_global(&self.global, &key).is_none()
+                    && self.scope() != Scope::Global =>
             {
                 self.declare_in_scope(&decl, Scope::Global)?;
             }

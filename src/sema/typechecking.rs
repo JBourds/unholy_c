@@ -192,7 +192,7 @@ impl InitialValue {
         let expr = convert_by_assignment(expr, &r#type, target).context(
             "Failed to perform implicit casting when constructing initial value for declaration",
         )?;
-        if is_null_pointer_constant(&expr) {
+        if is_null_pointer_constant(&expr) && target.is_pointer() {
             return Ok(InitialValue::Initial(vec![
                 0usize.to_ne_bytes().to_vec().into(),
             ]));

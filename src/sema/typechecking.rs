@@ -677,23 +677,13 @@ fn get_common_pointer_type(
     }
 }
 
-fn convert_by_assignment(e: ast::Expr, e1_t: &ast::Type, target: &ast::Type) -> Result<ast::Expr> {
-    if e1_t == target {
+fn convert_by_assignment(e: ast::Expr, e_t: &ast::Type, target: &ast::Type) -> Result<ast::Expr> {
+    if e_t == target {
         Ok(e)
-    } else if e1_t.is_arithmetic() && target.is_arithmetic()
+    } else if e_t.is_arithmetic() && target.is_arithmetic()
         || is_null_pointer_constant(&e) && target.is_pointer()
     {
-        if e1_t != target {
-            Ok(ast::Expr::Cast {
-                target: ast::Type {
-                    is_const: true,
-                    ..target.clone()
-                },
-                exp: Box::new(e),
-            })
-        } else {
-            Ok(e)
-        }
+        try_implicit_cast(target, e, e_t)
     } else {
         bail!("Cannot convert type for assignment.")
     }

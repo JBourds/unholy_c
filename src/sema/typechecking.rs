@@ -1037,7 +1037,7 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
             // FIXME: Lazy clone :(
             Ok(TypedExpr {
                 expr: ast::Expr::Assignment {
-                    lvalue: lvalue.clone(),
+                    lvalue: Box::new(lexpr),
                     rvalue: Box::new(
                         convert_by_assignment(rexpr, &right_t, &left_t).context(
                             "Failed to implicitly cast righthand side during assignment.",

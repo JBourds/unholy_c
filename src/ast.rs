@@ -1266,7 +1266,7 @@ impl Type {
     pub const PTR_ALIGNMENT: NonZeroUsize =
         NonZeroUsize::new(core::mem::size_of::<usize>()).unwrap();
 
-    pub const PTRDIFF_T: Self = Self::int(8, Some(false));
+    pub const PTRDIFF_T: Self = Self::int(core::mem::size_of::<isize>(), Some(true));
 
     pub fn bool() -> Self {
         Self::int(core::mem::size_of::<i32>(), None)

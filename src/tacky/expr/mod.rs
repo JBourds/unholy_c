@@ -39,15 +39,39 @@ impl Expr {
         let mut instructions = vec![];
         let left_t = left.get_type(symbols);
         let right_t = right.get_type(symbols);
+
+        // pointer subtraction is special- returns number of indices between them
+        if matches!(op, ast::BinaryOp::Subtract) && left_t.is_pointer() && right_t.is_pointer() {
+            let byte_diff =
+                Function::make_tacky_temp_var(ast::Type::PTRDIFF_T, symbols, make_temp_var);
+            instructions.push(Instruction::Binary {
+                op: BinaryOp::Subtract,
+                src1: left,
+                src2: right,
+                dst: byte_diff.clone(),
+            });
+            let index_diff =
+                Function::make_tacky_temp_var(ast::Type::PTRDIFF_T, symbols, make_temp_var);
+            instructions.push(Instruction::Binary {
+                op: BinaryOp::Divide,
+                src1: byte_diff,
+                src2: Val::Constant(ast::Constant::I64(
+                    left_t
+                        .deref()
+                        .size_of()
+                        .try_into()
+                        .expect("could not handle ptrdiff size"),
+                )),
+                dst: index_diff.clone(),
+            });
+            return (instructions, index_diff);
+        }
+
         let (ptr, ptr_t, mut index) = if left_t.is_pointer() || left_t.is_array() {
             (left, left_t.maybe_decay(), right)
         } else {
             (right, right_t.maybe_decay(), left)
         };
-        // pointer subtraction is special- returns number of indices between them
-        if matches!(op, ast::BinaryOp::Subtract) && left_t.is_pointer() && right_t.is_pointer() {
-            unimplemented!();
-        }
 
         if op.is_sub() {
             let negated_tmp =

@@ -1614,9 +1614,27 @@ fn typecheck_global_var_decl(
 
 fn typecheck_var_decl(decl: ast::VarDecl, symbols: &mut SymbolTable) -> Result<ast::VarDecl> {
     let target = &decl.r#type;
+    let mut entry = symbols.declare_var(&decl).context(format!(
+        "Failed to typecheck local variable declaration: for {}",
+        decl.name
+    ))?;
     let decl = match decl.init {
         Some(init) => {
             let init = typecheck_init(target, init, symbols, &decl.name)?;
+            if let Attribute::Static {
+                initial_value: _,
+                external_linkage,
+            } = entry.attribute
+            {
+                entry.attribute = Attribute::Static {
+                    initial_value: InitialValue::from_initializer(&decl.r#type, &init, symbols)
+                        .context("unable to create initial value from initializer")?,
+                    external_linkage,
+                };
+                if let Some(old_entry) = symbols.get_mut(&decl.name) {
+                    std::mem::swap(&mut entry, old_entry);
+                }
+            }
             ast::VarDecl {
                 init: Some(init),
                 ..decl
@@ -1624,11 +1642,6 @@ fn typecheck_var_decl(decl: ast::VarDecl, symbols: &mut SymbolTable) -> Result<a
         }
         None => ast::VarDecl { init: None, ..decl },
     };
-
-    symbols.declare_var(&decl).context(format!(
-        "Failed to typecheck local variable declaration: for {}",
-        decl.name
-    ))?;
     Ok(decl)
 }
 

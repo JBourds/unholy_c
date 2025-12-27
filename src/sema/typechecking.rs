@@ -607,18 +607,15 @@ impl SymbolTable {
         let decl = ast::Declaration::VarDecl(decl.clone());
 
         match storage_class {
-            Some(ast::StorageClass::Extern) => {
-                self.declare_in_scope(&decl, Scope::Global)?;
-            }
+            Some(ast::StorageClass::Extern) => self.declare_in_scope(&decl, Scope::Global),
             Some(ast::StorageClass::Static)
                 if Self::get_global(&self.global, &key).is_none()
                     && self.scope() != Scope::Global =>
             {
-                self.declare_in_scope(&decl, Scope::Global)?;
+                self.declare_in_scope(&decl, Scope::Global)
             }
-            _ => {}
+            _ => self.declare_in_scope(&decl, self.scope()),
         }
-        self.declare_in_scope(&decl, self.scope())
     }
 
     fn push_scope(&mut self) {
@@ -1604,7 +1601,7 @@ fn typecheck_global_var_decl(
 
 fn typecheck_var_decl(decl: ast::VarDecl, symbols: &mut SymbolTable) -> Result<ast::VarDecl> {
     let target = &decl.r#type;
-    let mut entry = symbols.declare_var(&decl).context(format!(
+    let entry = symbols.declare_var(&decl).context(format!(
         "Failed to typecheck local variable declaration: for {}",
         decl.name
     ))?;
@@ -1616,13 +1613,13 @@ fn typecheck_var_decl(decl: ast::VarDecl, symbols: &mut SymbolTable) -> Result<a
                 external_linkage,
             } = entry.attribute
             {
-                entry.attribute = Attribute::Static {
+                let attribute = Attribute::Static {
                     initial_value: InitialValue::from_initializer(&decl.r#type, &init, symbols)
                         .context("unable to create initial value from initializer")?,
                     external_linkage,
                 };
-                if let Some(old_entry) = symbols.get_mut(&decl.name) {
-                    std::mem::swap(&mut entry, old_entry);
+                if let Some(entry) = symbols.get_mut(&decl.name) {
+                    entry.attribute = attribute;
                 }
             }
             ast::VarDecl {

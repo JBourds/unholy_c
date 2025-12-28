@@ -53,7 +53,7 @@ fn pre_inc(
             });
             ExprResult::PlainOperand(Expr { instructions, val })
         }
-        ExprResult::DerefrencedPointer(Expr {
+        ExprResult::DereferencedPointer(Expr {
             mut instructions,
             val,
         }) => {
@@ -112,7 +112,7 @@ fn post_inc(
                 val: dst,
             })
         }
-        ExprResult::DerefrencedPointer(Expr {
+        ExprResult::DereferencedPointer(Expr {
             mut instructions,
             val,
         }) => {
@@ -167,7 +167,7 @@ fn pre_dec(
             });
             ExprResult::PlainOperand(Expr { instructions, val })
         }
-        ExprResult::DerefrencedPointer(Expr {
+        ExprResult::DereferencedPointer(Expr {
             mut instructions,
             val,
         }) => {
@@ -226,7 +226,7 @@ fn post_dec(
                 val: dst,
             })
         }
-        ExprResult::DerefrencedPointer(Expr {
+        ExprResult::DereferencedPointer(Expr {
             mut instructions,
             val,
         }) => {
@@ -320,7 +320,7 @@ fn addr_of(
                 val: dst,
             })
         }
-        ExprResult::DerefrencedPointer(expr) => {
+        ExprResult::DereferencedPointer(expr) => {
             if let Val::Var(ref name) = expr.val
                 && let Some(ptr) = symbols.get_mut(name)
             {

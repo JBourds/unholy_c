@@ -36,7 +36,7 @@ fn parse_normal_assignment(
             });
             ExprResult::PlainOperand(Expr { instructions, val })
         }
-        ExprResult::DerefrencedPointer(Expr {
+        ExprResult::DereferencedPointer(Expr {
             mut instructions,
             val,
         }) => {
@@ -124,7 +124,7 @@ fn parse_compound_assignment(
             });
             ExprResult::PlainOperand(Expr { instructions, val })
         }
-        ExprResult::DerefrencedPointer(Expr {
+        ExprResult::DereferencedPointer(Expr {
             mut instructions,
             val,
         }) => {

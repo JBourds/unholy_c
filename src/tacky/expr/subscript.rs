@@ -22,7 +22,7 @@ pub(crate) fn parse_subscript(
         Expr::do_pointer_arithmetic(ast::BinaryOp::Add, ptr, index, make_temp_var, symbols);
     instructions.extend(new_instructions);
 
-    ExprResult::DerefrencedPointer(Expr {
+    ExprResult::DereferencedPointer(Expr {
         instructions,
         val: new_ptr,
     })

@@ -19,7 +19,7 @@ use unary::*;
 #[derive(Debug)]
 pub enum ExprResult {
     PlainOperand(Expr),
-    DerefrencedPointer(Expr),
+    DereferencedPointer(Expr),
 }
 
 #[derive(Debug, PartialEq)]
@@ -122,7 +122,7 @@ impl Expr {
             ast::Expr::Unary {
                 op: ast::UnaryOp::Deref,
                 expr,
-            } => ExprResult::DerefrencedPointer(Self::parse_with_and_convert(
+            } => ExprResult::DereferencedPointer(Self::parse_with_and_convert(
                 *expr,
                 symbols,
                 make_temp_var,
@@ -282,7 +282,7 @@ impl Expr {
     ) -> Expr {
         match node {
             ExprResult::PlainOperand(expr) => expr,
-            ExprResult::DerefrencedPointer(expr) => {
+            ExprResult::DereferencedPointer(expr) => {
                 let Self {
                     mut instructions,
                     val,

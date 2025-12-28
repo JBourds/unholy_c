@@ -129,11 +129,13 @@ fn parse_compound_assignment(
             val,
         }) => {
             instructions.extend(rval.instructions);
-            let intermediate = Function::make_tacky_temp_var(
-                val.get_type(symbols).deref(),
-                symbols,
-                make_temp_var,
-            );
+            let dst_type = val.get_type(symbols).deref();
+            let intermediate =
+                Function::make_tacky_temp_var(dst_type.clone(), symbols, make_temp_var);
+            instructions.push(Instruction::Load {
+                src_ptr: val.clone(),
+                dst: intermediate.clone(),
+            });
             let binary_lhs = if let ast::Expr::Cast { target, exp: _ } = *left {
                 handle_upcast(op, &intermediate, target, symbols, make_temp_var)
             } else {
@@ -143,17 +145,12 @@ fn parse_compound_assignment(
                 }
             };
             instructions.extend(binary_lhs.instructions);
-            instructions.push(Instruction::Load {
-                src_ptr: val.clone(),
-                dst: binary_lhs.val.clone(),
-            });
             instructions.push(Instruction::Binary {
                 op: op.into(),
                 src1: binary_lhs.val.clone(),
                 src2: rval.val.clone(),
                 dst: binary_lhs.val.clone(),
             });
-            let dst_type = val.get_type(symbols).deref();
             let downcasted = Expr::cast(binary_lhs.val.clone(), dst_type, symbols, make_temp_var);
             instructions.extend(downcasted.instructions);
             instructions.push(Instruction::Store {

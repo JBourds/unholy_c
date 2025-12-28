@@ -1179,6 +1179,20 @@ fn align_up(addr: usize, align: usize) -> usize {
     }
 }
 
+/// Get the element type which can be copie for a given value.
+/// For a scalar or pointer value, this is the value's type.
+/// For an array, it is the first non-array type encountered when recursively
+/// dereferencing the type.
+fn get_element_type(t: &ast::Type) -> ast::Type {
+    match t {
+        ast::Type {
+            base: ast::BaseType::Array { element, .. },
+            ..
+        } => get_element_type(element),
+        _ => t.clone(),
+    }
+}
+
 impl Instruction<WithStorage> {
     pub(super) fn new(
         instruction: Instruction<Initial>,
@@ -1229,7 +1243,7 @@ impl Instruction<WithStorage> {
                         Operand::Data {
                             name: Rc::clone(name),
                             size: entry.r#type.size_of(),
-                            r#type: AssemblyType::from_ast_type(entry.r#type.last_child().clone()),
+                            r#type: AssemblyType::from_ast_type(get_element_type(&entry.r#type)),
                             is_const: false,
                         }
                     }
@@ -1242,7 +1256,7 @@ impl Instruction<WithStorage> {
                                 *stack_bound += byte_array.size_bytes();
                                 *stack_bound = align_up(*stack_bound, byte_array.alignment());
                                 let element_t =
-                                    AssemblyType::from_ast_type(entry.r#type.last_child().clone());
+                                    AssemblyType::from_ast_type(get_element_type(&entry.r#type));
                                 Operand::Memory {
                                     reg: RBP,
                                     offset: -(*stack_bound as isize),

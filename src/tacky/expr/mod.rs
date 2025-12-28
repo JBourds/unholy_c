@@ -275,12 +275,12 @@ impl Expr {
         }
     }
 
-    pub(crate) fn parse_with_and_convert(
-        node: ast::Expr,
+    pub(crate) fn convert(
+        node: ExprResult,
         symbols: &mut SymbolTable,
         make_temp_var: &mut impl FnMut() -> String,
-    ) -> Self {
-        match Self::parse_with(node, symbols, make_temp_var) {
+    ) -> Expr {
+        match node {
             ExprResult::PlainOperand(expr) => expr,
             ExprResult::DerefrencedPointer(expr) => {
                 let Self {
@@ -302,5 +302,17 @@ impl Expr {
                 }
             }
         }
+    }
+
+    pub(crate) fn parse_with_and_convert(
+        node: ast::Expr,
+        symbols: &mut SymbolTable,
+        make_temp_var: &mut impl FnMut() -> String,
+    ) -> Self {
+        Self::convert(
+            Self::parse_with(node, symbols, make_temp_var),
+            symbols,
+            make_temp_var,
+        )
     }
 }

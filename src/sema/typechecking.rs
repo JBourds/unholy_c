@@ -4,7 +4,7 @@ use std::{cmp, num::NonZeroUsize};
 
 use anyhow::{Context, Error};
 
-use crate::ast::{Expr, Type};
+use crate::ast::{Expr, StorageClass, Type};
 
 use super::*;
 
@@ -605,7 +605,6 @@ impl SymbolTable {
         let key = decl.name.clone();
         let storage_class = decl.storage_class;
         let decl = ast::Declaration::VarDecl(decl.clone());
-
         match storage_class {
             Some(ast::StorageClass::Extern) => self.declare_in_scope(&decl, Scope::Global),
             Some(ast::StorageClass::Static)
@@ -1605,6 +1604,15 @@ fn typecheck_var_decl(decl: ast::VarDecl, symbols: &mut SymbolTable) -> Result<a
         "Failed to typecheck local variable declaration: for {}",
         decl.name
     ))?;
+    if decl
+        .storage_class
+        .is_some_and(|cls| cls == StorageClass::Extern)
+    {
+        ensure!(
+            decl.init.is_none(),
+            "Cannot provide a definition for a variable with extern storage class."
+        );
+    }
     let decl = match decl.init {
         Some(init) => {
             let init = typecheck_init(target, init, symbols, &decl.name)?;

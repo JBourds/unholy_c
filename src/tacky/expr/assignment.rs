@@ -145,13 +145,27 @@ fn parse_compound_assignment(
                 }
             };
             instructions.extend(binary_lhs.instructions);
-            instructions.push(Instruction::Binary {
-                op: op.into(),
-                src1: binary_lhs.val.clone(),
-                src2: rval.val.clone(),
-                dst: binary_lhs.val.clone(),
-            });
-            let downcasted = Expr::cast(binary_lhs.val.clone(), dst_type, symbols, make_temp_var);
+            let arg_type = binary_lhs.val.get_type(symbols);
+            let dst = if arg_type.is_pointer() {
+                let (new_instructions, dst) = Expr::do_pointer_arithmetic(
+                    op,
+                    binary_lhs.val.clone(),
+                    rval.val,
+                    make_temp_var,
+                    symbols,
+                );
+                instructions.extend(new_instructions);
+                dst
+            } else {
+                instructions.push(Instruction::Binary {
+                    op: op.into(),
+                    src1: binary_lhs.val.clone(),
+                    src2: rval.val.clone(),
+                    dst: binary_lhs.val.clone(),
+                });
+                binary_lhs.val
+            };
+            let downcasted = Expr::cast(dst.clone(), dst_type, symbols, make_temp_var);
             instructions.extend(downcasted.instructions);
             instructions.push(Instruction::Store {
                 src: downcasted.val.clone(),

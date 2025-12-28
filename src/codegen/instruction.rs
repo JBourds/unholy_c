@@ -1170,6 +1170,15 @@ impl Instruction<Initial> {
     }
 }
 
+fn align_up(addr: usize, align: usize) -> usize {
+    let remainder = addr % align;
+    if remainder == 0 {
+        addr // addr already aligned
+    } else {
+        addr - remainder + align
+    }
+}
+
 impl Instruction<WithStorage> {
     pub(super) fn new(
         instruction: Instruction<Initial>,
@@ -1177,14 +1186,6 @@ impl Instruction<WithStorage> {
         mappings: &mut HashMap<Rc<String>, Operand>,
         stack_bound: &mut usize,
     ) -> Self {
-        let align_up = |addr: usize, align: usize| -> usize {
-            let remainder = addr % align;
-            if remainder == 0 {
-                addr // addr already aligned
-            } else {
-                addr - remainder + align
-            }
-        };
         let mut convert_operand_offset = |op| match op {
             Operand::Pseudo {
                 ref name,

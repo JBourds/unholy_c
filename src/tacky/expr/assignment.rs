@@ -54,6 +54,27 @@ fn parse_normal_assignment(
     }
 }
 
+// left shifts and right shifts don't require casts, everything else (minus
+// pointers) does though
+fn handle_upcast(
+    op: ast::BinaryOp,
+    val: &Val,
+    arg_type: ast::Type,
+    symbols: &mut SymbolTable,
+    make_temp_var: &mut impl FnMut() -> String,
+) -> Expr {
+    if matches!(op, ast::BinaryOp::LShift | ast::BinaryOp::RShift) {
+        Expr {
+            instructions: vec![],
+            val: val.clone(),
+        }
+    } else {
+        Expr::cast(val.clone(), arg_type, symbols, make_temp_var)
+    }
+}
+
+/// need to have a special function for handling compound assignment to avoid
+/// evaluating the LHS more than once
 fn parse_compound_assignment(
     lvalue: ast::Expr,
     rvalue: ast::Expr,
@@ -66,6 +87,7 @@ fn parse_compound_assignment(
     let Some(op) = op.compound_op() else {
         unreachable!();
     };
+
     let lval = Expr::parse_with(lvalue, symbols, make_temp_var);
     let rval = Expr::parse_with_and_convert(*right, symbols, make_temp_var);
     match lval {
@@ -74,33 +96,33 @@ fn parse_compound_assignment(
             val,
         }) => {
             instructions.extend(rval.instructions);
-            let arg_type = rval.val.get_type(symbols);
-            let upcasted = if matches!(op, ast::BinaryOp::LShift | ast::BinaryOp::RShift) {
-                Expr {
-                    instructions: vec![],
-                    val: val.clone(),
-                }
+            let lhs_type = val.get_type(symbols);
+            // binary operations on pointers need to be handled specially
+            let res = if lhs_type.is_pointer() {
+                let (new_instructions, dst) =
+                    Expr::do_pointer_arithmetic(op, val.clone(), rval.val, make_temp_var, symbols);
+                instructions.extend(new_instructions);
+                dst
             } else {
-                Expr::cast(val.clone(), arg_type, symbols, make_temp_var)
+                let arg_type = rval.val.get_type(symbols);
+                let upcasted = handle_upcast(op, &val, arg_type, symbols, make_temp_var);
+                instructions.extend(upcasted.instructions);
+                instructions.push(Instruction::Binary {
+                    op: op.into(),
+                    src1: upcasted.val.clone(),
+                    src2: rval.val.clone(),
+                    dst: upcasted.val.clone(),
+                });
+                let dst_type = val.get_type(symbols);
+                let downcasted = Expr::cast(upcasted.val.clone(), dst_type, symbols, make_temp_var);
+                instructions.extend(downcasted.instructions);
+                downcasted.val
             };
-            instructions.extend(upcasted.instructions);
-            instructions.push(Instruction::Binary {
-                op: op.into(),
-                src1: upcasted.val.clone(),
-                src2: rval.val.clone(),
-                dst: upcasted.val.clone(),
-            });
-            let dst_type = val.get_type(symbols);
-            let downcasted = Expr::cast(upcasted.val.clone(), dst_type, symbols, make_temp_var);
-            instructions.extend(downcasted.instructions);
             instructions.push(Instruction::Copy {
-                src: downcasted.val.clone(),
-                dst: val,
+                src: res,
+                dst: val.clone(),
             });
-            ExprResult::PlainOperand(Expr {
-                instructions,
-                val: downcasted.val,
-            })
+            ExprResult::PlainOperand(Expr { instructions, val })
         }
         ExprResult::DerefrencedPointer(Expr {
             mut instructions,
@@ -113,14 +135,7 @@ fn parse_compound_assignment(
                 make_temp_var,
             );
             let binary_lhs = if let ast::Expr::Cast { target, exp: _ } = *left {
-                if matches!(op, ast::BinaryOp::LShift | ast::BinaryOp::RShift) {
-                    Expr {
-                        instructions: vec![],
-                        val: intermediate.clone(),
-                    }
-                } else {
-                    Expr::cast(intermediate.clone(), target, symbols, make_temp_var)
-                }
+                handle_upcast(op, &intermediate, target, symbols, make_temp_var)
             } else {
                 Expr {
                     instructions: vec![],

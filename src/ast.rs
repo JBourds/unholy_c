@@ -10,6 +10,20 @@ pub fn parse(tokens: &[Token]) -> Result<Program> {
     Ok(prog)
 }
 
+/// Get the element type which can be copie for a given value.
+/// For a scalar or pointer value, this is the value's type.
+/// For an array, it is the first non-array type encountered when recursively
+/// dereferencing the type.
+pub fn get_element_type(t: &Type) -> Type {
+    match t {
+        Type {
+            base: BaseType::Array { element, .. },
+            ..
+        } => get_element_type(element),
+        _ => t.clone(),
+    }
+}
+
 #[derive(Debug, PartialEq)]
 pub struct Program {
     pub declarations: Vec<Declaration>,
@@ -1071,13 +1085,12 @@ impl BaseType {
         }
     }
 
-    /// Used by arrays to recursively extract its base type.
     pub fn size_of_base_type(&self) -> usize {
         match self {
             BaseType::Int { nbytes, .. } => *nbytes,
             BaseType::Float(nbytes) => *nbytes,
             BaseType::Double(nbytes) => *nbytes,
-            BaseType::Ptr { .. } => core::mem::size_of::<usize>(),
+            BaseType::Ptr { to, .. } => to.size_of(),
             BaseType::Array { element, .. } => element.base.size_of_base_type(),
             BaseType::Fun { .. } => unreachable!(),
             BaseType::Struct => unreachable!(),

@@ -97,7 +97,11 @@ impl Expr {
     fn unary_inc_dec_val(t: &ast::Type) -> ast::Constant {
         // Typechecking will have caught any case where an array is invalid as
         // a pointer
-        if t.is_pointer() || t.is_array() {
+        assert!(
+            !t.is_array(),
+            "Should not have any arrays being incremented!"
+        );
+        if t.is_pointer() {
             ast::Constant::U64(t.base.size_of_base_type().try_into().unwrap())
         } else {
             ast::Constant::const_from_type(t, 1)

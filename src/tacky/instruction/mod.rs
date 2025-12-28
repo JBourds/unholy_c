@@ -1,3 +1,5 @@
+use crate::ast::get_element_type;
+
 use super::*;
 
 mod conditionals;
@@ -171,7 +173,7 @@ impl Instruction {
         make_temp_var: &mut impl FnMut() -> String,
     ) -> Vec<Self> {
         let mut base = 0;
-        let per_element_size = r#type.base.size_of_base_type();
+        let per_element_size = get_element_type(r#type).size_of();
         Self::process_initializer_rec(
             &mut base,
             false,

@@ -57,11 +57,9 @@ fn pre_inc(
             mut instructions,
             val,
         }) => {
-            let intermediate = Function::make_tacky_temp_var(
-                val.get_type(symbols).deref(),
-                symbols,
-                make_temp_var,
-            );
+            let t = val.get_type(symbols).deref();
+            let inc_val = Val::Constant(Expr::unary_inc_dec_val(&t));
+            let intermediate = Function::make_tacky_temp_var(t, symbols, make_temp_var);
             instructions.extend([
                 Instruction::Load {
                     src_ptr: val.clone(),
@@ -70,7 +68,7 @@ fn pre_inc(
                 Instruction::Binary {
                     op: BinaryOp::Add,
                     src1: intermediate.clone(),
-                    src2: Val::Constant(Expr::unary_inc_dec_val(&val.get_type(symbols))),
+                    src2: inc_val,
                     dst: intermediate.clone(),
                 },
                 Instruction::Store {
@@ -96,7 +94,9 @@ fn post_inc(
             mut instructions,
             val,
         }) => {
-            let dst = Function::make_tacky_temp_var(val.get_type(symbols), symbols, make_temp_var);
+            let t = val.get_type(symbols);
+            let inc_val = Val::Constant(Expr::unary_inc_dec_val(&t));
+            let dst = Function::make_tacky_temp_var(t, symbols, make_temp_var);
             instructions.push(Instruction::Copy {
                 src: val.clone(),
                 dst: dst.clone(),
@@ -104,7 +104,7 @@ fn post_inc(
             instructions.push(Instruction::Binary {
                 op: BinaryOp::Add,
                 src1: val.clone(),
-                src2: Val::Constant(Expr::unary_inc_dec_val(&val.get_type(symbols))),
+                src2: inc_val,
                 dst: val.clone(),
             });
             ExprResult::PlainOperand(Expr {
@@ -117,6 +117,7 @@ fn post_inc(
             val,
         }) => {
             let typ = val.get_type(symbols).deref();
+            let inc_val = Val::Constant(Expr::unary_inc_dec_val(&typ));
             let dst = Function::make_tacky_temp_var(typ.clone(), symbols, make_temp_var);
             let intermediate = Function::make_tacky_temp_var(typ, symbols, make_temp_var);
             instructions.extend([
@@ -132,7 +133,7 @@ fn post_inc(
                 Instruction::Binary {
                     op: BinaryOp::Add,
                     src1: intermediate.clone(),
-                    src2: Val::Constant(Expr::unary_inc_dec_val(&val.get_type(symbols))),
+                    src2: inc_val,
                     dst: intermediate.clone(),
                 },
                 Instruction::Store {
@@ -170,11 +171,9 @@ fn pre_dec(
             mut instructions,
             val,
         }) => {
-            let intermediate = Function::make_tacky_temp_var(
-                val.get_type(symbols).deref(),
-                symbols,
-                make_temp_var,
-            );
+            let t = val.get_type(symbols).deref();
+            let dec_val = Val::Constant(Expr::unary_inc_dec_val(&t));
+            let intermediate = Function::make_tacky_temp_var(t, symbols, make_temp_var);
             instructions.extend([
                 Instruction::Load {
                     src_ptr: val.clone(),
@@ -183,7 +182,7 @@ fn pre_dec(
                 Instruction::Binary {
                     op: BinaryOp::Subtract,
                     src1: intermediate.clone(),
-                    src2: Val::Constant(Expr::unary_inc_dec_val(&val.get_type(symbols))),
+                    src2: dec_val,
                     dst: intermediate.clone(),
                 },
                 Instruction::Store {
@@ -209,7 +208,9 @@ fn post_dec(
             mut instructions,
             val,
         }) => {
-            let dst = Function::make_tacky_temp_var(val.get_type(symbols), symbols, make_temp_var);
+            let t = val.get_type(symbols);
+            let dec_val = Val::Constant(Expr::unary_inc_dec_val(&t));
+            let dst = Function::make_tacky_temp_var(t, symbols, make_temp_var);
             instructions.push(Instruction::Copy {
                 src: val.clone(),
                 dst: dst.clone(),
@@ -217,7 +218,7 @@ fn post_dec(
             instructions.push(Instruction::Binary {
                 op: BinaryOp::Subtract,
                 src1: val.clone(),
-                src2: Val::Constant(Expr::unary_inc_dec_val(&val.get_type(symbols))),
+                src2: dec_val,
                 dst: val.clone(),
             });
             ExprResult::PlainOperand(Expr {
@@ -230,6 +231,7 @@ fn post_dec(
             val,
         }) => {
             let typ = val.get_type(symbols).deref();
+            let dec_val = Val::Constant(Expr::unary_inc_dec_val(&typ));
             let dst = Function::make_tacky_temp_var(typ.clone(), symbols, make_temp_var);
             let intermediate = Function::make_tacky_temp_var(typ, symbols, make_temp_var);
             instructions.extend([
@@ -245,7 +247,7 @@ fn post_dec(
                 Instruction::Binary {
                     op: BinaryOp::Subtract,
                     src1: intermediate.clone(),
-                    src2: Val::Constant(Expr::unary_inc_dec_val(&val.get_type(symbols))),
+                    src2: dec_val,
                     dst: intermediate.clone(),
                 },
                 Instruction::Store {

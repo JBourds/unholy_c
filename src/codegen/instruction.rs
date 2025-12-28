@@ -1,4 +1,5 @@
 use super::*;
+use crate::ast::get_element_type;
 use crate::{ast, sema, tacky};
 use std::collections::{HashMap, HashSet};
 use std::marker::PhantomData;
@@ -1176,20 +1177,6 @@ fn align_up(addr: usize, align: usize) -> usize {
         addr // addr already aligned
     } else {
         addr - remainder + align
-    }
-}
-
-/// Get the element type which can be copie for a given value.
-/// For a scalar or pointer value, this is the value's type.
-/// For an array, it is the first non-array type encountered when recursively
-/// dereferencing the type.
-fn get_element_type(t: &ast::Type) -> ast::Type {
-    match t {
-        ast::Type {
-            base: ast::BaseType::Array { element, .. },
-            ..
-        } => get_element_type(element),
-        _ => t.clone(),
     }
 }
 

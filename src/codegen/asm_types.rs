@@ -49,10 +49,17 @@ impl AssemblyType {
             ast::Type {
                 base: ast::BaseType::Array { element, size },
                 ..
-            } => Self::ByteArray {
-                size: element.size_of() * size,
-                alignment: std::cmp::min(element.size_of(), MAX_AGGREGATE_ALIGNMENT),
-            },
+            } => {
+                let size_bytes = element.size_of() * size;
+                Self::ByteArray {
+                    size: size_bytes,
+                    alignment: if size_bytes < MAX_AGGREGATE_ALIGNMENT {
+                        element.size_of()
+                    } else {
+                        MAX_AGGREGATE_ALIGNMENT
+                    },
+                }
+            }
             _ => unimplemented!(),
         }
     }

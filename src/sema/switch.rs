@@ -1,3 +1,4 @@
+use crate::const_eval;
 use anyhow::ensure;
 use ast::Constant;
 

@@ -10,6 +10,20 @@ pub fn parse(tokens: &[Token]) -> Result<Program> {
     Ok(prog)
 }
 
+/// Get the element type which can be copie for a given value.
+/// For a scalar or pointer value, this is the value's type.
+/// For an array, it is the first non-array type encountered when recursively
+/// dereferencing the type.
+pub fn get_element_type(t: &Type) -> Type {
+    match t {
+        Type {
+            base: BaseType::Array { element, .. },
+            ..
+        } => get_element_type(element),
+        _ => t.clone(),
+    }
+}
+
 #[derive(Debug, PartialEq)]
 pub struct Program {
     pub declarations: Vec<Declaration>,
@@ -94,7 +108,7 @@ impl From<&FunDecl> for Type {
 
 impl FunDecl {
     #[allow(clippy::type_complexity)]
-    pub fn signature(&self) -> Result<Vec<(&Type, Option<&Rc<String>>)>> {
+    pub fn signature(&self) -> Result<Vec<(Type, Option<&Rc<String>>)>> {
         if let Type {
             base: BaseType::Fun {
                 ref param_types, ..
@@ -109,7 +123,7 @@ impl FunDecl {
             Ok(param_types
                 .iter()
                 .zip(self.params.iter())
-                .map(|(r#type, name)| (r#type, name.as_ref()))
+                .map(|(r#type, name)| (r#type.clone().maybe_decay(), name.as_ref()))
                 .collect())
         } else {
             bail!("ast.FunDecl.signature(): How did we get here? This match should always work!");
@@ -195,10 +209,66 @@ impl BlockItem {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+pub enum Initializer {
+    SingleInit(Box<Expr>),
+    CompundInit(Vec<Initializer>),
+}
+
+impl Initializer {
+    pub fn consume(tokens: &[Token]) -> Result<(Self, &[Token])> {
+        match tokens {
+            [Token::LSquirly, tokens @ ..] => {
+                let mut initializers = Vec::new();
+                let (first_init, mut left) = Self::consume(tokens)?;
+                initializers.push(first_init);
+                loop {
+                    match left {
+                        [Token::RSquirly, tokens @ ..]
+                        | [Token::Comma, Token::RSquirly, tokens @ ..] => {
+                            left = tokens;
+                            break;
+                        }
+                        [Token::Comma, tokens @ ..] => {
+                            let (inner, tokens) = Self::consume(tokens)?;
+                            initializers.push(inner);
+                            left = tokens;
+                        }
+                        _ => bail!("ast.Initializer.consume() failed to parse compound init"),
+                    }
+                }
+
+                Ok((Self::CompundInit(initializers), left))
+            }
+            _ => {
+                let (expr, tokens) = Expr::parse(tokens, 0)?;
+                Ok((Self::SingleInit(Box::new(expr)), tokens))
+            }
+        }
+    }
+
+    pub fn zero_initializer(r#type: &Type) -> Result<Self> {
+        if r#type.is_array() {
+            match &r#type.base {
+                BaseType::Array { element, size } => Ok(Self::CompundInit(
+                    (0..*size)
+                        .map(|_| Self::zero_initializer(element))
+                        .collect::<Result<Vec<Self>>>()?,
+                )),
+                _ => todo!(),
+            }
+        } else {
+            Ok(Self::SingleInit(Box::new(Expr::Constant(
+                Constant::const_from_type(r#type, 0)?,
+            ))))
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub struct VarDecl {
     pub r#type: Type,
     pub name: Rc<String>,
-    pub init: Option<Expr>,
+    pub init: Option<Initializer>,
     pub storage_class: Option<StorageClass>,
 }
 
@@ -206,13 +276,12 @@ impl VarDecl {
     fn check_for_definition(mut self, tokens: &[Token]) -> Result<(Self, &[Token])> {
         match tokens {
             [Token::Assign, tokens @ ..] => {
-                let (expr, tokens) = Expr::parse(tokens, 0)?;
+                let (initializer, tokens) = Initializer::consume(tokens)?;
                 if tokens.first().is_some_and(|x| *x != Token::Semi) {
                     bail!("Semicolon required after expression in variable declaration.")
-                } else {
-                    self.init = Some(expr);
-                    Ok((self, &tokens[1..]))
                 }
+                self.init = Some(initializer);
+                Ok((self, &tokens[1..]))
             }
             [Token::Semi, tokens @ ..] => Ok((self, tokens)),
             _ => bail!("Unable to parse valid variable declaration."),
@@ -257,6 +326,18 @@ impl Declaration {
             .context("Error building base type from token stream.")?;
         let (declarator, tokens) = Declarator::consume(&tokens[stream_offset..])
             .context("ast.Declaration.consume(): Error while parsing declarator.")?;
+
+        // This is ugly, but the book demands it be a parse error instead of the much
+        // more sensible type error. So here it is...
+        match declarator {
+            Declarator::Array { decl, .. } if matches!(*decl, Declarator::Fun { .. }) => {
+                bail!(
+                    "Arrays declarators cannot hold functions, also known as: annoying test case that should be a type error but is a parse error >:(("
+                )
+            }
+            _ => {}
+        }
+
         let (name, decl_type, params) = Declarator::process(declarator, base)
             .context("ast.Declaration.consume(): Error while processing declarator.")?;
         let name =
@@ -286,9 +367,9 @@ impl Declaration {
                     Rc::clone(&name),
                 )
                 .check_for_definition(tokens)
-                .context(
-                    "ast.Declaration.consume(): Error parsing variable declaration for \"{name}\".",
-                )?;
+                .context(format!(
+                    "ast.Declaration.consume(): Error parsing variable declaration for \"{name}\"."
+                ))?;
                 Ok((Declaration::VarDecl(decl), tokens))
             }
         }
@@ -666,9 +747,18 @@ pub enum Expr {
         name: Rc<String>,
         args: Vec<Expr>,
     },
+    Subscript {
+        expr: Box<Expr>,
+        index: Box<Expr>,
+    },
 }
 
 impl Expr {
+    pub fn is_modifiable_lvalue(&self, t: &Type) -> bool {
+        let disallowed = [Type::is_array, Type::is_function];
+        self.is_lvalue() && !disallowed.iter().any(|f| f(t))
+    }
+
     pub fn is_lvalue(&self) -> bool {
         matches!(
             self,
@@ -677,6 +767,7 @@ impl Expr {
                     op: UnaryOp::Deref,
                     ..
                 }
+                | Self::Subscript { .. }
         )
     }
 
@@ -755,16 +846,32 @@ impl Expr {
 struct Factor;
 
 impl Factor {
-    fn check_for_postfix(expr: Expr, tokens: &[Token]) -> (Expr, &[Token]) {
-        match UnaryOp::consume_postfix(tokens) {
-            Ok((op, tokens)) => Self::check_for_postfix(
-                Expr::Unary {
-                    op,
-                    expr: Box::new(expr),
-                },
-                tokens,
-            ),
-            _ => (expr, tokens),
+    fn check_for_postfix(expr: Expr, tokens: &[Token]) -> Result<(Expr, &[Token])> {
+        match tokens {
+            [Token::LBracket, tokens @ ..] => {
+                let (rhs, tokens) = Expr::parse(tokens, 0)?;
+                ensure!(
+                    tokens.first() == Some(&Token::RBracket),
+                    "ast.Factor.check_for_postfix(): subscript expression missing closing bracket"
+                );
+                Self::check_for_postfix(
+                    Expr::Subscript {
+                        expr: expr.into(),
+                        index: rhs.into(),
+                    },
+                    &tokens[1..],
+                )
+            }
+            _ => match UnaryOp::consume_postfix(tokens) {
+                Ok((op, tokens)) => Self::check_for_postfix(
+                    Expr::Unary {
+                        op,
+                        expr: Box::new(expr),
+                    },
+                    tokens,
+                ),
+                _ => Ok((expr, tokens)),
+            },
         }
     }
 
@@ -869,7 +976,7 @@ impl Factor {
                             .context("Parsing grammer rule: \"(\" <exp> \")\" failed")?;
                         match tokens {
                             [Token::RParen, tokens @ ..] => {
-                                let (expr, tokens) = Self::check_for_postfix(expr, tokens);
+                                let (expr, tokens) = Self::check_for_postfix(expr, tokens)?;
                                 Self::check_for_call(expr, tokens)
                             }
                             _ => bail!("Could not find matching right parenthesis"),
@@ -878,7 +985,7 @@ impl Factor {
                 }
                 _ => bail!("Could not match valid grammar rule."),
             }
-            .map(|(expr, tokens)| Self::check_for_postfix(expr, tokens)),
+            .and_then(|(expr, tokens)| Self::check_for_postfix(expr, tokens)),
         }
     }
 }
@@ -898,6 +1005,10 @@ pub enum BaseType {
     Ptr {
         to: Box<Type>,
         is_restrict: bool,
+    },
+    Array {
+        element: Box<Type>,
+        size: usize,
     },
     // TODO: Implement later and make this a non unit variant
     Struct,
@@ -945,6 +1056,16 @@ impl PartialEq for BaseType {
                     is_restrict: r_is_restrict,
                 },
             ) => *l_to == *r_to && l_is_restrict == r_is_restrict,
+            (
+                Self::Array {
+                    element: l_element,
+                    size: l_size,
+                },
+                Self::Array {
+                    element: r_element,
+                    size: r_size,
+                },
+            ) => *l_element == *r_element && l_size == r_size,
             _ => core::mem::discriminant(self) == core::mem::discriminant(other),
         }
     }
@@ -957,13 +1078,27 @@ impl BaseType {
             BaseType::Float(nbytes) => *nbytes,
             BaseType::Double(nbytes) => *nbytes,
             BaseType::Ptr { .. } => core::mem::size_of::<usize>(),
+            BaseType::Array { element, size } => element.base.nbytes() * size,
             BaseType::Fun { .. } => unreachable!(),
             BaseType::Struct => unreachable!(),
             BaseType::Void => unreachable!(),
         }
     }
 
-    pub fn int(nbytes: usize, signed: Option<bool>) -> Self {
+    pub fn size_of_base_type(&self) -> usize {
+        match self {
+            BaseType::Int { nbytes, .. } => *nbytes,
+            BaseType::Float(nbytes) => *nbytes,
+            BaseType::Double(nbytes) => *nbytes,
+            BaseType::Ptr { to, .. } => to.size_of(),
+            BaseType::Array { element, .. } => element.base.size_of_base_type(),
+            BaseType::Fun { .. } => unreachable!(),
+            BaseType::Struct => unreachable!(),
+            BaseType::Void => unreachable!(),
+        }
+    }
+
+    pub const fn int(nbytes: usize, signed: Option<bool>) -> Self {
         Self::Int { nbytes, signed }
     }
 
@@ -1013,6 +1148,7 @@ impl BaseType {
             Self::Fun { .. } | Self::Ptr { .. } => {
                 NonZeroUsize::new(core::mem::size_of::<usize>()).unwrap()
             }
+            Self::Array { element, .. } => element.base.default_alignment(),
             Self::Struct => todo!(),
             Self::Void => todo!(),
         }
@@ -1049,10 +1185,10 @@ impl BaseType {
     fn promote(self, other: &Self) -> Result<Self> {
         let other_rank = other
             .rank()
-            .context("Could not establish a rank for type {other:#?}.")?;
+            .context(format!("Could not establish a rank for type {other:#?}."))?;
         if self
             .rank()
-            .context("Could not establish a rank for type {self:#?}")?
+            .context(format!("Could not establish a rank for type {self:#?}"))?
             >= other_rank
         {
             Ok(self)
@@ -1121,6 +1257,18 @@ pub struct Type {
     pub is_const: bool,
 }
 
+impl From<&Constant> for Type {
+    fn from(value: &Constant) -> Self {
+        let base = BaseType::from(value);
+        let alignment = base.default_alignment();
+        Self {
+            base,
+            alignment,
+            is_const: false,
+        }
+    }
+}
+
 impl PartialEq for Type {
     fn eq(&self, other: &Self) -> bool {
         self.base == other.base && self.alignment == other.alignment
@@ -1130,11 +1278,14 @@ impl PartialEq for Type {
 impl Type {
     pub const PTR_ALIGNMENT: NonZeroUsize =
         NonZeroUsize::new(core::mem::size_of::<usize>()).unwrap();
+
+    pub const PTRDIFF_T: Self = Self::int(core::mem::size_of::<isize>(), Some(true));
+
     pub fn bool() -> Self {
         Self::int(core::mem::size_of::<i32>(), None)
     }
 
-    pub fn int(nbytes: usize, signed: Option<bool>) -> Self {
+    pub const fn int(nbytes: usize, signed: Option<bool>) -> Self {
         Self {
             base: BaseType::int(nbytes, signed),
             alignment: NonZeroUsize::new(nbytes).unwrap(),
@@ -1165,6 +1316,10 @@ impl Type {
         )
     }
 
+    pub fn is_integer(&self) -> bool {
+        matches!(self.base, BaseType::Int { .. },)
+    }
+
     pub fn is_float(&self) -> bool {
         matches!(self.base, BaseType::Float(_) | BaseType::Double(_))
     }
@@ -1173,12 +1328,55 @@ impl Type {
         matches!(self.base, BaseType::Fun { .. })
     }
 
+    pub fn is_array(&self) -> bool {
+        matches!(&self.base, BaseType::Array { .. })
+    }
+
     pub fn deref(self) -> Self {
-        assert!(self.is_pointer(), "Cannot derefrence non-pointer type");
-        let BaseType::Ptr { to, is_restrict: _ } = self.base else {
-            unreachable!()
-        };
-        *to
+        match self.base {
+            BaseType::Ptr { to, is_restrict: _ } => *to,
+            BaseType::Array { element, .. } => *element,
+            _ => unreachable!("Cannot dereference non-pointer type."),
+        }
+    }
+
+    /// Try to find a common type which one element can decay to the other as.
+    pub fn is_or_decays_to(&self, target: &Self) -> bool {
+        if self == target {
+            return true;
+        }
+        let self_decayed = self.maybe_decay();
+        self_decayed == *target
+    }
+
+    pub fn maybe_decay(&self) -> Self {
+        match self {
+            // Array types decay to pointers of their element types
+            Self {
+                base: BaseType::Array { element, .. },
+                ..
+            } => Self {
+                base: BaseType::Ptr {
+                    to: Box::new(*element.clone()),
+                    is_restrict: false,
+                },
+                alignment: Self::PTR_ALIGNMENT,
+                is_const: false,
+            },
+            // "Decaying" a function type is just making sure all of its
+            // parameters have their types decayed
+            Self {
+                base: BaseType::Fun { ret_t, param_types },
+                ..
+            } => Self {
+                base: BaseType::Fun {
+                    ret_t: ret_t.clone(),
+                    param_types: param_types.iter().map(|t| t.maybe_decay()).collect(),
+                },
+                ..self.clone()
+            },
+            _ => self.clone(),
+        }
     }
 }
 
@@ -1253,11 +1451,7 @@ impl TypeBuilder {
             }
         }
 
-        // SAFETY: `remaining` is constructed from within `tokens` slice of
-        // memory. This will always be valid, and was a whole lot easier to do
-        // than reworking all our parsing logic :^)
-        self.stream_offset =
-            unsafe { remaining.as_ptr().offset_from(tokens.as_ptr()) }.try_into()?;
+        self.stream_offset = tokens.len() - remaining.len();
 
         Ok(self)
     }
@@ -1368,20 +1562,15 @@ enum AbstractDeclarator {
         decl: Option<Box<Self>>,
         is_const: bool,
     },
+    Array {
+        decl: Option<Box<Self>>,
+        size: usize,
+    },
 }
 
 impl AbstractDeclarator {
     fn consume(tokens: &[Token]) -> Result<(Self, &[Token])> {
         match tokens {
-            [Token::LParen, tokens @ ..] => {
-                let (decl, tokens) =
-                    Self::consume(tokens).context("Failed to parse abstract declarator.")?;
-                ensure!(
-                    tokens.first().is_some_and(|t| *t == Token::RParen),
-                    "Expected closing \")\" in abstract declarator."
-                );
-                Ok((decl, &tokens[1..]))
-            }
             [Token::Star, tokens @ ..] => {
                 let (is_const, is_restrict, tokens) = consume_pointer_modifiers(tokens);
                 ensure!(
@@ -1406,8 +1595,67 @@ impl AbstractDeclarator {
                     ))
                 }
             }
+            _ => {
+                Self::consume_direct_abstract(tokens).context("Failed to parse abstract declarator")
+            }
+        }
+    }
+
+    fn consume_direct_abstract(tokens: &[Token]) -> Result<(Self, &[Token])> {
+        match tokens {
+            [Token::LParen, tokens @ ..] => {
+                let (decl, tokens) =
+                    Self::consume(tokens).context("Failed to parse abstract declarator.")?;
+                ensure!(
+                    tokens.first().is_some_and(|t| *t == Token::RParen),
+                    "Expected closing \")\" in abstract declarator."
+                );
+
+                let (decl, tokens, _) = Self::consume_subscript(Some(decl), &tokens[1..])?;
+
+                Ok((decl, tokens))
+            }
+            [Token::LBracket, ..] => {
+                let (decl, tokens, consumed) = Self::consume_subscript(None, tokens)?;
+                ensure!(
+                    consumed,
+                    "ast.AbstractDeclarator.consume_direct_abstract() requires atleast one subscript in the non-recursive case"
+                );
+                Ok((decl, tokens))
+            }
             _ => bail!("Failed to parse abstract declarator"),
         }
+    }
+
+    fn consume_subscript(
+        mut decl: Option<Self>,
+        mut tokens: &[Token],
+    ) -> Result<(Self, &[Token], bool)> {
+        const EMPTY_DECL: AbstractDeclarator = AbstractDeclarator::Array {
+            decl: None,
+            size: 0,
+        };
+        let mut consumed = false;
+        while let Some(t) = tokens.first() {
+            match t {
+                Token::LBracket => {
+                    let (constant, left) = Constant::consume(&tokens[1..])?;
+                    if left.first() != Some(&Token::RBracket) {
+                        bail!(
+                            "ast.AbstractDeclarator.consume_subscript(): Did not find matching right bracket when parsing direct declarator"
+                        );
+                    }
+                    consumed = true;
+                    tokens = &left[1..];
+                    decl = Some(Self::Array {
+                        decl: decl.map(Box::new),
+                        size: constant.as_array_size()?,
+                    });
+                }
+                _ => break,
+            }
+        }
+        Ok((decl.unwrap_or(EMPTY_DECL), tokens, consumed))
     }
 
     fn process(declarator: Self, base: Type) -> Result<Type> {
@@ -1429,6 +1677,21 @@ impl AbstractDeclarator {
                     Ok(derived_type)
                 }
             }
+            Self::Array { decl, size } => {
+                let derived_type = Type {
+                    alignment: base.alignment,
+                    base: BaseType::Array {
+                        element: Box::new(base),
+                        size,
+                    },
+                    is_const: false, // FIXME: Don't know whats supposed to go here
+                };
+                if let Some(decl) = decl {
+                    Self::process(*decl, derived_type)
+                } else {
+                    Ok(derived_type)
+                }
+            }
         }
     }
 }
@@ -1440,6 +1703,10 @@ enum Declarator {
         decl: Box<Self>,
         is_restrict: bool,
         is_const: bool,
+    },
+    Array {
+        decl: Box<Self>,
+        size: usize,
     },
     Fun {
         decl: Box<Self>,
@@ -1470,18 +1737,7 @@ fn consume_pointer_modifiers(tokens: &[Token]) -> (bool, bool, &[Token]) {
 impl Declarator {
     fn consume(tokens: &[Token]) -> Result<(Self, &[Token])> {
         let (mut decl, mut tokens) = match tokens {
-            [Token::Ident(s), tokens @ ..] => Ok::<(Declarator, &[Token]), anyhow::Error>((
-                Self::Ident(Some(Rc::clone(s))),
-                tokens,
-            )),
-            [Token::LParen, tokens @ ..] => {
-                let (decl, tokens) = Self::consume(tokens)?;
-                ensure!(
-                    tokens.first().is_some_and(|t| *t == Token::RParen),
-                    "Expected closing parentheses in declarator."
-                );
-                Ok((decl, &tokens[1..]))
-            }
+            // declarator
             [Token::Star, tokens @ ..] => {
                 let (is_const, is_restrict, remaining) = consume_pointer_modifiers(tokens);
                 let (decl, tokens) = Self::consume(remaining)?;
@@ -1494,13 +1750,58 @@ impl Declarator {
                     tokens,
                 ))
             }
-            _ => bail!("ast.Declarator.consume(): Error parsing declarator."),
+            _ => Self::consume_direct_declarator(tokens)
+                .context("ast.Declarator.consume(): Error parsing declarator."),
         }?;
 
         while let Some(t) = tokens.first() {
             match t {
                 // Disallow returning a function
-                Token::LParen if !matches!(decl, Self::Fun { .. }) => {
+                Token::LParen
+                    if !matches!(decl, Self::Fun { .. }) && !matches!(decl, Self::Array { .. }) =>
+                {
+                    let (params, left) = RawParameterList::consume(tokens)?;
+                    decl = Self::Fun {
+                        decl: Box::new(decl),
+                        params,
+                    };
+                    tokens = left;
+                }
+                _ => {
+                    break;
+                }
+            }
+        }
+        Ok((decl, tokens))
+    }
+
+    fn consume_direct_declarator(tokens: &[Token]) -> Result<(Self, &[Token])> {
+        // Simple declarator
+        let (mut decl, mut tokens) = match tokens {
+            [Token::Ident(s), tokens @ ..] => Ok::<(Declarator, &[Token]), anyhow::Error>((
+                Self::Ident(Some(Rc::clone(s))),
+                tokens,
+            )),
+            [Token::LParen, tokens @ ..] => {
+                let (decl, tokens) = Self::consume(tokens)?;
+                ensure!(
+                    tokens.first().is_some_and(|t| *t == Token::RParen),
+                    "Expected closing parentheses in declarator."
+                );
+                Ok((decl, &tokens[1..]))
+            }
+            _ => bail!(
+                "ast.Declarator.consume_direct_declarator(): Error parsing direct declarator."
+            ),
+        }?;
+
+        // Optional declarator suffix
+        while let Some(t) = tokens.first() {
+            match t {
+                // Disallow returning a function
+                Token::LParen
+                    if !matches!(decl, Self::Fun { .. }) && !matches!(decl, Self::Array { .. }) =>
+                {
                     let (params, left) = RawParameterList::consume(tokens)?;
                     decl = Self::Fun {
                         decl: Box::new(decl),
@@ -1509,7 +1810,17 @@ impl Declarator {
                     tokens = left;
                 }
                 Token::LBracket => {
-                    unimplemented!("Implement this when we get to arrays!");
+                    let (constant, left) = Constant::consume(&tokens[1..])?;
+                    if left.first() != Some(&Token::RBracket) {
+                        bail!(
+                            "ast.Declarator.consume_direct_declarator(): Did not find matching right bracket when parsing direct declarator"
+                        );
+                    }
+                    tokens = &left[1..];
+                    decl = Self::Array {
+                        decl: Box::new(decl),
+                        size: constant.as_array_size()?,
+                    };
                 }
                 _ => {
                     break;
@@ -1525,6 +1836,7 @@ impl Declarator {
         match self {
             Declarator::Ident(name) => name.clone(),
             Declarator::Pointer { decl, .. } => decl.name(),
+            Declarator::Array { decl, .. } => decl.name(),
             Declarator::Fun { decl, .. } => decl.name(),
         }
     }
@@ -1550,6 +1862,18 @@ impl Declarator {
                         "ast.Declarator.process(): Pointers always have word-sized alignment.",
                     ),
                     is_const,
+                };
+                Declarator::process(*decl, derived_type)
+            }
+            Declarator::Array { decl, size } => {
+                ensure!(!base.is_function(), "Array of functions not allowed");
+                let derived_type = Type {
+                    alignment: base.alignment,
+                    base: BaseType::Array {
+                        element: Box::new(base),
+                        size,
+                    },
+                    is_const: false, // FIXME: not sure whats supposed to go here
                 };
                 Declarator::process(*decl, derived_type)
             }
@@ -1615,6 +1939,7 @@ impl std::fmt::Display for BaseType {
                 }
                 write!(f, "*")
             }
+            Self::Array { element, size } => write!(f, "{element}[{size}]"),
             Self::Float(_) => write!(f, "float"),
             Self::Double(_) => write!(f, "double"),
             Self::Struct => todo!(),
@@ -1854,6 +2179,29 @@ impl Constant {
             bail!("No remaining tokens.")
         }
     }
+
+    pub fn as_array_size(&self) -> Result<usize> {
+        match self {
+            Constant::I8(v) => {
+                usize::try_from(*v).context("failed to convert {v} to positive size")
+            }
+            Constant::I16(v) => {
+                usize::try_from(*v).context("failed to convert {v} to positive size")
+            }
+            Constant::I32(v) => {
+                usize::try_from(*v).context("failed to convert {v} to positive size")
+            }
+            Constant::I64(v) => {
+                usize::try_from(*v).context("failed to convert {v} to positive size")
+            }
+            Constant::U8(v) => Ok(*v as usize),
+            Constant::U16(v) => Ok(*v as usize),
+            Constant::U32(v) => Ok(*v as usize),
+            Constant::U64(v) => Ok(*v as usize),
+            Constant::F32(..) => bail!("Floats cannot be used as constants in array declaration"),
+            Constant::F64(..) => bail!("Floats cannot be used as constants in array declaration"),
+        }
+    }
 }
 
 impl std::fmt::Display for Constant {
@@ -1913,11 +2261,30 @@ impl BinaryOp {
     }
 
     pub fn is_relational(&self) -> bool {
-        matches!(*self, |Self::Equal| Self::NotEqual
-            | Self::LessThan
-            | Self::LessOrEqual
-            | Self::GreaterThan
-            | Self::GreaterOrEqual)
+        matches!(
+            *self,
+            Self::Equal
+                | Self::NotEqual
+                | Self::LessThan
+                | Self::LessOrEqual
+                | Self::GreaterThan
+                | Self::GreaterOrEqual
+        )
+    }
+
+    pub fn is_add(&self) -> bool {
+        matches!(*self, Self::Add | Self::AddAssign)
+    }
+
+    pub fn is_sub(&self) -> bool {
+        matches!(*self, Self::Subtract | Self::SubAssign)
+    }
+
+    pub fn is_add_sub(&self) -> bool {
+        matches!(
+            *self,
+            Self::Add | Self::AddAssign | Self::Subtract | Self::SubAssign
+        )
     }
 
     pub fn is_bitwise(&self) -> bool {

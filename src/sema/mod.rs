@@ -1,4 +1,3 @@
-mod const_eval;
 mod gotos;
 mod identifiers;
 mod loops;

@@ -14,7 +14,7 @@ pub mod x64 {
         codegen::{self, Operand},
         tacky,
     };
-    use anyhow::{Result, bail};
+    use anyhow::{Result, bail, ensure};
     use std::fmt::Write;
 
     pub struct Generator;
@@ -64,8 +64,11 @@ pub mod x64 {
         if var.global {
             w.write_fmt(format_args!("\t.globl {}\n", var.identifier))?;
         }
-        let init_value = var.init.expect("all statics have some init after tacky?");
-        let in_bss = init_value.iter().all(|x| *x == 0);
+        ensure!(
+            !var.init.is_empty(),
+            "all statics have some init after tacky?"
+        );
+        let in_bss = var.init.iter().flat_map(|s| s.iter()).all(|x| *x == 0);
         if in_bss {
             w.write_fmt(format_args!("\t.bss\n"))?;
         } else {
@@ -76,18 +79,16 @@ pub mod x64 {
         if in_bss {
             w.write_fmt(format_args!("\t.zero {}\n", symbol.r#type.size_of()))?;
         } else {
-            // FIXME: This is not how this should be done
-            let nbytes = symbol.r#type.size_of();
-            match nbytes {
-                8 => w.write_fmt(format_args!(
-                    "\t.quad {}\n",
-                    i64::from_le_bytes(init_value[0..nbytes].try_into().unwrap())
-                ))?,
-                4 => w.write_fmt(format_args!(
-                    "\t.long {}\n",
-                    i32::from_le_bytes(init_value[0..nbytes].try_into().unwrap())
-                ))?,
-                _ => unreachable!(),
+            for init in &var.init {
+                // 16 is arbitrary, just mean to prevent super long files
+                for chunk in init.chunks(16) {
+                    let bytes = chunk
+                        .iter()
+                        .map(|b| format!("0x{b:02x}"))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    writeln!(w, "\t.byte {}", bytes)?;
+                }
             }
         }
         w.write_char('\n')?;
@@ -121,13 +122,15 @@ pub mod x64 {
 
     fn get_specifier<'a>(src: Option<&Operand>, dst: &Operand) -> &'a str {
         let size = match (src, dst) {
-            (None, Operand::Memory { size, .. } | Operand::Data { size, .. })
-            | (Some(Operand::Imm(_)), Operand::Memory { size, .. } | Operand::Data { size, .. }) => {
-                Some(*size)
-            }
-            (Some(Operand::Memory { size, .. } | Operand::Data { size, .. }), Operand::Imm(_)) => {
-                Some(*size)
-            }
+            (None, Operand::Memory { r#type, .. } | Operand::Data { r#type, .. })
+            | (
+                Some(Operand::Imm(_)),
+                Operand::Memory { r#type, .. } | Operand::Data { r#type, .. },
+            ) => Some(r#type.size_bytes()),
+            (
+                Some(Operand::Memory { r#type, .. } | Operand::Data { r#type, .. }),
+                Operand::Imm(_),
+            ) => Some(r#type.size_bytes()),
             _ => None,
         };
         match size {
@@ -236,16 +239,11 @@ pub mod x64 {
                     codegen::Operand::Reg(r) => {
                         codegen::Operand::Reg(r.as_section(codegen::RegSection::LowByte))
                     }
-                    codegen::Operand::Memory {
-                        reg,
-                        offset,
-                        r#type,
-                        ..
-                    } => codegen::Operand::Memory {
+                    codegen::Operand::Memory { reg, offset, .. } => codegen::Operand::Memory {
                         reg,
                         offset,
                         size: 1,
-                        r#type,
+                        r#type: codegen::AssemblyType::Byte,
                     },
                     _ => dst,
                 };

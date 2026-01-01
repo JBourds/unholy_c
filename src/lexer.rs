@@ -337,7 +337,7 @@ impl Token {
         character: &mut usize,
     ) -> Result<(Token, &'a str)> {
         let mut chars_found = false;
-        for (i, c) in stream.chars().enumerate() {
+        for (i, c) in stream.char_indices() {
             match c {
                 '\n' | '\r' => {
                     *character = 0;

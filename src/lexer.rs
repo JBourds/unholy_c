@@ -245,7 +245,7 @@ impl std::fmt::Display for Token {
 
 impl Token {
     const IDENT: &'static str = r"^[a-zA-Z_]\w*\b";
-    const STRING: &'static str = r#""(?:[^"\\]|\\[\s\S])*""#;
+    const STRING: &'static str = r#""([^"\\\n]|\\['"?\\abfnrtv])*""#;
     const CHAR: &'static str = r#"'([^'\\\n]|\\['"?\\abfnrtv])'"#;
     const FLOAT: &'static str =
         r"(([0-9]*\.[0-9]+|[0-9]+\.?)[Ee][+-]?[0-9]+|[0-9]*\.[0-9]+|[0-9]+\.)[^\w.]";

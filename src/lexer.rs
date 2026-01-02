@@ -40,6 +40,8 @@ pub enum ConstantFlag {
     Unsigned,
     UnsignedLong,
     Float,
+    Char,
+    String,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -141,7 +143,7 @@ impl std::fmt::Display for ConstantFlag {
             Self::Long => write!(f, "l"),
             Self::Unsigned => write!(f, "u"),
             Self::UnsignedLong => write!(f, "ul"),
-            Self::Float => write!(f, ""),
+            Self::Float | Self::Char | Self::String => write!(f, ""),
         }
     }
 }

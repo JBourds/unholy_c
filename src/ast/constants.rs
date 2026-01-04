@@ -17,6 +17,8 @@ pub enum Constant {
     U64(u64),
     F32(f32),
     F64(f64),
+    ICHAR(i32),
+    UCHAR(i32),
 }
 
 // Implement these traits knowing they will never get called on floats
@@ -59,6 +61,8 @@ impl Constant {
             Constant::U64(v) => <T as TryFrom<u64>>::try_from(*v).is_ok(),
             Constant::F32(v) => num::cast::<f32, T>(*v).is_some(),
             Constant::F64(v) => num::cast::<f64, T>(*v).is_some(),
+            Constant::ICHAR(v) => <T as TryFrom<i32>>::try_from(*v).is_ok(),
+            Constant::UCHAR(v) => <T as TryFrom<i32>>::try_from(*v).is_ok(),
         }
     }
 
@@ -74,6 +78,8 @@ impl Constant {
             Constant::U64(_) => core::mem::size_of::<u64>(),
             Constant::F32(_) => core::mem::size_of::<f32>(),
             Constant::F64(_) => core::mem::size_of::<f64>(),
+            Constant::ICHAR(_) => core::mem::size_of::<i32>(),
+            Constant::UCHAR(_) => core::mem::size_of::<i32>(),
         }
     }
 
@@ -87,6 +93,8 @@ impl Constant {
             }
             Self::F32(_) => Type::float(self.size_bytes()),
             Self::F64(_) => Type::float(self.size_bytes()),
+            Self::ICHAR(_) => Type::char(Some(true)),
+            Self::UCHAR(_) => Type::char(Some(false)),
         }
     }
 
@@ -246,6 +254,9 @@ impl Constant {
             Constant::U64(v) => Ok(*v as usize),
             Constant::F32(..) => bail!("Floats cannot be used as constants in array declaration"),
             Constant::F64(..) => bail!("Floats cannot be used as constants in array declaration"),
+            Constant::ICHAR(_) | Constant::UCHAR(_) => {
+                bail!("Chars cannot be used as constants in array declaration")
+            }
         }
     }
 }
@@ -263,6 +274,16 @@ impl std::fmt::Display for Constant {
             Constant::U64(v) => write!(f, "{v}"),
             Constant::F32(v) => write!(f, "{v}"),
             Constant::F64(v) => write!(f, "{v}"),
+            Constant::ICHAR(v) => write!(
+                f,
+                "{}",
+                char::from_u32(*v as u32).unwrap_or_else(|| { '�' })
+            ),
+            Constant::UCHAR(v) => write!(
+                f,
+                "{}",
+                char::from_u32(*v as u32).unwrap_or_else(|| { '�' })
+            ),
         }
     }
 }

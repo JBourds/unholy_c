@@ -242,6 +242,51 @@ impl BaseType {
     }
 }
 
+impl std::fmt::Display for BaseType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Int { nbytes, signed } => {
+                let mut sign = 'i';
+                if let Some(signed) = signed {
+                    if *signed {
+                        write!(f, "signed ")?;
+                    } else {
+                        write!(f, "unsigned ")?;
+                        sign = 'u';
+                    }
+                }
+                let nbits = nbytes * 8;
+                // When pretty printing, use the number of bytes rather than
+                // bending the knee to the wobbly-sized integers
+                write!(f, "{sign}{nbits}")
+            }
+            Self::Ptr { to, is_restrict } => {
+                write!(f, "{to}")?;
+                if *is_restrict {
+                    write!(f, " restrict")?;
+                }
+                write!(f, "*")
+            }
+            Self::Array { element, size } => write!(f, "{element}[{size}]"),
+            Self::Float(_) => write!(f, "float"),
+            Self::Double(_) => write!(f, "double"),
+            Self::Struct => todo!(),
+            Self::Fun { ret_t, param_types } => {
+                write!(f, "(")?;
+                for (index, t) in param_types.iter().enumerate() {
+                    write!(f, "{t}")?;
+                    if index < param_types.len() - 1 {
+                        write!(f, ", ")?;
+                    }
+                }
+                write!(f, ") -> ")?;
+                ret_t.fmt(f)
+            }
+            Self::Void => write!(f, "void"),
+        }
+    }
+}
+
 impl From<&Constant> for BaseType {
     fn from(value: &Constant) -> Self {
         match value {

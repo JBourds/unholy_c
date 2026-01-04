@@ -25,6 +25,9 @@ pub enum BaseType {
         element: Box<Type>,
         size: usize,
     },
+    Char {
+        signed: Option<bool>,
+    },
     // TODO: Implement later and make this a non unit variant
     Struct,
     Void,
@@ -94,6 +97,7 @@ impl BaseType {
             BaseType::Double(nbytes) => *nbytes,
             BaseType::Ptr { .. } => core::mem::size_of::<usize>(),
             BaseType::Array { element, size } => element.base.nbytes() * size,
+            BaseType::Char { .. } => core::mem::size_of::<u8>(),
             BaseType::Fun { .. } => unreachable!(),
             BaseType::Struct => unreachable!(),
             BaseType::Void => unreachable!(),
@@ -107,6 +111,7 @@ impl BaseType {
             BaseType::Double(nbytes) => *nbytes,
             BaseType::Ptr { to, .. } => to.size_of(),
             BaseType::Array { element, .. } => element.base.size_of_base_type(),
+            BaseType::Char { .. } => self.nbytes(),
             BaseType::Fun { .. } => unreachable!(),
             BaseType::Struct => unreachable!(),
             BaseType::Void => unreachable!(),
@@ -164,6 +169,7 @@ impl BaseType {
                 NonZeroUsize::new(core::mem::size_of::<usize>()).unwrap()
             }
             Self::Array { element, .. } => element.base.default_alignment(),
+            Self::Char { .. } => NonZeroUsize::new(core::mem::size_of::<u8>()).unwrap(),
             Self::Struct => todo!(),
             Self::Void => todo!(),
         }
@@ -283,6 +289,15 @@ impl std::fmt::Display for BaseType {
                 ret_t.fmt(f)
             }
             Self::Void => write!(f, "void"),
+            Self::Char { signed } => write!(
+                f,
+                "{}char",
+                match signed {
+                    Some(true) => "s",
+                    Some(false) => "u",
+                    None => "",
+                }
+            ),
         }
     }
 }
@@ -300,6 +315,10 @@ impl From<&Constant> for BaseType {
             Constant::U64(_) => Self::int(core::mem::size_of::<u64>(), Some(false)),
             Constant::F32(_) => Self::float(false),
             Constant::F64(_) => Self::float(true),
+            Constant::ICHAR(_) => Self::Char { signed: Some(true) },
+            Constant::UCHAR(_) => Self::Char {
+                signed: Some(false),
+            },
         }
     }
 }
@@ -357,6 +376,16 @@ impl Type {
         Self {
             base: BaseType::float(nbytes == core::mem::size_of::<f64>()),
             alignment: NonZeroUsize::new(nbytes).unwrap(),
+            is_const: true,
+        }
+    }
+
+    pub fn char(signed: Option<bool>) -> Self {
+        let base = BaseType::Char { signed };
+        let alignment = base.default_alignment();
+        Self {
+            base,
+            alignment,
             is_const: true,
         }
     }

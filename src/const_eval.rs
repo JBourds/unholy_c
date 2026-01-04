@@ -425,6 +425,8 @@ impl From<&ast::Constant> for Result<Constant> {
             ast::Constant::U64(num) => Ok(Constant::U64(num)),
             ast::Constant::F32(num) => Ok(Constant::F32(num)),
             ast::Constant::F64(num) => Ok(Constant::F64(num)),
+            ast::Constant::ICHAR(..) => todo!(),
+            ast::Constant::UCHAR(..) => todo!(),
         }
     }
 }

@@ -229,6 +229,8 @@ impl InitialValue {
             ast::Constant::F64(val) => Ok(InitialValue::Initial(vec![
                 val.to_ne_bytes().to_vec().into(),
             ])),
+            ast::Constant::ICHAR(..) => todo!(),
+            ast::Constant::UCHAR(..) => todo!(),
         }
     }
 

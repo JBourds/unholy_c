@@ -89,7 +89,10 @@ impl From<&Operand> for AssemblyType {
     fn from(value: &Operand) -> Self {
         match value {
             Operand::Imm(constant) => match constant {
-                ast::Constant::I8(_) | ast::Constant::U8(_) => Self::Byte,
+                ast::Constant::I8(_)
+                | ast::Constant::U8(_)
+                | ast::Constant::ICHAR(_)
+                | ast::Constant::UCHAR(_) => Self::Byte,
                 ast::Constant::I16(_) | ast::Constant::U16(_) => Self::Word,
                 ast::Constant::I32(_) | ast::Constant::U32(_) => Self::Longword,
                 ast::Constant::I64(_) | ast::Constant::U64(_) => Self::Quadword,

@@ -435,5 +435,6 @@ fn resolve_expr(expr: ast::Expr, ident_map: &HashMap<Rc<String>, IdentEntry>) ->
             expr: resolve_expr(*expr, ident_map)?.into(),
             index: resolve_expr(*index, ident_map)?.into(),
         }),
+        ast::Expr::String { .. } => todo!(),
     }
 }

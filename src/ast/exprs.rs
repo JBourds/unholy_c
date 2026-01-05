@@ -38,6 +38,9 @@ pub enum Expr {
         expr: Box<Expr>,
         index: Box<Expr>,
     },
+    String {
+        value: String,
+    },
 }
 
 impl Expr {

@@ -1535,6 +1535,7 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
                 ),
             }
         }
+        ast::Expr::String { .. } => todo!(),
     }
 }
 

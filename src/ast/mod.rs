@@ -134,13 +134,21 @@ pub enum BlockItem {
 
 impl BlockItem {
     fn consume(tokens: &[Token]) -> Result<(BlockItem, &[Token])> {
-        if let Ok((decl, tokens)) = Declaration::consume(tokens) {
-            Ok((Self::Decl(decl), tokens))
-        } else if let Ok((stmt, tokens)) = Stmt::consume(tokens) {
-            Ok((Self::Stmt(stmt), tokens))
-        } else {
-            bail!("Unable to parse a valid block item.")
+        let decl_consume = Declaration::consume(tokens);
+        if let Ok((decl, tokens)) = decl_consume {
+            return Ok((Self::Decl(decl), tokens));
         }
+
+        let stmt_consume = Stmt::consume(tokens);
+        if let Ok((stmt, tokens)) = stmt_consume {
+            return Ok((Self::Stmt(stmt), tokens));
+        }
+
+        return Err(decl_consume
+            .context(stmt_consume.err().unwrap())
+            .context("Unable to parse a valid block item")
+            .err()
+            .unwrap());
     }
 }
 
@@ -216,14 +224,22 @@ impl Block {
             Some(Token::LSquirly) => {
                 let mut remaining = &tokens[1..];
                 let mut items = vec![];
-                while let Ok((item, tokens)) = BlockItem::consume(remaining) {
+                let mut block_item = BlockItem::consume(remaining);
+                while let Ok((item, tokens)) = block_item {
                     remaining = tokens;
                     items.push(item);
+                    block_item = BlockItem::consume(remaining);
                 }
                 match remaining.first() {
                     Some(Token::RSquirly) => Ok((Self(items), &remaining[1..])),
-                    Some(token) => bail!("Expected \"}}\" to end block but found {}", token),
-                    None => bail!("Missing \"}}\" to end block."),
+                    Some(token) => Err(block_item
+                        .err()
+                        .unwrap()
+                        .context(format!("Expected \"}}\" to end block but found {}", token))),
+                    None => Err(block_item
+                        .err()
+                        .unwrap()
+                        .context("Missing \"}}\" to end block.")),
                 }
             }
             Some(token) => bail!("Expected \"{{\" to start block but found {}", token),

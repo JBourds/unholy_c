@@ -240,6 +240,7 @@ impl BaseType {
                 Token::Double => Ok((Self::Double(std::mem::size_of::<f64>()), &tokens[1..])),
                 // TODO: Recursive parsing logic for structs
                 Token::Struct => Ok((Self::Struct, &tokens[1..])),
+                Token::Char => Ok((Self::Char { signed: None }, &tokens[1..])),
                 _ => bail!("Could not parse base type."),
             }
         } else {
@@ -533,6 +534,17 @@ impl TypeBuilder {
                         nbytes,
                         signed: self.is_signed,
                     });
+                }
+                Some(BaseType::Char { .. }) => {
+                    if self.n_longs > 0 {
+                        bail!("TypeBuilder: long char is not a valid type");
+                    } else if self.is_short {
+                        bail!("TypeBuilder: short char is not a valid type");
+                    } else {
+                        self.base.replace(BaseType::Char {
+                            signed: self.is_signed,
+                        });
+                    }
                 }
                 _ => bail!(
                     "Cannot provide type specifiers specific to integers for non integer type."

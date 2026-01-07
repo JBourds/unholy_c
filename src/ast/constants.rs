@@ -1,4 +1,4 @@
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result, bail, ensure};
 use num::{NumCast, bigint::BigUint};
 use std::str::FromStr;
 
@@ -225,6 +225,18 @@ impl Constant {
                         };
                         Ok((val, &tokens[1..]))
                     }
+                    Some(ConstantFlag::Char) => {
+                        let text = normalize_text(&text);
+                        ensure!(
+                            text.len() == 1,
+                            "Somehow parsed a character literal with more than one character?"
+                        );
+                        let val = Self::I32(*text.as_bytes().first().unwrap() as i32);
+                        Ok((val, &tokens[1..]))
+                    }
+                    Some(ConstantFlag::String) => {
+                        bail!("String constants should've been consumed by Expr::consume")
+                    }
                     _ => bail!("Could not parse token into constant."),
                 },
                 _ => bail!("Could not parse token into constant."),
@@ -286,4 +298,27 @@ impl std::fmt::Display for Constant {
             ),
         }
     }
+}
+
+const ESCAPE_CHARACTERS: [(&str, &str); 11] = [
+    ("\\\\", "\\"),
+    ("\\'", "\'"),
+    ("\\\"", "\""),
+    ("\\?", "?"),
+    ("\\a", "\x07"),
+    ("\\b", "\x08"),
+    ("\\f", "\x0C"),
+    ("\\n", "\n"),
+    ("\\r", "\r"),
+    ("\\t", "\t"),
+    ("\\v", "\x0B"),
+];
+
+fn normalize_text(text: &str) -> String {
+    let mut text = text.to_string();
+
+    for (pattern, replacement) in ESCAPE_CHARACTERS {
+        text = text.replace(pattern, replacement);
+    }
+    text
 }

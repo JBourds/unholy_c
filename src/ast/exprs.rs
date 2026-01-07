@@ -39,7 +39,7 @@ pub enum Expr {
         index: Box<Expr>,
     },
     String {
-        value: String,
+        value: Rc<String>,
     },
 }
 

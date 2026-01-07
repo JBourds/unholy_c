@@ -314,7 +314,7 @@ const ESCAPE_CHARACTERS: [(&str, &str); 11] = [
     ("\\v", "\x0B"),
 ];
 
-fn normalize_text(text: &str) -> String {
+pub fn normalize_text(text: &str) -> String {
     let mut text = text.to_string();
 
     for (pattern, replacement) in ESCAPE_CHARACTERS {

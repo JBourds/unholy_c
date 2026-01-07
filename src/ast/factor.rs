@@ -2,7 +2,7 @@ use anyhow::{Context, Result, bail, ensure};
 use std::rc::Rc;
 
 use super::{AbstractDeclarator, Constant, Expr, TypeBuilder, UnaryOp};
-use crate::lexer::Token;
+use crate::lexer::{ConstantFlag, Token};
 
 pub struct Factor;
 
@@ -93,6 +93,42 @@ impl Factor {
                 ))
             }
             _ => match tokens {
+                [
+                    Token::Constant {
+                        text,
+                        flag: Some(ConstantFlag::String),
+                    },
+                    tokens @ ..,
+                ] => {
+                    let text = super::constants::normalize_text(text);
+                    if matches!(
+                        tokens.first(),
+                        Some(&Token::Constant {
+                            flag: Some(ConstantFlag::String),
+                            ..
+                        })
+                    ) {
+                        match Self::parse(tokens)? {
+                            (Expr::String { value }, tokens) => Ok((
+                                Expr::String {
+                                    value: Rc::new(format!("{text}{value}")),
+                                },
+                                tokens,
+                            )),
+                            (expr, _) => bail!(
+                                "expected to concat a string to a string, found '{:#?}' instead",
+                                expr
+                            ),
+                        }
+                    } else {
+                        Ok((
+                            Expr::String {
+                                value: Rc::new(text),
+                            },
+                            tokens,
+                        ))
+                    }
+                }
                 [Token::Constant { .. }, ..] => {
                     let (lit, tokens) = Constant::consume(tokens)?;
                     Ok((Expr::Constant(lit), tokens))

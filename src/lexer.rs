@@ -393,20 +393,26 @@ impl Token {
         if let Some((token, len)) = {
             match stream.chars().next() {
                 Some('\'') => Self::match_regex(stream, Self::CHAR).map_or(None, |s| {
+                    assert!(
+                        s.len() > 0,
+                        "Matched chars should always contain wrapping single quotes"
+                    );
                     Some((
                         Token::Constant {
-                            text: Rc::new(s.to_string()),
-                            flag: None,
+                            text: Rc::new(s[1..s.len() - 1].to_string()),
                             flag: Some(ConstantFlag::Char),
                         },
                         s.len(),
                     ))
                 }),
                 Some('"') => Self::match_regex(stream, Self::STRING).map_or(None, |s| {
+                    assert!(
+                        s.len() > 0,
+                        "Matched string literals should always contain wrapping double quotes"
+                    );
                     Some((
                         Token::Constant {
-                            text: Rc::new(s.to_string()),
-                            flag: None,
+                            text: Rc::new(s[1..s.len() - 1].to_string()),
                             flag: Some(ConstantFlag::String),
                         },
                         s.len(),

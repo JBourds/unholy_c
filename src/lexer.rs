@@ -397,6 +397,7 @@ impl Token {
                         Token::Constant {
                             text: Rc::new(s.to_string()),
                             flag: None,
+                            flag: Some(ConstantFlag::Char),
                         },
                         s.len(),
                     ))
@@ -406,6 +407,7 @@ impl Token {
                         Token::Constant {
                             text: Rc::new(s.to_string()),
                             flag: None,
+                            flag: Some(ConstantFlag::String),
                         },
                         s.len(),
                     ))

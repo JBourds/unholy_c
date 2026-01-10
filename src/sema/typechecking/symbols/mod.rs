@@ -208,7 +208,7 @@ impl SymbolTable {
                     },
                 }
             }
-            Attribute::Local => {}
+            Attribute::Local | Attribute::Constant { .. } => {}
         };
         Ok(old_attrib.clone())
     }

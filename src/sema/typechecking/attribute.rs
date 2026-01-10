@@ -2,6 +2,9 @@ use super::{InitialValue, Scope, SymbolTable};
 use anyhow::{Context, Result, ensure};
 
 use crate::ast;
+
+use std::rc::Rc;
+
 #[derive(Clone, Debug)]
 pub enum Attribute {
     Fun {
@@ -10,6 +13,9 @@ pub enum Attribute {
     Static {
         initial_value: InitialValue,
         external_linkage: bool,
+    },
+    Constant {
+        data: Vec<Rc<[u8]>>,
     },
     Local,
 }
@@ -109,6 +115,7 @@ impl Attribute {
                 external_linkage, ..
             } => *external_linkage,
             Self::Local => false,
+            Self::Constant { .. } => false,
         }
     }
 }

@@ -31,6 +31,7 @@ impl StaticVariable {
                 sema::tc::InitialValue::None => None,
             },
             sema::tc::Attribute::Local => None,
+            sema::tc::Attribute::Constant { .. } => todo!(),
         }
     }
 }

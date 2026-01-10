@@ -10,8 +10,25 @@ use std::rc::Rc;
 use crate::ast;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub enum InitialData {
+    Bytes(Vec<Rc<[u8]>>),
+    Label(Rc<String>),
+}
+
+impl InitialData {
+    pub fn unwrap_bytes(&self) -> &Vec<Rc<[u8]>> {
+        match &self {
+            Self::Bytes(v) => &v,
+            Self::Label(..) => {
+                panic!("Tried to unwrap InitialData into bytes but InitialData was a Label!")
+            }
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum InitialValue {
-    Initial(Vec<Rc<[u8]>>),
+    Initial(InitialData),
     Tentative,
     None,
 }
@@ -55,14 +72,14 @@ impl InitialValue {
                 let mut new_inits = vec![];
                 for init in inits.iter() {
                     match Self::from_initializer(element, init, symbols)? {
-                        Self::Initial(initial) => {
+                        Self::Initial(InitialData::Bytes(initial)) => {
                             new_inits.extend(initial);
                         }
                         _ => unreachable!(),
                     }
                 }
 
-                Ok(Self::Initial(new_inits))
+                Ok(Self::Initial(InitialData::Bytes(new_inits)))
             }
             _ => bail!("Cannot static init non-array with compound initializer"),
         }
@@ -75,50 +92,26 @@ impl InitialValue {
             "Failed to perform implicit casting when constructing initial value for declaration",
         )?;
         if is_null_pointer_constant(&expr) && target.is_pointer() {
-            return Ok(InitialValue::Initial(vec![
+            return Ok(InitialValue::Initial(InitialData::Bytes(vec![
                 0usize.to_ne_bytes().to_vec().into(),
-            ]));
+            ])));
         }
         let val = const_eval::eval(expr.clone()).context("Failed to const eval expression")?;
-        match val {
-            ast::Constant::I8(val) => Ok(InitialValue::Initial(vec![
-                val.to_ne_bytes().to_vec().into(),
-            ])),
-            ast::Constant::I16(val) => Ok(InitialValue::Initial(vec![
-                val.to_ne_bytes().to_vec().into(),
-            ])),
-            ast::Constant::I32(val) => Ok(InitialValue::Initial(vec![
-                val.to_ne_bytes().to_vec().into(),
-            ])),
-            ast::Constant::I64(val) => Ok(InitialValue::Initial(vec![
-                val.to_ne_bytes().to_vec().into(),
-            ])),
-            ast::Constant::U8(val) => Ok(InitialValue::Initial(vec![
-                val.to_ne_bytes().to_vec().into(),
-            ])),
-            ast::Constant::U16(val) => Ok(InitialValue::Initial(vec![
-                val.to_ne_bytes().to_vec().into(),
-            ])),
-            ast::Constant::U32(val) => Ok(InitialValue::Initial(vec![
-                val.to_ne_bytes().to_vec().into(),
-            ])),
-            ast::Constant::U64(val) => Ok(InitialValue::Initial(vec![
-                val.to_ne_bytes().to_vec().into(),
-            ])),
-            ast::Constant::F32(val) => Ok(InitialValue::Initial(vec![
-                val.to_ne_bytes().to_vec().into(),
-            ])),
-            ast::Constant::F64(val) => Ok(InitialValue::Initial(vec![
-                val.to_ne_bytes().to_vec().into(),
-            ])),
+        Ok(InitialValue::Initial(InitialData::Bytes(match val {
+            ast::Constant::I8(val) => vec![val.to_ne_bytes().to_vec().into()],
+            ast::Constant::I16(val) => vec![val.to_ne_bytes().to_vec().into()],
+            ast::Constant::I32(val) => vec![val.to_ne_bytes().to_vec().into()],
+            ast::Constant::I64(val) => vec![val.to_ne_bytes().to_vec().into()],
+            ast::Constant::U8(val) => vec![val.to_ne_bytes().to_vec().into()],
+            ast::Constant::U16(val) => vec![val.to_ne_bytes().to_vec().into()],
+            ast::Constant::U32(val) => vec![val.to_ne_bytes().to_vec().into()],
+            ast::Constant::U64(val) => vec![val.to_ne_bytes().to_vec().into()],
+            ast::Constant::F32(val) => vec![val.to_ne_bytes().to_vec().into()],
+            ast::Constant::F64(val) => vec![val.to_ne_bytes().to_vec().into()],
             // FIXME: We may need to truncate these to fit in i8/u8
-            ast::Constant::ICHAR(val) => Ok(InitialValue::Initial(vec![
-                val.to_ne_bytes().to_vec().into(),
-            ])),
-            ast::Constant::UCHAR(val) => Ok(InitialValue::Initial(vec![
-                val.to_ne_bytes().to_vec().into(),
-            ])),
-        }
+            ast::Constant::ICHAR(val) => vec![val.to_ne_bytes().to_vec().into()],
+            ast::Constant::UCHAR(val) => vec![val.to_ne_bytes().to_vec().into()],
+        })))
     }
 
     pub fn from_var_with_scope(
@@ -152,9 +145,11 @@ impl InitialValue {
             },
             (Scope::Local(..), None) => match var.storage_class {
                 // Local Statics with no initilizer get defaulted to zero
-                Some(ast::StorageClass::Static) => Ok(Some(InitialValue::Initial(vec![
-                    vec![0; var.r#type.base.nbytes()].into(),
-                ]))),
+                Some(ast::StorageClass::Static) => {
+                    Ok(Some(InitialValue::Initial(InitialData::Bytes(vec![
+                        vec![0; var.r#type.base.nbytes()].into(),
+                    ]))))
+                }
                 // Resolve any existing declaration's initial value
                 Some(ast::StorageClass::Extern) => {
                     if let Some(entry) = symbols.get(&var.name) {

@@ -16,7 +16,7 @@ use anyhow::Context;
 
 use crate::ast::{Expr, Type};
 pub use attribute::Attribute;
-pub use initial_value::InitialValue;
+pub use initial_value::{InitialData, InitialValue};
 pub use symbols::{Scope, SymbolEntry, SymbolTable};
 
 use super::*;

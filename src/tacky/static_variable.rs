@@ -21,7 +21,7 @@ impl StaticVariable {
                 sema::tc::InitialValue::Initial(i) => Some(StaticVariable {
                     identifier: name,
                     external_linkage: *external_linkage,
-                    init: i.to_vec(),
+                    init: i.unwrap_bytes().to_vec(),
                 }),
                 sema::tc::InitialValue::Tentative => Some(StaticVariable {
                     identifier: name,

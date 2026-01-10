@@ -2,19 +2,21 @@ pub mod attribute;
 pub mod expr;
 pub mod initial_value;
 pub mod symbols;
+pub mod var_init;
 
 use crate::const_eval;
 use std::collections::HashSet;
 
 use anyhow::{Context, Error};
 
-use crate::ast::{Expr, StorageClass, Type};
+use crate::ast::{Expr, Type};
 pub use attribute::Attribute;
 pub use initial_value::InitialValue;
 pub use symbols::{Scope, SymbolEntry, SymbolTable};
 
 use super::*;
 use expr::typecheck_expr_and_convert;
+use var_init::{typecheck_global_var_decl, typecheck_var_decl};
 
 fn is_null_pointer_constant(e: &ast::Expr) -> bool {
     if let ast::Expr::Cast { target, exp } = e
@@ -418,59 +420,6 @@ fn typecheck_fun_decl(decl: ast::FunDecl, symbols: &mut SymbolTable) -> Result<a
         .pop_scope()
         .expect("We just popped the scope so this should not fail.");
     Ok(ast::FunDecl { block, ..decl })
-}
-
-fn typecheck_global_var_decl(
-    decl: ast::VarDecl,
-    symbols: &mut SymbolTable,
-) -> Result<ast::VarDecl> {
-    ensure!(
-        symbols.scope() == Scope::Global,
-        "Global vars must be declared in global scope"
-    );
-    typecheck_var_decl(decl, symbols)
-}
-
-fn typecheck_var_decl(decl: ast::VarDecl, symbols: &mut SymbolTable) -> Result<ast::VarDecl> {
-    let target = &decl.r#type;
-    let entry = symbols.declare_var(&decl).context(format!(
-        "Failed to typecheck local variable declaration: for {}",
-        decl.name
-    ))?;
-    if decl
-        .storage_class
-        .is_some_and(|cls| cls == StorageClass::Extern)
-    {
-        ensure!(
-            decl.init.is_none(),
-            "Cannot provide a definition for a variable with extern storage class."
-        );
-    }
-    let decl = match decl.init {
-        Some(init) => {
-            let init = typecheck_init(target, init, symbols, &decl.name)?;
-            if let Attribute::Static {
-                initial_value: _,
-                external_linkage,
-            } = entry.attribute
-            {
-                let attribute = Attribute::Static {
-                    initial_value: InitialValue::from_initializer(&decl.r#type, &init, symbols)
-                        .context("unable to create initial value from initializer")?,
-                    external_linkage,
-                };
-                if let Some(entry) = symbols.get_mut(&decl.name) {
-                    entry.attribute = attribute;
-                }
-            }
-            ast::VarDecl {
-                init: Some(init),
-                ..decl
-            }
-        }
-        None => ast::VarDecl { init: None, ..decl },
-    };
-    Ok(decl)
 }
 
 fn typecheck_init(

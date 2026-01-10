@@ -98,8 +98,14 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
                 },
                 ast::UnaryOp::AddrOf => bail!("Cannot take the address of a non-lvalue"),
                 ast::UnaryOp::Deref => r#type.deref(),
-                ast::UnaryOp::Negate if r#type.is_pointer() => {
-                    bail!("Cannot apply unary negate operation to pointer.")
+                ast::UnaryOp::Negate => {
+                    if r#type.is_pointer() {
+                        bail!("Cannot apply unary negate operation to pointer.")
+                    } else if r#type.is_char() {
+                        ast::Type::int(4, None)
+                    } else {
+                        r#type
+                    }
                 }
                 ast::UnaryOp::Complement if r#type.is_pointer() => {
                     bail!("Cannot apply unary complement operation to pointer.")

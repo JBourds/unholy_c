@@ -415,7 +415,7 @@ impl Type {
     }
 
     pub fn is_integer(&self) -> bool {
-        matches!(self.base, BaseType::Int { .. },)
+        matches!(self.base, BaseType::Int { .. } | BaseType::Char { .. })
     }
 
     pub fn is_float(&self) -> bool {

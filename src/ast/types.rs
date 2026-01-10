@@ -136,6 +136,14 @@ impl BaseType {
         // Completely arbitrary numbers but this ensures that rank favors size,
         // and that floating point representations will always win out
         match self {
+            Self::Char { signed } => Some(
+                10 + 1
+                    + if signed.is_some_and(|signed| !signed) {
+                        1
+                    } else {
+                        0
+                    },
+            ),
             Self::Int { nbytes, signed } => Some(
                 *nbytes * 10
                     + 1
@@ -189,7 +197,7 @@ impl BaseType {
     fn default_promote(self) -> Self {
         match self {
             // Integer types get promoted to a basic signed int by default
-            Self::Int { .. } => {
+            Self::Int { .. } | Self::Char { .. } => {
                 let int = Self::default();
                 let int_rank = int.rank().expect("Integer does not have a rank?");
                 if self.rank().expect("Integer does not have a rank?") >= int_rank {

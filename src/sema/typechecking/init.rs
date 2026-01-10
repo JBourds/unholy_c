@@ -14,9 +14,30 @@ pub fn typecheck_init(
     name: &Rc<String>,
 ) -> Result<ast::Initializer> {
     match (target, init) {
-        (target, ast::Initializer::SingleInit(..)) if target.is_array() => {
-            bail!("Arrays cannot be initialized with a `SingleInit`")
-        }
+        (
+            ast::Type {
+                base: ast::BaseType::Array { element, size },
+                ..
+            },
+            ast::Initializer::SingleInit(expr),
+        ) => match *expr {
+            ast::Expr::String { value } => {
+                if !element.is_char() {
+                    bail!("Can't initialize a non-character type with a string literal");
+                }
+                if value.len() > *size {
+                    bail!(
+                        "String literal is too large for array, string {} > array {}",
+                        value.len(),
+                        size
+                    );
+                }
+                Ok(ast::Initializer::SingleInit(Box::new(ast::Expr::String {
+                    value,
+                })))
+            }
+            _ => bail!("Arrays cannot be initialized with a `SingleInit`"),
+        },
         (_, ast::Initializer::SingleInit(expr)) => {
             let TypedExpr { expr, r#type } = typecheck_expr_and_convert(&expr, symbols)
                 .context("failed to typecheck expression and convert")?;

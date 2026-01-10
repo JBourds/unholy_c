@@ -36,7 +36,9 @@ pub fn typecheck_init(
                     value,
                 })))
             }
-            _ => bail!("Arrays cannot be initialized with a `SingleInit`"),
+            _ => bail!(
+                "Arrays cannot be initialized with a `SingleInit` that aren't string literals"
+            ),
         },
         (_, ast::Initializer::SingleInit(expr)) => {
             let TypedExpr { expr, r#type } = typecheck_expr_and_convert(&expr, symbols)

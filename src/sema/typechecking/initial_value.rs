@@ -6,6 +6,7 @@ use anyhow::{Context, Result, bail, ensure};
 
 use std::cmp;
 use std::rc::Rc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::ast;
 
@@ -60,6 +61,73 @@ impl InitialValue {
         symbols: &mut SymbolTable,
     ) -> Result<Self> {
         match (r#type, init) {
+            (
+                ast::Type {
+                    base: ast::BaseType::Array { element, size },
+                    ..
+                },
+                ast::Initializer::SingleInit(expr),
+            ) => match &**expr {
+                ast::Expr::String { value } => {
+                    if !element.is_char() {
+                        bail!("Can't initialize a non-character type with a string literal");
+                    }
+                    if value.len() > *size {
+                        bail!(
+                            "String literal is too large for array, string {} > array {}",
+                            value.len(),
+                            size
+                        );
+                    }
+                    let mut bytes = value.as_bytes().to_vec();
+                    bytes.extend_from_slice(&[0].repeat(size - bytes.len()));
+                    Ok(Self::Initial(InitialData::Bytes(vec![bytes.into()])))
+                }
+                _ => bail!("Arrays cannot be initialized with a `SingleInit`"),
+            },
+            (
+                r#type @ ast::Type {
+                    base: ast::BaseType::Ptr { to, .. },
+                    ..
+                },
+                ast::Initializer::SingleInit(expr),
+            ) => match &**expr {
+                ast::Expr::String { value } => {
+                    if !matches!(to.base, ast::BaseType::Char { signed: None }) {
+                        bail!(
+                            "Cannot assign string literal to non char pointer, including signed and unsigned char pointers"
+                        );
+                    }
+                    static COUNTER: AtomicUsize = AtomicUsize::new(0);
+                    let label = Rc::new(format!(
+                        "string_literal.{}",
+                        COUNTER.fetch_add(1, Ordering::Relaxed)
+                    ));
+                    let base = ast::BaseType::Array {
+                        element: Box::new(ast::Type::char(None)),
+                        size: value.len() + 1,
+                    };
+                    let alignment = base.default_alignment();
+
+                    symbols.insert_scope(
+                        Rc::clone(&label),
+                        crate::sema::tc::SymbolEntry {
+                            r#type: ast::Type {
+                                base,
+                                alignment,
+                                is_const: true,
+                            },
+                            defined: true,
+                            scope: Scope::Global,
+                            attribute: Attribute::Constant {
+                                data: vec![value.as_bytes().to_vec().into(), vec![0].into()],
+                            },
+                        },
+                    );
+                    Ok(Self::Initial(InitialData::Label(label)))
+                }
+                _ => Self::from_expr(r#type, expr, symbols),
+            },
             (_, ast::Initializer::SingleInit(init)) => Self::from_expr(r#type, init, symbols),
             (
                 ast::Type {
@@ -91,6 +159,7 @@ impl InitialValue {
         let expr = convert_by_assignment(expr, &r#type, target).context(
             "Failed to perform implicit casting when constructing initial value for declaration",
         )?;
+
         if is_null_pointer_constant(&expr) && target.is_pointer() {
             return Ok(InitialValue::Initial(InitialData::Bytes(vec![
                 0usize.to_ne_bytes().to_vec().into(),

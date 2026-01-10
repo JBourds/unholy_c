@@ -68,7 +68,7 @@ impl SymbolTable {
         Self::get_local_mut(&mut self.scopes, key).or(Self::get_global_mut(&mut self.global, key))
     }
 
-    fn insert_scope(&mut self, key: Rc<String>, entry: SymbolEntry) -> Option<SymbolEntry> {
+    pub fn insert_scope(&mut self, key: Rc<String>, entry: SymbolEntry) -> Option<SymbolEntry> {
         // Declare local static vars in global scope as well so it is
         // easy to iterate over (unique names make this legal)
         match entry.scope {

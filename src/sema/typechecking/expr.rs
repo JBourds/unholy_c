@@ -573,6 +573,22 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
                 ),
             }
         }
-        ast::Expr::String { .. } => todo!(),
+        ast::Expr::String { value } => {
+            let base = ast::BaseType::Array {
+                element: Box::new(ast::Type::char(None)),
+                size: value.len() + 1,
+            };
+            let alignment = base.default_alignment();
+            Ok(TypedExpr {
+                expr: ast::Expr::String {
+                    value: Rc::clone(value),
+                },
+                r#type: ast::Type {
+                    base,
+                    alignment,
+                    is_const: true,
+                },
+            })
+        }
     }
 }

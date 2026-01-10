@@ -1,7 +1,9 @@
 pub mod attribute;
 pub mod block;
+pub mod decl;
 pub mod expr;
 pub mod fun_decl;
+pub mod init;
 pub mod initial_value;
 pub mod statement;
 pub mod symbols;
@@ -18,8 +20,10 @@ pub use symbols::{Scope, SymbolEntry, SymbolTable};
 
 use super::*;
 use block::{typecheck_block, typecheck_block_item};
+use decl::typecheck_decl;
 use expr::typecheck_expr_and_convert;
 use fun_decl::typecheck_fun_decl;
+use init::typecheck_init;
 use statement::typecheck_stmt;
 use var_init::{typecheck_global_var_decl, typecheck_var_decl};
 
@@ -172,71 +176,5 @@ fn maybe_decay_expr(texpr: TypedExpr) -> TypedExpr {
         }
     } else {
         TypedExpr { expr, r#type }
-    }
-}
-
-fn typecheck_decl(decl: ast::Declaration, symbols: &mut SymbolTable) -> Result<ast::Declaration> {
-    Ok(match decl {
-        ast::Declaration::FunDecl(decl) => {
-            let name = Rc::clone(&decl.name);
-            ast::Declaration::FunDecl(
-                typecheck_fun_decl(decl, symbols)
-                    .context(format!("Unable to typecheck \"{name}\" declaration"))?,
-            )
-        }
-        ast::Declaration::VarDecl(decl) => {
-            let name = Rc::clone(&decl.name);
-            ast::Declaration::VarDecl(
-                typecheck_var_decl(decl, symbols)
-                    .context(format!("Unable to typecheck \"{name}\" declaration"))?,
-            )
-        }
-    })
-}
-
-fn typecheck_init(
-    target: &Type,
-    init: ast::Initializer,
-    symbols: &mut SymbolTable,
-    name: &Rc<String>,
-) -> Result<ast::Initializer> {
-    match (target, init) {
-        (target, ast::Initializer::SingleInit(..)) if target.is_array() => {
-            bail!("Arrays cannot be initialized with a `SingleInit`")
-        }
-        (_, ast::Initializer::SingleInit(expr)) => {
-            let TypedExpr { expr, r#type } = typecheck_expr_and_convert(&expr, symbols)
-                .context("failed to typecheck expression and convert")?;
-            Ok(ast::Initializer::SingleInit(
-                convert_by_assignment(expr, &r#type, target)
-                    .context(format!(
-                        "Failed to typecheck initialization for variable \"{}\"",
-                        name,
-                    ))?
-                    .into(),
-            ))
-        }
-
-        (
-            ast::Type {
-                base: ast::BaseType::Array { element, size },
-                ..
-            },
-            ast::Initializer::CompundInit(inits),
-        ) => {
-            if inits.len() > *size {
-                bail!("Initializer {inits:#?} has to many elements for array of len {size}");
-            }
-            let mut inits = inits
-                .into_iter()
-                .map(|i| typecheck_init(element, i, symbols, name))
-                .collect::<Result<Vec<ast::Initializer>>>()?;
-            while inits.len() < *size {
-                inits.push(ast::Initializer::zero_initializer(element)?);
-            }
-
-            Ok(ast::Initializer::CompundInit(inits))
-        }
-        _ => bail!("Cannot assign compound initializer to non array var decl"),
     }
 }

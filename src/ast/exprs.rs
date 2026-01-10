@@ -58,6 +58,7 @@ impl Expr {
                     ..
                 }
                 | Self::Subscript { .. }
+                | Self::String { .. }
         )
     }
 

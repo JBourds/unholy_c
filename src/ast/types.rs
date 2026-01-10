@@ -84,6 +84,7 @@ impl PartialEq for BaseType {
                     size: r_size,
                 },
             ) => *l_element == *r_element && l_size == r_size,
+            (Self::Char { signed: lsigned }, Self::Char { signed: rsigned }) => lsigned == rsigned,
             _ => core::mem::discriminant(self) == core::mem::discriminant(other),
         }
     }

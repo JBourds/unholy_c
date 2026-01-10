@@ -1,4 +1,5 @@
 pub mod attribute;
+pub mod block;
 pub mod expr;
 pub mod initial_value;
 pub mod symbols;
@@ -15,6 +16,7 @@ pub use initial_value::InitialValue;
 pub use symbols::{Scope, SymbolEntry, SymbolTable};
 
 use super::*;
+use block::{typecheck_block, typecheck_block_item};
 use expr::typecheck_expr_and_convert;
 use var_init::{typecheck_global_var_decl, typecheck_var_decl};
 
@@ -112,39 +114,6 @@ fn typecheck_program(program: ast::Program, symbols: &mut SymbolTable) -> Result
         }
     }
     Ok(ast::Program { declarations })
-}
-
-fn typecheck_block(
-    block: ast::Block,
-    symbols: &mut SymbolTable,
-    function: Option<Rc<String>>,
-) -> Result<ast::Block> {
-    symbols.push_scope();
-    let items = block
-        .into_items()
-        .into_iter()
-        .map(|item| typecheck_block_item(item, symbols, function.clone()))
-        .collect::<Result<Vec<_>>>()
-        .context("Failed to typecheck all block items")?;
-    symbols
-        .pop_scope()
-        .expect("We just popped the scope so this should not fail.");
-    Ok(ast::Block(items))
-}
-
-fn typecheck_block_item(
-    item: ast::BlockItem,
-    symbols: &mut SymbolTable,
-    function: Option<Rc<String>>,
-) -> Result<ast::BlockItem> {
-    match item {
-        ast::BlockItem::Stmt(stmt) => Ok(ast::BlockItem::Stmt(
-            typecheck_stmt(stmt, symbols, function).context("Failed to typecheck block item")?,
-        )),
-        ast::BlockItem::Decl(decl) => Ok(ast::BlockItem::Decl(
-            typecheck_decl(decl, symbols).context("Failed to typecheck block item")?,
-        )),
-    }
 }
 
 fn typecheck_stmt(

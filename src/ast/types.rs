@@ -430,6 +430,10 @@ impl Type {
         matches!(&self.base, BaseType::Array { .. })
     }
 
+    pub fn is_char(&self) -> bool {
+        matches!(&self.base, BaseType::Char { .. })
+    }
+
     pub fn deref(self) -> Self {
         match self.base {
             BaseType::Ptr { to, is_restrict: _ } => *to,

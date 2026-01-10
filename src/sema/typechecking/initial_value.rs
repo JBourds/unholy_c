@@ -111,8 +111,13 @@ impl InitialValue {
             ast::Constant::F64(val) => Ok(InitialValue::Initial(vec![
                 val.to_ne_bytes().to_vec().into(),
             ])),
-            ast::Constant::ICHAR(..) => todo!(),
-            ast::Constant::UCHAR(..) => todo!(),
+            // FIXME: We may need to truncate these to fit in i8/u8
+            ast::Constant::ICHAR(val) => Ok(InitialValue::Initial(vec![
+                val.to_ne_bytes().to_vec().into(),
+            ])),
+            ast::Constant::UCHAR(val) => Ok(InitialValue::Initial(vec![
+                val.to_ne_bytes().to_vec().into(),
+            ])),
         }
     }
 

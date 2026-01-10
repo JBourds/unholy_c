@@ -5,6 +5,7 @@ pub mod expr;
 pub mod fun_decl;
 pub mod init;
 pub mod initial_value;
+pub mod program;
 pub mod statement;
 pub mod symbols;
 pub mod var_init;
@@ -24,6 +25,7 @@ use decl::typecheck_decl;
 use expr::typecheck_expr_and_convert;
 use fun_decl::typecheck_fun_decl;
 use init::typecheck_init;
+use program::typecheck_program;
 use statement::typecheck_stmt;
 use var_init::{typecheck_global_var_decl, typecheck_var_decl};
 
@@ -96,31 +98,6 @@ pub fn validate(stage: SemaStage<SwitchLabelling>) -> Result<SemaStage<TypeCheck
         symbols: Some(symbols),
         stage: PhantomData::<TypeChecking>,
     })
-}
-
-fn typecheck_program(program: ast::Program, symbols: &mut SymbolTable) -> Result<ast::Program> {
-    let mut declarations = vec![];
-    for decl in program.declarations.into_iter() {
-        match decl {
-            ast::Declaration::FunDecl(f) => {
-                let name = Rc::clone(&f.name);
-                declarations.push(ast::Declaration::FunDecl(
-                    typecheck_fun_decl(f, symbols).context(format!(
-                        "Unable to typecheck function declaration for {name}"
-                    ))?,
-                ));
-            }
-            ast::Declaration::VarDecl(v) => {
-                let name = Rc::clone(&v.name);
-                declarations.push(ast::Declaration::VarDecl(
-                    typecheck_global_var_decl(v, symbols).context(format!(
-                        "Unable to typecheck variable declaration for {name}"
-                    ))?,
-                ));
-            }
-        }
-    }
-    Ok(ast::Program { declarations })
 }
 
 fn try_implicit_cast(target: &ast::Type, from: ast::Expr, from_t: &ast::Type) -> Result<ast::Expr> {

@@ -100,6 +100,7 @@ impl Constant {
 
     pub fn const_from_type(r#type: &Type, value: u8) -> Result<Self> {
         match r#type {
+            _ if r#type.is_pointer() && value == 0 => Ok(Constant::U64(0)),
             _ if *r#type == Constant::I8(value as i8).get_type() => Ok(Constant::I8(value as i8)),
             _ if *r#type == Constant::I16(value as i16).get_type() => {
                 Ok(Constant::I16(value as i16))
@@ -125,6 +126,12 @@ impl Constant {
             }
             _ if *r#type == Constant::F64(value as f64).get_type() => {
                 Ok(Constant::F64(value as f64))
+            }
+            _ if *r#type == Constant::ICHAR(value as i32).get_type() => {
+                Ok(Constant::ICHAR(value as i32))
+            }
+            _ if *r#type == Constant::UCHAR(value as i32).get_type() => {
+                Ok(Constant::UCHAR(value as i32))
             }
             _ => bail!("Could not create a constant with type {type} and value {value}"),
         }

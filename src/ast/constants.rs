@@ -133,6 +133,13 @@ impl Constant {
             _ if *r#type == Constant::UCHAR(value as i32).get_type() => {
                 Ok(Constant::UCHAR(value as i32))
             }
+            // Silly special case for char since by default we only have
+            // signed char and unsigned char constants, and signed char != char
+            // as they are distinct types
+            Type {
+                base: super::BaseType::Char { signed: None },
+                ..
+            } => Ok(Constant::ICHAR(value as i32)),
             _ => bail!("Could not create a constant with type {type} and value {value}"),
         }
     }

@@ -410,7 +410,7 @@ impl Type {
     pub fn is_arithmetic(&self) -> bool {
         matches!(
             self.base,
-            BaseType::Int { .. } | BaseType::Float(_) | BaseType::Double(_)
+            BaseType::Int { .. } | BaseType::Char { .. } | BaseType::Float(_) | BaseType::Double(_)
         )
     }
 

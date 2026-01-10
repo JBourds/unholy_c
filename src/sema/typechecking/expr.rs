@@ -107,8 +107,14 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
                         r#type
                     }
                 }
-                ast::UnaryOp::Complement if r#type.is_pointer() => {
-                    bail!("Cannot apply unary complement operation to pointer.")
+                ast::UnaryOp::Complement => {
+                    if r#type.is_pointer() {
+                        bail!("Cannot apply unary complement operation to pointer.")
+                    } else if r#type.is_char() {
+                        ast::Type::int(4, None)
+                    } else {
+                        r#type
+                    }
                 }
                 op @ ast::UnaryOp::PostInc
                 | op @ ast::UnaryOp::PostDec

@@ -1,4 +1,4 @@
-use super::{InitialData, InitialValue, Scope, SymbolTable};
+use super::{InitialValue, Scope, SymbolTable};
 use anyhow::{Context, Result, ensure};
 
 use crate::{ast, tacky::StaticInit};
@@ -45,9 +45,7 @@ impl Attribute {
                 },
                 Scope::Local(..) => match var.storage_class {
                     Some(ast::StorageClass::Static) => {
-                        InitialValue::Initial(InitialData::Bytes(vec![
-                            vec![0; var.r#type.base.nbytes()].into(),
-                        ]))
+                        InitialValue::Initial(vec![StaticInit::Zero(var.r#type.base.nbytes())])
                     } // Local Statics with no initilizer get defaulted to zero
                     Some(ast::StorageClass::Extern) | None => InitialValue::None,
                     _ => unreachable!(

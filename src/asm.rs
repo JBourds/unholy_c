@@ -12,7 +12,7 @@ pub mod x64 {
     use super::AsmGen;
     use crate::{
         codegen::{self, Operand},
-        tacky,
+        tacky::{self, StaticInit},
     };
     use anyhow::{Result, bail, ensure};
     use std::fmt::Write;
@@ -48,26 +48,7 @@ pub mod x64 {
         w.write_str("\t.section .rodata\n")?;
         w.write_fmt(format_args!("\t.align {}\n", constant.alignment))?;
         w.write_fmt(format_args!("\".L_{}\":\n", constant.id))?;
-        match constant.val {
-            tacky::StaticInit::Float(tacky::FpNumber::F32(val)) => {
-                w.write_fmt(format_args!("\t.long {}\n\n", val))?
-            }
-            tacky::StaticInit::Float(tacky::FpNumber::F64(val)) => {
-                w.write_fmt(format_args!("\t.quad {}\n\n", val))?
-            }
-            tacky::StaticInit::String {
-                data,
-                null_terminated,
-            } => todo!(),
-            tacky::StaticInit::Pointer(_) => todo!(),
-            tacky::StaticInit::IntInit(_) => todo!(),
-            tacky::StaticInit::UIntInit(_) => todo!(),
-            tacky::StaticInit::LongInit(_) => todo!(),
-            tacky::StaticInit::ULongInit(_) => todo!(),
-            tacky::StaticInit::CharInit(_) => todo!(),
-            tacky::StaticInit::UCharInit(_) => todo!(),
-            tacky::StaticInit::ZeroInit(_) => todo!(),
-        }
+        w.write_str(constant.val.asm_block().as_str())?;
         Ok(())
     }
 
@@ -84,7 +65,7 @@ pub mod x64 {
             !var.init.is_empty(),
             "all statics have some init after tacky?"
         );
-        let in_bss = var.init.iter().flat_map(|s| s.iter()).all(|x| *x == 0);
+        let in_bss = var.init.iter().all(|x| matches!(x, StaticInit::Zero(_)));
         if in_bss {
             w.write_fmt(format_args!("\t.bss\n"))?;
         } else {
@@ -96,15 +77,7 @@ pub mod x64 {
             w.write_fmt(format_args!("\t.zero {}\n", symbol.r#type.size_of()))?;
         } else {
             for init in &var.init {
-                // 16 is arbitrary, just mean to prevent super long files
-                for chunk in init.chunks(16) {
-                    let bytes = chunk
-                        .iter()
-                        .map(|b| format!("0x{b:02x}"))
-                        .collect::<Vec<_>>()
-                        .join(", ");
-                    writeln!(w, "\t.byte {}", bytes)?;
-                }
+                writeln!(w, "{}", init.asm_block())?;
             }
         }
         w.write_char('\n')?;

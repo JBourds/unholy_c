@@ -8,27 +8,10 @@ use std::cmp;
 use std::rc::Rc;
 
 use crate::ast;
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum InitialData {
-    Bytes(Vec<Rc<[u8]>>),
-    Label(Rc<String>),
-}
-
-impl InitialData {
-    pub fn unwrap_bytes(&self) -> &Vec<Rc<[u8]>> {
-        match &self {
-            Self::Bytes(v) => &v,
-            Self::Label(..) => {
-                panic!("Tried to unwrap InitialData into bytes but InitialData was a Label!")
-            }
-        }
-    }
-}
-
+use crate::tacky::StaticInit;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum InitialValue {
-    Initial(InitialData),
+    Initial(Vec<StaticInit>),
     Tentative,
     None,
 }
@@ -78,9 +61,15 @@ impl InitialValue {
                             size
                         );
                     }
-                    let mut bytes = value.as_bytes().to_vec();
-                    bytes.extend_from_slice(&[0].repeat(size - bytes.len()));
-                    Ok(Self::Initial(InitialData::Bytes(vec![bytes.into()])))
+                    let remaining_bytes = *size - value.len() - 1;
+                    let mut inits = vec![StaticInit::String {
+                        data: value.as_bytes().to_vec().into(),
+                        null_terminated: true,
+                    }];
+                    if remaining_bytes > 0 {
+                        inits.push(StaticInit::Zero(remaining_bytes));
+                    }
+                    Ok(Self::Initial(inits))
                 }
                 _ => bail!("Arrays cannot be initialized with a `SingleInit`"),
             },
@@ -98,7 +87,7 @@ impl InitialValue {
                         );
                     }
                     let label = symbols.get_or_make_string(Rc::clone(value));
-                    Ok(Self::Initial(InitialData::Label(label)))
+                    Ok(Self::Initial(vec![StaticInit::Pointer(label)]))
                 }
                 _ => Self::from_expr(r#type, expr, symbols),
             },
@@ -114,14 +103,14 @@ impl InitialValue {
                 let mut new_inits = vec![];
                 for init in inits.iter() {
                     match Self::from_initializer(element, init, symbols)? {
-                        Self::Initial(InitialData::Bytes(initial)) => {
-                            new_inits.extend(initial);
+                        Self::Initial(init) => {
+                            new_inits.extend(init);
                         }
                         _ => unreachable!(),
                     }
                 }
 
-                Ok(Self::Initial(InitialData::Bytes(new_inits)))
+                Ok(Self::Initial(new_inits))
             }
             _ => bail!("Cannot static init non-array with compound initializer"),
         }
@@ -135,26 +124,12 @@ impl InitialValue {
         )?;
 
         if is_null_pointer_constant(&expr) && target.is_pointer() {
-            return Ok(InitialValue::Initial(InitialData::Bytes(vec![
-                0usize.to_ne_bytes().to_vec().into(),
-            ])));
+            return Ok(InitialValue::Initial(vec![StaticInit::Zero(
+                core::mem::size_of::<usize>(),
+            )]));
         }
         let val = const_eval::eval(expr.clone()).context("Failed to const eval expression")?;
-        Ok(InitialValue::Initial(InitialData::Bytes(match val {
-            ast::Constant::I8(val) => vec![val.to_ne_bytes().to_vec().into()],
-            ast::Constant::I16(val) => vec![val.to_ne_bytes().to_vec().into()],
-            ast::Constant::I32(val) => vec![val.to_ne_bytes().to_vec().into()],
-            ast::Constant::I64(val) => vec![val.to_ne_bytes().to_vec().into()],
-            ast::Constant::U8(val) => vec![val.to_ne_bytes().to_vec().into()],
-            ast::Constant::U16(val) => vec![val.to_ne_bytes().to_vec().into()],
-            ast::Constant::U32(val) => vec![val.to_ne_bytes().to_vec().into()],
-            ast::Constant::U64(val) => vec![val.to_ne_bytes().to_vec().into()],
-            ast::Constant::F32(val) => vec![val.to_ne_bytes().to_vec().into()],
-            ast::Constant::F64(val) => vec![val.to_ne_bytes().to_vec().into()],
-            // FIXME: We may need to truncate these to fit in i8/u8
-            ast::Constant::ICHAR(val) => vec![val.to_ne_bytes().to_vec().into()],
-            ast::Constant::UCHAR(val) => vec![val.to_ne_bytes().to_vec().into()],
-        })))
+        Ok(InitialValue::Initial(vec![val.into()]))
     }
 
     pub fn from_var_with_scope(
@@ -189,9 +164,9 @@ impl InitialValue {
             (Scope::Local(..), None) => match var.storage_class {
                 // Local Statics with no initilizer get defaulted to zero
                 Some(ast::StorageClass::Static) => {
-                    Ok(Some(InitialValue::Initial(InitialData::Bytes(vec![
-                        vec![0; var.r#type.base.nbytes()].into(),
-                    ]))))
+                    Ok(Some(InitialValue::Initial(vec![StaticInit::Zero(
+                        var.r#type.base.nbytes(),
+                    )])))
                 }
                 // Resolve any existing declaration's initial value
                 Some(ast::StorageClass::Extern) => {

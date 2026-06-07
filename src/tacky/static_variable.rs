@@ -4,7 +4,7 @@ use super::*;
 pub struct StaticVariable {
     pub identifier: Rc<String>,
     pub global: bool,
-    pub init: Vec<Rc<[u8]>>,
+    pub init: Vec<StaticInit>,
 }
 
 impl StaticVariable {
@@ -21,12 +21,12 @@ impl StaticVariable {
                 sema::tc::InitialValue::Initial(i) => Some(StaticVariable {
                     identifier: name,
                     global: *external_linkage,
-                    init: i.unwrap_bytes().to_vec(),
+                    init: i.clone(),
                 }),
                 sema::tc::InitialValue::Tentative => Some(StaticVariable {
                     identifier: name,
                     global: *external_linkage,
-                    init: vec![vec![0; symbol.r#type.base.nbytes()].into()],
+                    init: vec![StaticInit::Zero(symbol.r#type.base.nbytes())],
                 }),
                 sema::tc::InitialValue::None => None,
             },

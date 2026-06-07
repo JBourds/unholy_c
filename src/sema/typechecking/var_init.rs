@@ -1,6 +1,6 @@
 use super::{Attribute, InitialValue, Scope, SymbolTable, typecheck_init};
-use crate::ast;
 use crate::ast::StorageClass;
+use crate::{ast, sema::typechecking::init::pad_compound_init};
 
 use anyhow::{Context, Result, ensure};
 
@@ -32,14 +32,15 @@ pub fn typecheck_var_decl(decl: ast::VarDecl, symbols: &mut SymbolTable) -> Resu
     }
     let decl = match decl.init {
         Some(init) => {
-            let init = typecheck_init(target, init, symbols, &decl.name)?;
+            // Make sure the init is fixed up
+            let init = pad_compound_init(target, init, symbols, &decl.name)?;
             if let Attribute::Static {
                 initial_value: _,
                 external_linkage,
             } = entry.attribute
             {
                 let attribute = Attribute::Static {
-                    initial_value: InitialValue::from_initializer(&decl.r#type, &init, symbols)
+                    initial_value: InitialValue::from_initializer(target, &init, symbols)
                         .context("unable to create initial value from initializer")?,
                     external_linkage,
                 };
@@ -47,6 +48,10 @@ pub fn typecheck_var_decl(decl: ast::VarDecl, symbols: &mut SymbolTable) -> Resu
                     entry.attribute = attribute;
                 }
             }
+            // AST rewrite happens here, make sure we do this after creating
+            // the InitialValue for globals/statics otherwise it gets rewritten
+            // twice causing typechecking to fail.
+            let init = typecheck_init(target, init, symbols, &decl.name)?;
             ast::VarDecl {
                 init: Some(init),
                 ..decl

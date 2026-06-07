@@ -55,24 +55,39 @@ pub fn typecheck_init(
 
         (
             ast::Type {
-                base: ast::BaseType::Array { element, size },
+                base: ast::BaseType::Array { .. },
                 ..
             },
-            ast::Initializer::CompundInit(inits),
-        ) => {
-            if inits.len() > *size {
-                bail!("Initializer {inits:#?} has to many elements for array of len {size}");
-            }
-            let mut inits = inits
-                .into_iter()
-                .map(|i| typecheck_init(element, i, symbols, name))
-                .collect::<Result<Vec<ast::Initializer>>>()?;
-            while inits.len() < *size {
-                inits.push(ast::Initializer::zero_initializer(element)?);
-            }
-
-            Ok(ast::Initializer::CompundInit(inits))
-        }
+            init @ ast::Initializer::CompundInit(_),
+        ) => pad_compound_init(target, init, symbols, name),
         _ => bail!("Cannot assign compound initializer to non array var decl"),
+    }
+}
+
+pub fn pad_compound_init(
+    target: &Type,
+    init: ast::Initializer,
+    symbols: &mut SymbolTable,
+    name: &Rc<String>,
+) -> Result<ast::Initializer> {
+    if let ast::Type {
+        base: ast::BaseType::Array { element, size },
+        ..
+    } = target
+        && let ast::Initializer::CompundInit(inits) = init
+    {
+        if inits.len() > *size {
+            bail!("Initializer {inits:#?} has to many elements for array of len {size}");
+        }
+        let mut inits = inits
+            .into_iter()
+            .map(|i| typecheck_init(element, i, symbols, name))
+            .collect::<Result<Vec<ast::Initializer>>>()?;
+        while inits.len() < *size {
+            inits.push(ast::Initializer::zero_initializer(element)?);
+        }
+        Ok(ast::Initializer::CompundInit(inits))
+    } else {
+        Ok(init)
     }
 }

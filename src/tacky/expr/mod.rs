@@ -253,7 +253,7 @@ impl Expr {
                 }
                 _ => match val_type {
                     ast::Type {
-                        base: ast::BaseType::Int { signed, .. },
+                        base: ast::BaseType::Int { signed, .. } | ast::BaseType::Char { signed },
                         ..
                     } => {
                         if signed.is_none_or(|signed| signed) {

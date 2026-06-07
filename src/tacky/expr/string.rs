@@ -14,15 +14,18 @@ pub(crate) fn parse_string(
     let ast::Expr::String { value } = node else {
         unreachable!()
     };
-    let string = Val::Var(
-        symbols
-            .get_string(&value)
-            .map(Rc::clone)
-            .expect("all string literals should be in symbol table"),
-    );
-    let tmp = Val::Var(Rc::new(make_temp_var()));
+    let string = symbols
+        .get_string(&value)
+        .map(Rc::clone)
+        .expect("all string literals should be in symbol table");
+    let entry = symbols
+        .get(&string)
+        .expect("string must also be in symbol table");
+    let label = Rc::new(make_temp_var());
+    symbols.new_entry(Rc::clone(&label), entry.r#type.clone());
+    let tmp = Val::Var(label);
     let instructions = vec![Instruction::GetAddress {
-        src: string,
+        src: Val::Var(string),
         dst: tmp.clone(),
     }];
     ExprResult::PlainOperand(tacky::Expr {

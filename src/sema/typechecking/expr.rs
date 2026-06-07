@@ -579,6 +579,7 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
                 size: value.len() + 1,
             };
             let alignment = base.default_alignment();
+            let _ = symbols.get_or_make_string(Rc::clone(value));
             Ok(TypedExpr {
                 expr: ast::Expr::String {
                     value: Rc::clone(value),

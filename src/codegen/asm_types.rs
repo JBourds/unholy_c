@@ -33,6 +33,10 @@ impl AssemblyType {
                 ..
             } => Self::Double,
             ast::Type {
+                base: ast::BaseType::Char { .. },
+                ..
+            } => Self::Byte,
+            ast::Type {
                 base: ast::BaseType::Int { nbytes, .. },
                 ..
             } => match nbytes {
@@ -60,7 +64,7 @@ impl AssemblyType {
                     },
                 }
             }
-            _ => unimplemented!(),
+            _ => unimplemented!("{}", r#type),
         }
     }
 

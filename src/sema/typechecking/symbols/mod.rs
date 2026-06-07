@@ -6,6 +6,7 @@ use anyhow::{Context, Result, bail};
 
 use std::collections::HashMap;
 use std::rc::Rc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 #[derive(Clone, Debug)]
 pub struct SymbolEntry {
@@ -18,6 +19,8 @@ pub struct SymbolEntry {
 #[derive(Debug, Default)]
 pub struct SymbolTable {
     pub global: HashMap<Rc<String>, SymbolEntry>,
+    /// Map string literals to their unique ID
+    pub string_pool: HashMap<Rc<String>, Rc<String>>,
     scopes: Vec<HashMap<Rc<String>, SymbolEntry>>,
 }
 
@@ -42,6 +45,7 @@ impl SymbolTable {
     pub fn new_table() -> Self {
         Self {
             global: HashMap::new(),
+            string_pool: HashMap::new(),
             scopes: vec![],
         }
     }
@@ -59,13 +63,50 @@ impl SymbolTable {
             attribute: Attribute::from_decl_with_scope(decl, scope, self)?,
         })
     }
-
     pub fn get(&self, key: &Rc<String>) -> Option<&SymbolEntry> {
         Self::get_local(&self.scopes, key).or(Self::get_global(&self.global, key))
     }
 
     pub fn get_mut(&mut self, key: &Rc<String>) -> Option<&mut SymbolEntry> {
         Self::get_local_mut(&mut self.scopes, key).or(Self::get_global_mut(&mut self.global, key))
+    }
+
+    pub fn get_or_make_string(&mut self, string: Rc<String>) -> Rc<String> {
+        self.string_pool
+            .get(&string)
+            .map(Rc::clone)
+            .unwrap_or_else(|| self.new_string(string))
+    }
+
+    pub fn new_string(&mut self, string: Rc<String>) -> Rc<String> {
+        static COUNTER: AtomicUsize = AtomicUsize::new(0);
+        let label = Rc::new(format!(
+            "string_literal.{}",
+            COUNTER.fetch_add(1, Ordering::Relaxed)
+        ));
+        let base = ast::BaseType::Array {
+            element: Box::new(ast::Type::char(None)),
+            size: string.len() + 1,
+        };
+        let alignment = base.default_alignment();
+        self.string_pool
+            .insert(Rc::clone(&string), Rc::clone(&label));
+        let _ = self.insert_scope(
+            Rc::clone(&label),
+            crate::sema::tc::SymbolEntry {
+                r#type: ast::Type {
+                    base,
+                    alignment,
+                    is_const: true,
+                },
+                defined: true,
+                scope: Scope::Global,
+                attribute: Attribute::Constant {
+                    data: vec![string.as_bytes().to_vec().into(), vec![0].into()],
+                },
+            },
+        );
+        label
     }
 
     pub fn insert_scope(&mut self, key: Rc<String>, entry: SymbolEntry) -> Option<SymbolEntry> {

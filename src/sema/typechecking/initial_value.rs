@@ -6,7 +6,6 @@ use anyhow::{Context, Result, bail, ensure};
 
 use std::cmp;
 use std::rc::Rc;
-use std::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::ast;
 
@@ -98,32 +97,7 @@ impl InitialValue {
                             "Cannot assign string literal to non char pointer, including signed and unsigned char pointers"
                         );
                     }
-                    static COUNTER: AtomicUsize = AtomicUsize::new(0);
-                    let label = Rc::new(format!(
-                        "string_literal.{}",
-                        COUNTER.fetch_add(1, Ordering::Relaxed)
-                    ));
-                    let base = ast::BaseType::Array {
-                        element: Box::new(ast::Type::char(None)),
-                        size: value.len() + 1,
-                    };
-                    let alignment = base.default_alignment();
-
-                    symbols.insert_scope(
-                        Rc::clone(&label),
-                        crate::sema::tc::SymbolEntry {
-                            r#type: ast::Type {
-                                base,
-                                alignment,
-                                is_const: true,
-                            },
-                            defined: true,
-                            scope: Scope::Global,
-                            attribute: Attribute::Constant {
-                                data: vec![value.as_bytes().to_vec().into(), vec![0].into()],
-                            },
-                        },
-                    );
+                    let label = symbols.get_or_make_string(Rc::clone(value));
                     Ok(Self::Initial(InitialData::Label(label)))
                 }
                 _ => Self::from_expr(r#type, expr, symbols),

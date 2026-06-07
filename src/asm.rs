@@ -44,20 +44,36 @@ pub mod x64 {
         Ok(())
     }
 
-    fn gen_static_const(w: &mut impl Write, constant: codegen::StaticConstant) -> Result<()> {
+    fn gen_static_const(w: &mut impl Write, constant: tacky::StaticConstant) -> Result<()> {
         w.write_str("\t.section .rodata\n")?;
         w.write_fmt(format_args!("\t.align {}\n", constant.alignment))?;
         w.write_fmt(format_args!("\".L_{}\":\n", constant.id))?;
         match constant.val {
-            codegen::FpNumber::F32(val) => w.write_fmt(format_args!("\t.long {}\n\n", val))?,
-            codegen::FpNumber::F64(val) => w.write_fmt(format_args!("\t.quad {}\n\n", val))?,
+            tacky::StaticInit::Float(tacky::FpNumber::F32(val)) => {
+                w.write_fmt(format_args!("\t.long {}\n\n", val))?
+            }
+            tacky::StaticInit::Float(tacky::FpNumber::F64(val)) => {
+                w.write_fmt(format_args!("\t.quad {}\n\n", val))?
+            }
+            tacky::StaticInit::String {
+                data,
+                null_terminated,
+            } => todo!(),
+            tacky::StaticInit::Pointer(_) => todo!(),
+            tacky::StaticInit::IntInit(_) => todo!(),
+            tacky::StaticInit::UIntInit(_) => todo!(),
+            tacky::StaticInit::LongInit(_) => todo!(),
+            tacky::StaticInit::ULongInit(_) => todo!(),
+            tacky::StaticInit::CharInit(_) => todo!(),
+            tacky::StaticInit::UCharInit(_) => todo!(),
+            tacky::StaticInit::ZeroInit(_) => todo!(),
         }
         Ok(())
     }
 
     fn gen_static_var(
         w: &mut impl Write,
-        var: codegen::StaticVariable,
+        var: tacky::StaticVariable,
         symbols: &tacky::SymbolTable,
     ) -> Result<()> {
         let symbol = symbols.get(&var.identifier).unwrap();

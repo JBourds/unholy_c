@@ -1,9 +1,7 @@
 use super::{InitialData, InitialValue, Scope, SymbolTable};
 use anyhow::{Context, Result, ensure};
 
-use crate::ast;
-
-use std::rc::Rc;
+use crate::{ast, tacky::StaticInit};
 
 #[derive(Clone, Debug)]
 pub enum Attribute {
@@ -14,9 +12,7 @@ pub enum Attribute {
         initial_value: InitialValue,
         external_linkage: bool,
     },
-    Constant {
-        data: Vec<Rc<[u8]>>,
-    },
+    Constant(StaticInit),
     Local,
 }
 

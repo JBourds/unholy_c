@@ -1,4 +1,5 @@
 use crate::ast;
+use crate::tacky::StaticInit;
 
 use super::Attribute;
 
@@ -101,9 +102,10 @@ impl SymbolTable {
                 },
                 defined: true,
                 scope: Scope::Global,
-                attribute: Attribute::Constant {
-                    data: vec![string.as_bytes().to_vec().into(), vec![0].into()],
-                },
+                attribute: Attribute::Constant(StaticInit::String {
+                    data: string.as_bytes().to_vec().into(),
+                    null_terminated: true,
+                }),
             },
         );
         label

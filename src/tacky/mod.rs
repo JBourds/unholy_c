@@ -8,6 +8,8 @@ mod expr;
 mod function;
 mod instruction;
 mod program;
+mod static_constant;
+mod static_init;
 mod static_variable;
 mod symbol_table;
 mod unary_op;
@@ -18,6 +20,8 @@ pub use expr::*;
 pub use function::*;
 pub use instruction::*;
 pub use program::*;
+pub use static_constant::*;
+pub use static_init::*;
 pub use static_variable::*;
 pub use symbol_table::*;
 pub use unary_op::*;
@@ -26,7 +30,8 @@ pub use val::*;
 #[derive(Debug, PartialEq)]
 pub enum TopLevel {
     Fun(Function),
-    Static(StaticVariable),
+    StaticVariable(StaticVariable),
+    StaticConstant(StaticConstant),
 }
 
 #[cfg(test)]

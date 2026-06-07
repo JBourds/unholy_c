@@ -1,4 +1,7 @@
-use crate::{ast, tacky};
+use crate::{
+    ast,
+    tacky::{self, StaticConstant, StaticVariable},
+};
 
 mod asm_types;
 mod cond_code;
@@ -9,7 +12,6 @@ mod ops;
 mod program;
 mod regs;
 mod rewrite;
-mod statics;
 
 pub use asm_types::*;
 pub use cond_code::*;
@@ -20,7 +22,6 @@ pub use ops::*;
 pub use program::*;
 pub use regs::*;
 use rewrite::*;
-pub use statics::*;
 
 pub(super) const MAX_AGGREGATE_ALIGNMENT: usize = 16;
 const SSE_ALIGNMENT: usize = 16;
@@ -30,12 +31,6 @@ pub enum TopLevel {
     Fun(Function),
     StaticVariable(StaticVariable),
     StaticConstant(StaticConstant),
-}
-
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
-pub enum FpNumber {
-    F32(u32),
-    F64(u64),
 }
 
 // Create unique identifiers (e.g., Labels in cast)

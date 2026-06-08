@@ -87,6 +87,7 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
                     )),
                 "Cannot perform a bitwise unary operation on a floating point value."
             );
+            let operand_is_char = r#type.is_char();
             let r#type = match op {
                 ast::UnaryOp::AddrOf if expr.is_lvalue() => ast::Type {
                     base: ast::BaseType::Ptr {
@@ -126,6 +127,20 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
                     r#type
                 }
                 ast::UnaryOp::Not => ast::Type::bool(),
+            };
+            // Integer-promote a char operand for negate/complement so the
+            // operation actually runs at int width (the result type was already
+            // widened above); otherwise it computes in char width and is only
+            // correct when something later re-promotes it.
+            let expr = if operand_is_char
+                && matches!(op, ast::UnaryOp::Negate | ast::UnaryOp::Complement)
+            {
+                ast::Expr::Cast {
+                    target: ast::Type::int(4, None),
+                    exp: Box::new(expr),
+                }
+            } else {
+                expr
             };
             Ok(TypedExpr {
                 expr: ast::Expr::Unary {
@@ -326,9 +341,22 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
                 "Cannot perform a bitwise or remainder binary operation on a floating point value."
             );
 
-            // Bitshifts do not upcast, and are just the type of the LHS
-            // assuming that it is a valid shift (not a float)
+            // Bitshifts don't find a common type, but the left operand still
+            // undergoes integer promotion (char -> int), and the result takes
+            // that promoted type.
             if matches!(op, ast::BinaryOp::LShift | ast::BinaryOp::RShift) {
+                let (left, left_t) = if left_t.is_char() {
+                    let promoted = ast::Type::int(4, None);
+                    (
+                        ast::Expr::Cast {
+                            target: promoted.clone(),
+                            exp: Box::new(left),
+                        },
+                        promoted,
+                    )
+                } else {
+                    (left, left_t)
+                };
                 Ok(TypedExpr {
                     expr: ast::Expr::Binary {
                         op: *op,

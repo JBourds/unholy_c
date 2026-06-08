@@ -140,6 +140,15 @@ pub fn typecheck_stmt(
                 if condition_type.is_function() || condition_type.is_pointer() {
                     bail!("Cannot switch on {condition:#?} as it has type {condition_type:#?}");
                 }
+                // The integer promotions are performed on the controlling
+                // expression, so case labels are compared as int (e.g. case 356
+                // stays distinct from case 100 when switching on a char).
+                let (condition, condition_type) = if condition_type.is_char() {
+                    let promoted = ast::Type::int(4, None);
+                    (ast::Expr::Cast { target: promoted.clone(), exp: Box::new(condition) }, promoted)
+                } else {
+                    (condition, condition_type)
+                };
                 let body = typecheck_stmt(*body, symbols, function)
                     .context("Failed to typecheck switch body.")?;
                 let mut casted_cases = vec![];

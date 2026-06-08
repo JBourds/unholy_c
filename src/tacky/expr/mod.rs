@@ -277,7 +277,9 @@ impl Expr {
                     let label = Rc::new(make_temp_var());
                     symbols.new_entry(Rc::clone(&label), ast::Type::U32);
                     let tmp = Val::Var(label);
-                    instructions.push(Instruction::Copy {
+                    // Widen the 1-byte char to int width before converting; a
+                    // plain Copy would read garbage in the upper bytes.
+                    instructions.push(Instruction::ZeroExtend {
                         src: val,
                         dst: tmp.clone(),
                     });
@@ -296,7 +298,9 @@ impl Expr {
                     let label = Rc::new(make_temp_var());
                     symbols.new_entry(Rc::clone(&label), ast::Type::I32);
                     let tmp = Val::Var(label);
-                    instructions.push(Instruction::Copy {
+                    // Sign-extend the 1-byte char to int width before
+                    // converting; a plain Copy would read garbage upper bytes.
+                    instructions.push(Instruction::SignExtend {
                         src: val,
                         dst: tmp.clone(),
                     });

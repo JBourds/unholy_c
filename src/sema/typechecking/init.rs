@@ -58,7 +58,7 @@ pub fn typecheck_init(
                 base: ast::BaseType::Array { .. },
                 ..
             },
-            init @ ast::Initializer::CompundInit(_),
+            init @ ast::Initializer::CompoundInit(_),
         ) => pad_compound_init(target, init, symbols, name),
         _ => bail!("Cannot assign compound initializer to non array var decl"),
     }
@@ -74,7 +74,7 @@ pub fn pad_compound_init(
         base: ast::BaseType::Array { element, size },
         ..
     } = target
-        && let ast::Initializer::CompundInit(inits) = init
+        && let ast::Initializer::CompoundInit(inits) = init
     {
         if inits.len() > *size {
             bail!("Initializer {inits:#?} has to many elements for array of len {size}");
@@ -86,7 +86,7 @@ pub fn pad_compound_init(
         while inits.len() < *size {
             inits.push(ast::Initializer::zero_initializer(element)?);
         }
-        Ok(ast::Initializer::CompundInit(inits))
+        Ok(ast::Initializer::CompoundInit(inits))
     } else {
         Ok(init)
     }

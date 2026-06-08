@@ -100,7 +100,7 @@ impl InitialValue {
                     base: ast::BaseType::Array { element, size },
                     ..
                 },
-                ast::Initializer::CompundInit(inits),
+                ast::Initializer::CompoundInit(inits),
             ) => {
                 ensure!(inits.len() <= *size, "Too many initializers in static init");
                 let mut new_inits = vec![];

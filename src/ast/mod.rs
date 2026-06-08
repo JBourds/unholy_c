@@ -155,7 +155,7 @@ impl BlockItem {
 #[derive(Clone, Debug, PartialEq)]
 pub enum Initializer {
     SingleInit(Box<Expr>),
-    CompundInit(Vec<Initializer>),
+    CompoundInit(Vec<Initializer>),
 }
 
 impl Initializer {
@@ -181,7 +181,7 @@ impl Initializer {
                     }
                 }
 
-                Ok((Self::CompundInit(initializers), left))
+                Ok((Self::CompoundInit(initializers), left))
             }
             _ => {
                 let (expr, tokens) = Expr::parse(tokens, 0)?;
@@ -193,7 +193,7 @@ impl Initializer {
     pub fn zero_initializer(r#type: &Type) -> Result<Self> {
         if r#type.is_array() {
             match &r#type.base {
-                BaseType::Array { element, size } => Ok(Self::CompundInit(
+                BaseType::Array { element, size } => Ok(Self::CompoundInit(
                     (0..*size)
                         .map(|_| Self::zero_initializer(element))
                         .collect::<Result<Vec<Self>>>()?,

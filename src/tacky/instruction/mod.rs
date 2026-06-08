@@ -158,7 +158,7 @@ impl Instruction {
                 }
                 instructions
             }
-            ast::Initializer::CompundInit(inits) => {
+            ast::Initializer::CompoundInit(inits) => {
                 let element_t = match &r#type.base {
                     ast::BaseType::Array { element, .. } => element.as_ref(),
                     _ => r#type,

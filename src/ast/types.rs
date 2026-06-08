@@ -34,7 +34,7 @@ impl Type {
     pub const U32: Self = Self {
         base: BaseType::Int {
             nbytes: core::mem::size_of::<u32>(),
-            signed: Some(true),
+            signed: Some(false),
         },
         alignment: NonZeroUsize::new(core::mem::size_of::<u32>()).unwrap(),
         is_const: false,
@@ -42,7 +42,7 @@ impl Type {
     pub const I32: Self = Self {
         base: BaseType::Int {
             nbytes: core::mem::size_of::<i32>(),
-            signed: Some(false),
+            signed: Some(true),
         },
         alignment: NonZeroUsize::new(core::mem::size_of::<i32>()).unwrap(),
         is_const: false,

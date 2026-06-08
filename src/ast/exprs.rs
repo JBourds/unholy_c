@@ -44,6 +44,14 @@ pub enum Expr {
 }
 
 impl Expr {
+    /// Wrap this expression in an explicit cast to `target`.
+    pub fn cast_to(self, target: Type) -> Self {
+        Self::Cast {
+            target,
+            exp: Box::new(self),
+        }
+    }
+
     pub fn is_modifiable_lvalue(&self, t: &Type) -> bool {
         let disallowed = [Type::is_array, Type::is_function];
         self.is_lvalue() && !disallowed.iter().any(|f| f(t))

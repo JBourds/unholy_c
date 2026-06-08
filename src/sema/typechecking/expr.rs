@@ -135,10 +135,7 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
             let expr = if operand_is_char
                 && matches!(op, ast::UnaryOp::Negate | ast::UnaryOp::Complement)
             {
-                ast::Expr::Cast {
-                    target: ast::Type::int(4, None),
-                    exp: Box::new(expr),
-                }
+                expr.cast_to(ast::Type::int(4, None))
             } else {
                 expr
             };
@@ -544,10 +541,7 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
             }
 
             let expr = if *target != r#type {
-                ast::Expr::Cast {
-                    target: target.clone(),
-                    exp: Box::new(expr),
-                }
+                expr.cast_to(target.clone())
             } else {
                 expr
             };
@@ -579,19 +573,13 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
                 (expr_t, index_t) if expr_t.is_pointer() && index_t.is_integer() => Ok(TypedExpr {
                     expr: ast::Expr::Subscript {
                         expr: Box::new(expr),
-                        index: Box::new(ast::Expr::Cast {
-                            target: ast::Type::PTRDIFF_T,
-                            exp: Box::new(index),
-                        }),
+                        index: Box::new(index.cast_to(ast::Type::PTRDIFF_T)),
                     },
                     r#type: expr_t.deref(),
                 }),
                 (expr_t, index_t) if expr_t.is_integer() && index_t.is_pointer() => Ok(TypedExpr {
                     expr: ast::Expr::Subscript {
-                        expr: Box::new(ast::Expr::Cast {
-                            target: ast::Type::PTRDIFF_T,
-                            exp: Box::new(expr),
-                        }),
+                        expr: Box::new(expr.cast_to(ast::Type::PTRDIFF_T)),
                         index: Box::new(index),
                     },
                     r#type: index_t.deref(),

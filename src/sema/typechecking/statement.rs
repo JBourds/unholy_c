@@ -145,7 +145,7 @@ pub fn typecheck_stmt(
                 // stays distinct from case 100 when switching on a char).
                 let (condition, condition_type) = if condition_type.is_char() {
                     let promoted = ast::Type::int(4, None);
-                    (ast::Expr::Cast { target: promoted.clone(), exp: Box::new(condition) }, promoted)
+                    (condition.cast_to(promoted.clone()), promoted)
                 } else {
                     (condition, condition_type)
                 };

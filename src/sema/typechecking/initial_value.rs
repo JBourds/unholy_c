@@ -61,13 +61,16 @@ impl InitialValue {
                             size
                         );
                     }
-                    let remaining_bytes = *size - value.len() - 1;
+                    let null_terminated = *size > value.len();
                     let mut inits = vec![StaticInit::String {
                         data: value.as_bytes().to_vec().into(),
-                        null_terminated: true,
+                        null_terminated,
                     }];
-                    if remaining_bytes > 0 {
-                        inits.push(StaticInit::Zero(remaining_bytes));
+                    if null_terminated {
+                        let remaining = *size - value.len() - 1;
+                        if remaining > 0 {
+                            inits.push(StaticInit::Zero(remaining));
+                        }
                     }
                     Ok(Self::Initial(inits))
                 }

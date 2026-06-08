@@ -150,208 +150,45 @@ impl Expr {
         symbols: &mut SymbolTable,
         make_temp_var: &mut impl FnMut() -> String,
     ) -> Self {
-        // I do this cause get_type currently clones on vars
         let val_type = val.get_type(symbols);
-        let mut instructions = vec![];
         if target == val_type {
-            return Self { instructions, val };
+            return Self {
+                instructions: vec![],
+                val,
+            };
         }
-        let dst = Function::make_tacky_temp_var(target.clone(), symbols, make_temp_var);
 
-        let is_float = |t: &ast::Type| {
-            matches!(
-                t,
-                ast::Type {
-                    base: ast::BaseType::Float(_) | ast::BaseType::Double(_),
-                    ..
-                }
-            )
-        };
-
-        // Double -> Integer
-        if is_float(&val_type) {
-            match target {
-                ast::Type {
-                    base:
-                        ast::BaseType::Int {
-                            nbytes: _,
-                            signed: Some(false),
-                        },
-                    ..
-                } => {
-                    instructions.push(Instruction::DoubleToUInt {
-                        src: val,
-                        dst: dst.clone(),
-                    });
-                }
-                ast::Type {
-                    base:
-                        ast::BaseType::Int {
-                            nbytes: _,
-                            signed: _,
-                        },
-                    ..
-                } => {
-                    instructions.push(Instruction::DoubleToInt {
-                        src: val,
-                        dst: dst.clone(),
-                    });
-                }
-                ast::Type {
-                    base:
-                        ast::BaseType::Char {
-                            signed: Some(false),
-                        },
-                    ..
-                } => {
-                    let label = Rc::new(make_temp_var());
-                    symbols.new_entry(Rc::clone(&label), ast::Type::U32);
-                    let tmp = Val::Var(label);
-                    instructions.push(Instruction::DoubleToUInt {
-                        src: val,
-                        dst: tmp.clone(),
-                    });
-                    instructions.push(Instruction::Copy {
-                        src: tmp,
-                        dst: dst.clone(),
-                    });
-                }
-                ast::Type {
-                    base:
-                        ast::BaseType::Char {
-                            signed: None | Some(true),
-                        },
-                    ..
-                } => {
-                    let label = Rc::new(make_temp_var());
-                    symbols.new_entry(Rc::clone(&label), ast::Type::I32);
-                    let tmp = Val::Var(label);
-                    instructions.push(Instruction::DoubleToInt {
-                        src: val,
-                        dst: tmp.clone(),
-                    });
-                    instructions.push(Instruction::Copy {
-                        src: tmp,
-                        dst: dst.clone(),
-                    });
-                }
-                // We should not ever be trying to cast a double to
-                // anything other than an int or char
-                _ => unreachable!("Casting float type to {target:?}"),
-            }
-        } else if is_float(&target) {
-            match val_type {
-                ast::Type {
-                    base:
-                        ast::BaseType::Int {
-                            nbytes: _,
-                            signed: Some(false),
-                        },
-                    ..
-                } => {
-                    instructions.push(Instruction::UIntToDouble {
-                        src: val,
-                        dst: dst.clone(),
-                    });
-                }
-                ast::Type {
-                    base:
-                        ast::BaseType::Int {
-                            nbytes: _,
-                            signed: _,
-                        },
-                    ..
-                } => {
-                    instructions.push(Instruction::IntToDouble {
-                        src: val,
-                        dst: dst.clone(),
-                    });
-                }
-                ast::Type {
-                    base:
-                        ast::BaseType::Char {
-                            signed: Some(false),
-                        },
-                    ..
-                } => {
-                    let label = Rc::new(make_temp_var());
-                    symbols.new_entry(Rc::clone(&label), ast::Type::U32);
-                    let tmp = Val::Var(label);
-                    // Widen the 1-byte char to int width before converting; a
-                    // plain Copy would read garbage in the upper bytes.
-                    instructions.push(Instruction::ZeroExtend {
-                        src: val,
-                        dst: tmp.clone(),
-                    });
-                    instructions.push(Instruction::UIntToDouble {
-                        src: tmp.clone(),
-                        dst: dst.clone(),
-                    });
-                }
-                ast::Type {
-                    base:
-                        ast::BaseType::Char {
-                            signed: None | Some(true),
-                        },
-                    ..
-                } => {
-                    let label = Rc::new(make_temp_var());
-                    symbols.new_entry(Rc::clone(&label), ast::Type::I32);
-                    let tmp = Val::Var(label);
-                    // Sign-extend the 1-byte char to int width before
-                    // converting; a plain Copy would read garbage upper bytes.
-                    instructions.push(Instruction::SignExtend {
-                        src: val,
-                        dst: tmp.clone(),
-                    });
-                    instructions.push(Instruction::IntToDouble {
-                        src: tmp.clone(),
-                        dst: dst.clone(),
-                    });
-                }
-                // We should not ever be trying to cast a double to
-                // anything other than an int
-                _ => unreachable!("Casting float type to {target:?}"),
-            }
-        } else {
-            // Integer ops
-            // FIXME: This needs to use PartialEq/Eq
-            match target.base.nbytes().cmp(&val_type.base.nbytes()) {
-                std::cmp::Ordering::Equal => {
-                    instructions.push(Instruction::Copy {
-                        src: val,
-                        dst: dst.clone(),
-                    });
-                }
-                std::cmp::Ordering::Less => {
-                    instructions.push(Instruction::Truncate {
-                        src: val,
-                        dst: dst.clone(),
-                    });
-                }
-                _ => match val_type {
-                    ast::Type {
-                        base: ast::BaseType::Int { signed, .. } | ast::BaseType::Char { signed },
-                        ..
-                    } => {
-                        if signed.is_none_or(|signed| signed) {
-                            instructions.push(Instruction::SignExtend {
-                                src: val,
-                                dst: dst.clone(),
-                            });
-                        } else {
-                            instructions.push(Instruction::ZeroExtend {
-                                src: val,
-                                dst: dst.clone(),
-                            });
-                        }
-                    }
-                    _ => unimplemented!(),
+        let mut emitter = CastEmitter::new(symbols, make_temp_var);
+        let dst = emitter.temp(target.clone());
+        match (Scalar::of(&val_type), Scalar::of(&target)) {
+            (
+                Scalar::Int { bytes: src, signed },
+                Scalar::Int {
+                    bytes: dst_bytes, ..
                 },
+            ) => {
+                emitter.resize(val, src, signed, dst.clone(), dst_bytes);
+            }
+            (Scalar::Int { bytes, signed }, Scalar::F64) => {
+                emitter.int_to_double(val, bytes, signed, dst.clone());
+            }
+            (Scalar::F64, Scalar::Int { bytes, signed }) => {
+                emitter.double_to_int(val, dst.clone(), bytes, signed);
+            }
+            // We don't have f32 but this is where we would slot them in
+            (Scalar::Int { .. }, Scalar::F32)
+            | (Scalar::F32, Scalar::Int { .. })
+            | (Scalar::F32, Scalar::F64)
+            | (Scalar::F64, Scalar::F32) => {
+                todo!("conversions involving 32-bit float are not implemented yet")
+            }
+            // Same-type float casts are caught by the early `target == val_type`.
+            (Scalar::F32, Scalar::F32) | (Scalar::F64, Scalar::F64) => {
+                unreachable!("identity float cast should have returned early")
             }
         }
         Self {
-            instructions,
+            instructions: emitter.instructions,
             val: dst,
         }
     }
@@ -392,5 +229,126 @@ impl Expr {
     ) -> Self {
         let parsed = Self::parse_with(node, symbols, make_temp_var);
         Self::convert(parsed, symbols, make_temp_var)
+    }
+}
+
+/// A scalar type reduced to what casting actually depends on. A char is just a
+/// 1-byte integer here, so the four char-specific conversion paths collapse into
+/// the integer paths. The two floating-point widths are kept distinct so f32
+/// support can be slotted in without restructuring.
+enum Scalar {
+    F32,
+    F64,
+    Int { bytes: usize, signed: bool },
+}
+
+impl Scalar {
+    fn of(t: &ast::Type) -> Self {
+        match &t.base {
+            ast::BaseType::Float(_) => Self::F32,
+            ast::BaseType::Double(_) => Self::F64,
+            ast::BaseType::Int { nbytes, signed } => Self::Int {
+                bytes: *nbytes,
+                signed: signed.unwrap_or(true),
+            },
+            // Pointers cast as unsigned machine-word integers.
+            ast::BaseType::Ptr { .. } => Self::Int {
+                bytes: t.base.nbytes(),
+                signed: false,
+            },
+            other => unreachable!("not a scalar cast operand: {other:?}"),
+        }
+    }
+}
+
+/// Accumulates instructions for a single scalar conversion adding any
+/// intermediate temporaries it needs. Conversions to/from `double` require the
+/// integer side to be at least int-width, so a 1-byte operand is widened
+/// (before int->double) or produced wide and truncated (after double->int).
+struct CastEmitter<'a, F: FnMut() -> String> {
+    instructions: Vec<Instruction>,
+    symbols: &'a mut SymbolTable,
+    make_temp_var: &'a mut F,
+}
+
+impl<'a, F: FnMut() -> String> CastEmitter<'a, F> {
+    fn new(symbols: &'a mut SymbolTable, make_temp_var: &'a mut F) -> Self {
+        Self {
+            instructions: vec![],
+            symbols,
+            make_temp_var,
+        }
+    }
+
+    fn temp(&mut self, t: ast::Type) -> Val {
+        Function::make_tacky_temp_var(t, self.symbols, self.make_temp_var)
+    }
+
+    /// A 32-bit temporary matching `signed`, used to stage char conversions.
+    fn int32(&mut self, signed: bool) -> Val {
+        self.temp(if signed {
+            ast::Type::I32
+        } else {
+            ast::Type::U32
+        })
+    }
+
+    /// int -> int: sign/zero-extend, truncate, or copy by relative width.
+    fn resize(&mut self, src: Val, src_bytes: usize, signed: bool, dst: Val, dst_bytes: usize) {
+        self.instructions.push(match dst_bytes.cmp(&src_bytes) {
+            std::cmp::Ordering::Equal => Instruction::Copy { src, dst },
+            std::cmp::Ordering::Less => Instruction::Truncate { src, dst },
+            std::cmp::Ordering::Greater if signed => Instruction::SignExtend { src, dst },
+            std::cmp::Ordering::Greater => Instruction::ZeroExtend { src, dst },
+        });
+    }
+
+    /// int -> double, widening a 1-byte source to int width first.
+    fn int_to_double(&mut self, src: Val, src_bytes: usize, signed: bool, dst: Val) {
+        let src = if src_bytes == 1 {
+            let wide = self.int32(signed);
+            self.instructions.push(if signed {
+                Instruction::SignExtend {
+                    src,
+                    dst: wide.clone(),
+                }
+            } else {
+                Instruction::ZeroExtend {
+                    src,
+                    dst: wide.clone(),
+                }
+            });
+            wide
+        } else {
+            src
+        };
+        self.instructions.push(if signed {
+            Instruction::IntToDouble { src, dst }
+        } else {
+            Instruction::UIntToDouble { src, dst }
+        });
+    }
+
+    /// double -> int, producing a 1-byte destination at int width then truncating.
+    fn double_to_int(&mut self, src: Val, dst: Val, dst_bytes: usize, signed: bool) {
+        let wide = if dst_bytes == 1 {
+            self.int32(signed)
+        } else {
+            dst.clone()
+        };
+        self.instructions.push(if signed {
+            Instruction::DoubleToInt {
+                src,
+                dst: wide.clone(),
+            }
+        } else {
+            Instruction::DoubleToUInt {
+                src,
+                dst: wide.clone(),
+            }
+        });
+        if dst_bytes == 1 {
+            self.instructions.push(Instruction::Copy { src: wide, dst });
+        }
     }
 }

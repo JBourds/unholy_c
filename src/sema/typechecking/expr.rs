@@ -167,254 +167,7 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
             } = typecheck_expr_and_convert(right, symbols)
                 .context("Failed to typecheck righthand argument of binary operation.")?;
 
-            // Only allow null pointer constant comparisons with == or !=
-            if left_t.is_pointer() && op.is_relational() {
-                if is_null_pointer_constant(&left) || is_null_pointer_constant(&right) {
-                    // can have null pointer comparison but only with == and !=
-                    ensure!(
-                        matches!(op, ast::BinaryOp::Equal | ast::BinaryOp::NotEqual),
-                        format!(
-                            "Error in \"{op:#?}\" comparison: lefthand side with type {left_t:#?} and righthand side with type {right_t:#?}. Expressions: \nLeft: {left:#?}\nRight: {right:#?}"
-                        )
-                    );
-                } else {
-                    ensure!(
-                        left_t == right_t,
-                        format!(
-                            "Error in \"{op:#?}\" comparison: lefthand side with type {left_t:#?} and righthand side with type {right_t:#?}. Expressions: \nLeft: {left:#?}\nRight: {right:#?}"
-                        )
-                    );
-                }
-            }
-
-            // Evaluate all operands in a boolean context.
-            if op.is_logical() {
-                return Ok(TypedExpr {
-                    expr: ast::Expr::Binary {
-                        op: *op,
-                        left: Box::new(boolify(left, &left_t)?),
-                        right: Box::new(boolify(right, &right_t)?),
-                    },
-                    r#type: ast::Type::bool(),
-                });
-            }
-            match (*op, left_t.clone(), right_t.clone()) {
-                // ptr +/- int
-                (op @ ast::BinaryOp::Add | op @ ast::BinaryOp::Subtract, left_t, right_t)
-                    if left_t.is_pointer() && right_t.is_integer() =>
-                {
-                    return Ok(TypedExpr {
-                        expr: ast::Expr::Binary {
-                            op,
-                            left: Box::new(left),
-                            right: Box::new(ast::Expr::Cast {
-                                target: ast::Type::PTRDIFF_T,
-                                exp: Box::new(right.clone()),
-                            }),
-                        },
-                        r#type: left_t,
-                    });
-                }
-                // ptr (+/-)= int
-                (
-                    op @ ast::BinaryOp::AddAssign | op @ ast::BinaryOp::SubAssign,
-                    left_t,
-                    right_t,
-                ) if left_t.is_pointer() && right_t.is_integer() && left.is_lvalue() => {
-                    return Ok(TypedExpr {
-                        expr: ast::Expr::Assignment {
-                            lvalue: Box::new(left.clone()),
-                            rvalue: Box::new(ast::Expr::Binary {
-                                op,
-                                left: Box::new(left),
-                                right: Box::new(ast::Expr::Cast {
-                                    target: ast::Type::PTRDIFF_T,
-                                    exp: Box::new(right.clone()),
-                                }),
-                            }),
-                        },
-                        r#type: left_t,
-                    });
-                }
-                // int + ptr
-                (ast::BinaryOp::Add, left_t, right_t)
-                    if left_t.is_integer() && right_t.is_pointer() =>
-                {
-                    return Ok(TypedExpr {
-                        expr: ast::Expr::Binary {
-                            op: ast::BinaryOp::Add,
-                            left: Box::new(ast::Expr::Cast {
-                                target: ast::Type::PTRDIFF_T,
-                                exp: Box::new(left.clone()),
-                            }),
-                            right: Box::new(right),
-                        },
-                        r#type: right_t,
-                    });
-                }
-                // ptr1 - ptr2
-                (ast::BinaryOp::Subtract, left_t, right_t)
-                    if left_t.is_pointer() && right_t.is_pointer() && left_t == right_t =>
-                {
-                    return Ok(TypedExpr {
-                        expr: ast::Expr::Binary {
-                            op: ast::BinaryOp::Subtract,
-                            left: Box::new(left),
-                            right: Box::new(right),
-                        },
-                        r#type: ast::Type::PTRDIFF_T,
-                    });
-                }
-                // ptr1 </<=/>/>= ptr2
-                (
-                    op @ ast::BinaryOp::LessThan
-                    | op @ ast::BinaryOp::LessOrEqual
-                    | op @ ast::BinaryOp::GreaterThan
-                    | op @ ast::BinaryOp::GreaterOrEqual,
-                    left_t,
-                    right_t,
-                ) if left_t.is_pointer() && right_t.is_pointer() => {
-                    return Ok(TypedExpr {
-                        expr: ast::Expr::Binary {
-                            op,
-                            left: Box::new(left),
-                            right: Box::new(right),
-                        },
-                        r#type: ast::Type::bool(),
-                    });
-                }
-                (ast::BinaryOp::Subtract | ast::BinaryOp::SubAssign, left_t, right_t)
-                    if !left_t.is_pointer() && right_t.is_pointer() =>
-                {
-                    bail!("Cannot subtract pointer from non pointer type")
-                }
-                (ast::BinaryOp::Add | ast::BinaryOp::AddAssign, left_t, right_t)
-                    if left_t.is_pointer() && right_t.is_pointer() =>
-                {
-                    bail!("cannot add two pointers together")
-                }
-
-                _ => {} // Not a 'valid' pointer arithmitic case
-            }
-
-            let common_t = if left_t.is_pointer() || right_t.is_pointer() {
-                ensure!(
-                    !matches!(
-                        op,
-                        ast::BinaryOp::Multiply
-                            | ast::BinaryOp::Divide
-                            | ast::BinaryOp::Remainder
-                            | ast::BinaryOp::MultAssign
-                            | ast::BinaryOp::DivAssign
-                            | ast::BinaryOp::ModAssign
-                    ) && !op.is_bitwise(),
-                    format!(
-                        "Attempted to perform binary operation other than addition or subtraction on pointer type."
-                    )
-                );
-                get_common_pointer_type(&left, left_t.clone(), &right, right_t.clone())?
-            } else {
-                let (lifted_left_t, _) =
-                    ast::BaseType::lift(left_t.base.clone(), right_t.base.clone()).context(
-                        "Unable to promote {left_t:#?} and {right_t:#?} to a common type.",
-                    )?;
-                ast::Type {
-                    base: lifted_left_t.clone(),
-                    is_const: true,
-                    alignment: std::cmp::max(left_t.alignment, right_t.alignment),
-                }
-            };
-
-            ensure!(
-                !(op.is_bitwise()
-                    | matches!(op, ast::BinaryOp::Remainder | ast::BinaryOp::ModAssign)
-                    && matches!(
-                        common_t,
-                        ast::Type {
-                            base: ast::BaseType::Float(_) | ast::BaseType::Double(_),
-                            ..
-                        }
-                    )),
-                "Cannot perform a bitwise or remainder binary operation on a floating point value."
-            );
-
-            // Bitshifts don't find a common type, but the left operand still
-            // undergoes integer promotion (char -> int), and the result takes
-            // that promoted type.
-            if matches!(op, ast::BinaryOp::LShift | ast::BinaryOp::RShift) {
-                let (left, left_t) = if left_t.is_char() {
-                    let promoted = ast::Type::int(4, None);
-                    (
-                        ast::Expr::Cast {
-                            target: promoted.clone(),
-                            exp: Box::new(left),
-                        },
-                        promoted,
-                    )
-                } else {
-                    (left, left_t)
-                };
-                Ok(TypedExpr {
-                    expr: ast::Expr::Binary {
-                        op: *op,
-                        left: Box::new(left),
-                        right: Box::new(right),
-                    },
-                    r#type: left_t,
-                })
-            } else {
-                let casted_left = if common_t != left_t {
-                    Some(ast::Expr::Cast {
-                        target: common_t.clone(),
-                        exp: Box::new(left.clone()),
-                    })
-                } else {
-                    None
-                };
-                let casted_right = if common_t != right_t {
-                    Some(ast::Expr::Cast {
-                        target: common_t.clone(),
-                        exp: Box::new(right.clone()),
-                    })
-                } else {
-                    None
-                };
-                match op.compound_op() {
-                    Some(_) => {
-                        ensure!(
-                            left.is_modifiable_lvalue(&left_t),
-                            "Compound operations are only valid on modifiable lvalues."
-                        );
-                        Ok(TypedExpr {
-                            expr: ast::Expr::Assignment {
-                                lvalue: Box::new(left.clone()),
-                                rvalue: Box::new(ast::Expr::Binary {
-                                    op: *op,
-                                    left: Box::new(casted_left.unwrap_or(left)),
-                                    right: Box::new(casted_right.unwrap_or(right)),
-                                }),
-                            },
-                            r#type: if op.is_relational() {
-                                ast::Type::int(4, None)
-                            } else {
-                                common_t
-                            },
-                        })
-                    }
-                    _ => Ok(TypedExpr {
-                        expr: ast::Expr::Binary {
-                            op: *op,
-                            left: Box::new(casted_left.unwrap_or(left)),
-                            right: Box::new(casted_right.unwrap_or(right)),
-                        },
-                        r#type: if op.is_relational() {
-                            ast::Type::int(4, None)
-                        } else {
-                            common_t
-                        },
-                    }),
-                }
-            }
+            typecheck_binary(*op, left, left_t, right, right_t)
         }
         ast::Expr::Conditional {
             condition,
@@ -607,5 +360,268 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
                 },
             })
         }
+    }
+}
+
+/// Typecheck a binary expression whose operands have already been checked.
+/// Dispatches to the rule that applies: logical, pointer arithmetic/comparison,
+/// shift, or ordinary arithmetic.
+fn typecheck_binary(
+    op: ast::BinaryOp,
+    left: ast::Expr,
+    left_t: ast::Type,
+    right: ast::Expr,
+    right_t: ast::Type,
+) -> Result<TypedExpr> {
+    validate_pointer_comparison(op, &left, &left_t, &right, &right_t)?;
+
+    // Logical operands are evaluated in a boolean context.
+    if op.is_logical() {
+        return Ok(TypedExpr {
+            expr: ast::Expr::Binary {
+                op,
+                left: Box::new(boolify(left, &left_t)?),
+                right: Box::new(boolify(right, &right_t)?),
+            },
+            r#type: ast::Type::bool(),
+        });
+    }
+
+    if let Some(result) = try_pointer_binary(op, &left, &left_t, &right, &right_t)? {
+        return Ok(result);
+    }
+
+    let common_t = compute_common_type(op, &left, &left_t, &right, &right_t)?;
+
+    ensure!(
+        !((op.is_bitwise() || matches!(op, ast::BinaryOp::Remainder | ast::BinaryOp::ModAssign))
+            && common_t.is_float()),
+        "Cannot perform a bitwise or remainder binary operation on a floating point value."
+    );
+
+    if op.is_shift() {
+        typecheck_shift(op, left, left_t, right)
+    } else {
+        typecheck_arithmetic(op, left, left_t, right, right_t, common_t)
+    }
+}
+
+/// Pointer relational operands must be compatible (or compared against a null
+/// pointer constant, which is only allowed with `==`/`!=`).
+fn validate_pointer_comparison(
+    op: ast::BinaryOp,
+    left: &ast::Expr,
+    left_t: &ast::Type,
+    right: &ast::Expr,
+    right_t: &ast::Type,
+) -> Result<()> {
+    if left_t.is_pointer() && op.is_relational() {
+        if is_null_pointer_constant(left) || is_null_pointer_constant(right) {
+            ensure!(
+                matches!(op, ast::BinaryOp::Equal | ast::BinaryOp::NotEqual),
+                format!(
+                    "Error in \"{op:#?}\" comparison: lefthand side with type {left_t:#?} and righthand side with type {right_t:#?}. Expressions: \nLeft: {left:#?}\nRight: {right:#?}"
+                )
+            );
+        } else {
+            ensure!(
+                left_t == right_t,
+                format!(
+                    "Error in \"{op:#?}\" comparison: lefthand side with type {left_t:#?} and righthand side with type {right_t:#?}. Expressions: \nLeft: {left:#?}\nRight: {right:#?}"
+                )
+            );
+        }
+    }
+    Ok(())
+}
+
+/// Handle the pointer-arithmetic and pointer-comparison forms. Returns `Some`
+/// when `op` is one of those forms, `None` when it is ordinary scalar work.
+fn try_pointer_binary(
+    op: ast::BinaryOp,
+    left: &ast::Expr,
+    left_t: &ast::Type,
+    right: &ast::Expr,
+    right_t: &ast::Type,
+) -> Result<Option<TypedExpr>> {
+    let ptrdiff_cast = |e: &ast::Expr| e.clone().cast_to(ast::Type::PTRDIFF_T);
+
+    // ptr +/- int
+    if matches!(op, ast::BinaryOp::Add | ast::BinaryOp::Subtract)
+        && left_t.is_pointer()
+        && right_t.is_integer()
+    {
+        return Ok(Some(TypedExpr {
+            expr: ast::Expr::Binary {
+                op,
+                left: Box::new(left.clone()),
+                right: Box::new(ptrdiff_cast(right)),
+            },
+            r#type: left_t.clone(),
+        }));
+    }
+    // ptr (+/-)= int
+    if matches!(op, ast::BinaryOp::AddAssign | ast::BinaryOp::SubAssign)
+        && left_t.is_pointer()
+        && right_t.is_integer()
+        && left.is_lvalue()
+    {
+        return Ok(Some(TypedExpr {
+            expr: ast::Expr::Assignment {
+                lvalue: Box::new(left.clone()),
+                rvalue: Box::new(ast::Expr::Binary {
+                    op,
+                    left: Box::new(left.clone()),
+                    right: Box::new(ptrdiff_cast(right)),
+                }),
+            },
+            r#type: left_t.clone(),
+        }));
+    }
+    // int + ptr
+    if matches!(op, ast::BinaryOp::Add) && left_t.is_integer() && right_t.is_pointer() {
+        return Ok(Some(TypedExpr {
+            expr: ast::Expr::Binary {
+                op: ast::BinaryOp::Add,
+                left: Box::new(ptrdiff_cast(left)),
+                right: Box::new(right.clone()),
+            },
+            r#type: right_t.clone(),
+        }));
+    }
+    // ptr1 - ptr2
+    if matches!(op, ast::BinaryOp::Subtract)
+        && left_t.is_pointer()
+        && right_t.is_pointer()
+        && left_t == right_t
+    {
+        return Ok(Some(TypedExpr {
+            expr: ast::Expr::Binary {
+                op: ast::BinaryOp::Subtract,
+                left: Box::new(left.clone()),
+                right: Box::new(right.clone()),
+            },
+            r#type: ast::Type::PTRDIFF_T,
+        }));
+    }
+    // ptr1 </<=/>/>= ptr2
+    if op.is_ordering() && left_t.is_pointer() && right_t.is_pointer() {
+        return Ok(Some(TypedExpr {
+            expr: ast::Expr::Binary {
+                op,
+                left: Box::new(left.clone()),
+                right: Box::new(right.clone()),
+            },
+            r#type: ast::Type::bool(),
+        }));
+    }
+    if matches!(op, ast::BinaryOp::Subtract | ast::BinaryOp::SubAssign)
+        && !left_t.is_pointer()
+        && right_t.is_pointer()
+    {
+        bail!("Cannot subtract pointer from non pointer type")
+    }
+    if matches!(op, ast::BinaryOp::Add | ast::BinaryOp::AddAssign)
+        && left_t.is_pointer()
+        && right_t.is_pointer()
+    {
+        bail!("cannot add two pointers together")
+    }
+
+    Ok(None)
+}
+
+/// The common type the two operands are converted to: a common pointer type if
+/// either side is a pointer, otherwise the lifted (promoted) scalar type.
+fn compute_common_type(
+    op: ast::BinaryOp,
+    left: &ast::Expr,
+    left_t: &ast::Type,
+    right: &ast::Expr,
+    right_t: &ast::Type,
+) -> Result<ast::Type> {
+    if left_t.is_pointer() || right_t.is_pointer() {
+        ensure!(
+            !op.is_mult_div_mod() && !op.is_bitwise(),
+            "Attempted to perform binary operation other than addition or subtraction on pointer type."
+        );
+        get_common_pointer_type(left, left_t.clone(), right, right_t.clone())
+    } else {
+        let (lifted_left_t, _) = ast::BaseType::lift(left_t.base.clone(), right_t.base.clone())
+            .context("Unable to promote {left_t:#?} and {right_t:#?} to a common type.")?;
+        Ok(ast::Type {
+            base: lifted_left_t,
+            is_const: true,
+            alignment: std::cmp::max(left_t.alignment, right_t.alignment),
+        })
+    }
+}
+
+/// Shifts don't find a common type; the left operand is integer-promoted
+/// (char -> int) and the result takes that promoted type.
+fn typecheck_shift(
+    op: ast::BinaryOp,
+    left: ast::Expr,
+    left_t: ast::Type,
+    right: ast::Expr,
+) -> Result<TypedExpr> {
+    let (left, left_t) = if left_t.is_char() {
+        (left.cast_to(ast::Type::I32), ast::Type::I32)
+    } else {
+        (left, left_t)
+    };
+    Ok(TypedExpr {
+        expr: ast::Expr::Binary {
+            op,
+            left: Box::new(left),
+            right: Box::new(right),
+        },
+        r#type: left_t,
+    })
+}
+
+/// Ordinary arithmetic/bitwise/comparison: convert both operands to the common
+/// type, emitting an assignment back to the LHS for compound forms.
+fn typecheck_arithmetic(
+    op: ast::BinaryOp,
+    left: ast::Expr,
+    left_t: ast::Type,
+    right: ast::Expr,
+    right_t: ast::Type,
+    common_t: ast::Type,
+) -> Result<TypedExpr> {
+    let casted_left = (common_t != left_t).then(|| left.clone().cast_to(common_t.clone()));
+    let casted_right = (common_t != right_t).then(|| right.clone().cast_to(common_t.clone()));
+    let result_type = if op.is_relational() {
+        ast::Type::I32
+    } else {
+        common_t
+    };
+
+    if op.compound_op().is_some() {
+        ensure!(
+            left.is_modifiable_lvalue(&left_t),
+            "Compound operations are only valid on modifiable lvalues."
+        );
+        Ok(TypedExpr {
+            expr: ast::Expr::Assignment {
+                lvalue: Box::new(left.clone()),
+                rvalue: Box::new(ast::Expr::Binary {
+                    op,
+                    left: Box::new(casted_left.unwrap_or(left)),
+                    right: Box::new(casted_right.unwrap_or(right)),
+                }),
+            },
+            r#type: result_type,
+        })
+    } else {
+        Ok(TypedExpr {
+            expr: ast::Expr::Binary {
+                op,
+                left: Box::new(casted_left.unwrap_or(left)),
+                right: Box::new(casted_right.unwrap_or(right)),
+            },
+            r#type: result_type,
+        })
     }
 }

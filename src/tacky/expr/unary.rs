@@ -320,16 +320,29 @@ fn addr_of(
                 val: dst,
             })
         }
-        ExprResult::DereferencedPointer(expr) => {
-            if let Val::Var(ref name) = expr.val
-                && let Some(ptr) = symbols.get_mut(name)
+        ExprResult::DereferencedPointer(Expr {
+            mut instructions,
+            val,
+        }) => {
+            if let Val::Var(ref name) = val
+                && let Some(ptr) = symbols.get(name)
             {
+                // Copy into new value with dereferenced type
                 let dereferenced = ptr.r#type.clone().deref().maybe_decay();
-                ptr.r#type = dereferenced;
+                let label = Rc::new(make_temp_var());
+                symbols.new_entry(Rc::clone(&label), dereferenced);
+                let tmp = Val::Var(label);
+                instructions.push(Instruction::Copy {
+                    src: val,
+                    dst: tmp.clone(),
+                });
+                ExprResult::PlainOperand(Expr {
+                    instructions,
+                    val: tmp,
+                })
             } else {
                 unreachable!("cannot have constant expression for dereferenced pointer.");
             }
-            ExprResult::PlainOperand(expr)
         }
     }
 }

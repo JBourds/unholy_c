@@ -1468,7 +1468,7 @@ impl Instruction<WithStorage> {
             } => match dst {
                 Operand::Reg(reg) => vec![Self::from_op(InstructionType::Mov {
                     src,
-                    dst: Operand::Reg(reg.as_section(dst_t.into())),
+                    dst: Operand::Reg(reg.as_section(RegSection::Dword)),
                 })],
                 dst => vec![
                     Self::from_op(InstructionType::Mov {

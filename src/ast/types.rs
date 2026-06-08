@@ -1,4 +1,4 @@
-use crate::lexer::Token;
+use crate::{codegen::MAX_AGGREGATE_ALIGNMENT, lexer::Token};
 
 use anyhow::{Context, Result, bail};
 use std::num::NonZeroUsize;
@@ -50,6 +50,14 @@ impl Type {
         alignment: NonZeroUsize::new(core::mem::size_of::<i32>()).unwrap(),
         is_const: false,
     };
+}
+
+pub fn calculate_alignment(per_element_alignment: usize, n_elements: usize) -> usize {
+    if per_element_alignment * n_elements >= MAX_AGGREGATE_ALIGNMENT {
+        MAX_AGGREGATE_ALIGNMENT
+    } else {
+        per_element_alignment
+    }
 }
 
 // Need to implement this since the optional signed parameter should
@@ -196,7 +204,9 @@ impl BaseType {
             Self::Fun { .. } | Self::Ptr { .. } => {
                 NonZeroUsize::new(core::mem::size_of::<usize>()).unwrap()
             }
-            Self::Array { element, .. } => element.base.default_alignment(),
+            Self::Array { element, size } => {
+                NonZeroUsize::new(calculate_alignment(element.alignment.get(), *size)).unwrap()
+            }
             Self::Char { .. } => NonZeroUsize::new(core::mem::size_of::<u8>()).unwrap(),
             Self::Struct => todo!(),
             Self::Void => todo!(),

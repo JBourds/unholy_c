@@ -3,7 +3,7 @@ use std::num::NonZeroUsize;
 use std::rc::Rc;
 
 use super::{BaseType, Constant, RawParameterList, Type};
-use crate::lexer::Token;
+use crate::{ast::types::calculate_alignment, lexer::Token};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum AbstractDeclarator {
@@ -128,7 +128,8 @@ impl AbstractDeclarator {
             }
             Self::Array { decl, size } => {
                 let derived_type = Type {
-                    alignment: base.alignment,
+                    alignment: NonZeroUsize::new(calculate_alignment(base.alignment.get(), size))
+                        .unwrap(),
                     base: BaseType::Array {
                         element: Box::new(base),
                         size,
@@ -317,7 +318,8 @@ impl Declarator {
             Declarator::Array { decl, size } => {
                 ensure!(!base.is_function(), "Array of functions not allowed");
                 let derived_type = Type {
-                    alignment: base.alignment,
+                    alignment: NonZeroUsize::new(calculate_alignment(base.alignment.get(), size))
+                        .unwrap(),
                     base: BaseType::Array {
                         element: Box::new(base),
                         size,

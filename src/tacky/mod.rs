@@ -7,6 +7,7 @@ mod binary_op;
 mod expr;
 mod function;
 mod instruction;
+mod mov_chunker;
 mod program;
 mod static_constant;
 mod static_init;

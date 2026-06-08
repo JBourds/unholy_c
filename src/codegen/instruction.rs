@@ -1376,6 +1376,33 @@ impl Instruction<WithStorage> {
 
     pub(super) fn fixup_stack_vars(self) -> Vec<Self> {
         match self.op {
+            // Chunked aggregate store (string array init): the value is wider
+            // than the array's element type (char), but the region holds it.
+            InstructionType::Mov {
+                src: src @ Operand::Imm(..),
+                dst:
+                    Operand::Memory {
+                        reg,
+                        offset,
+                        size,
+                        r#type,
+                    },
+            } if src.size() > r#type.size_bytes() && size >= src.size() => {
+                let dst = Operand::Memory {
+                    reg,
+                    offset,
+                    size,
+                    r#type,
+                }
+                .size_cast(AssemblyType::from(&src));
+                rewrite_move(
+                    src,
+                    dst,
+                    RewriteRule::new(ImmRewrite::Ignore, MemRewrite::Default, true),
+                    RewriteRule::new(ImmRewrite::Error, MemRewrite::Ignore, false),
+                    |src, dst| Self::from_op(InstructionType::Mov { src, dst }),
+                )
+            }
             InstructionType::Mov { src, dst } => rewrite_move(
                 src,
                 dst,

@@ -1,3 +1,5 @@
+use crate::tacky;
+
 use super::*;
 
 pub(crate) fn parse_assignment(
@@ -22,24 +24,44 @@ fn parse_normal_assignment(
     make_temp_var: &mut impl FnMut() -> String,
 ) -> ExprResult {
     let lval = Expr::parse_with(lvalue, symbols, make_temp_var);
-    let rval = Expr::parse_with_and_convert(rvalue, symbols, make_temp_var);
     match lval {
         ExprResult::PlainOperand(Expr {
             mut instructions,
             val,
         }) => {
-            instructions.extend(rval.instructions);
+            let t = val.get_type(symbols);
+            match t.base {
+                ast::BaseType::Array { element, size }
+                    if matches!(rvalue, ast::Expr::String { .. })
+                        && matches!(element.base, ast::BaseType::Char { .. }) =>
+                {
+                    let ast::Expr::String { value } = rvalue else {
+                        unreachable!()
+                    };
+                    let tacky::Val::Var(dst) = val.clone() else {
+                        unreachable!()
+                    };
+                    let instructions: Vec<_> =
+                        mov_chunker::MovChunker::new(value.as_bytes(), dst, size, 0).collect();
+                    ExprResult::PlainOperand(Expr { instructions, val })
+                }
+                _ => {
+                    let rval = Expr::parse_with_and_convert(rvalue.clone(), symbols, make_temp_var);
+                    instructions.extend(rval.instructions);
 
-            instructions.push(Instruction::Copy {
-                src: rval.val,
-                dst: val.clone(),
-            });
-            ExprResult::PlainOperand(Expr { instructions, val })
+                    instructions.push(Instruction::Copy {
+                        src: rval.val,
+                        dst: val.clone(),
+                    });
+                    ExprResult::PlainOperand(Expr { instructions, val })
+                }
+            }
         }
         ExprResult::DereferencedPointer(Expr {
             mut instructions,
             val,
         }) => {
+            let rval = Expr::parse_with_and_convert(rvalue.clone(), symbols, make_temp_var);
             instructions.extend(rval.instructions);
             instructions.push(Instruction::Store {
                 src: rval.val.clone(),

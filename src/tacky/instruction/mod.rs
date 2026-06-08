@@ -1,4 +1,4 @@
-use crate::ast::get_element_type;
+use crate::{ast::get_element_type, tacky::mov_chunker::MovChunker};
 
 use super::*;
 
@@ -121,11 +121,23 @@ impl Instruction {
         in_array: bool,
         name: Rc<String>,
         init: ast::Initializer,
-        per_element_size: usize,
+        r#type: &ast::Type,
         symbols: &mut SymbolTable,
         make_temp_var: &mut impl FnMut() -> String,
     ) -> Vec<Self> {
         match init {
+            ast::Initializer::SingleInit(expr)
+                if r#type.is_array() && matches!(&*expr, ast::Expr::String { .. }) =>
+            {
+                let ast::Expr::String { value } = *expr else {
+                    unreachable!()
+                };
+                let len = r#type.size_of();
+                let instructions =
+                    MovChunker::new(value.as_bytes(), Rc::clone(&name), len, *base).collect();
+                *base += len;
+                instructions
+            }
             ast::Initializer::SingleInit(init) => {
                 let Expr {
                     mut instructions,
@@ -137,17 +149,20 @@ impl Instruction {
                         dst: Rc::clone(&name),
                         offset: (*base).try_into().unwrap(),
                     });
-                    *base += per_element_size;
+                    *base += r#type.size_of();
                 } else {
-                    let dst = Val::Var(name);
                     instructions.push(Instruction::Copy {
                         src,
-                        dst: dst.clone(),
+                        dst: Val::Var(name),
                     });
                 }
                 instructions
             }
             ast::Initializer::CompundInit(inits) => {
+                let element_t = match &r#type.base {
+                    ast::BaseType::Array { element, .. } => element.as_ref(),
+                    _ => r#type,
+                };
                 let mut instructions = vec![];
                 for init in inits {
                     instructions.extend(Self::process_initializer_rec(
@@ -155,7 +170,7 @@ impl Instruction {
                         true,
                         name.clone(),
                         init,
-                        per_element_size,
+                        element_t,
                         symbols,
                         make_temp_var,
                     ));
@@ -173,16 +188,7 @@ impl Instruction {
         make_temp_var: &mut impl FnMut() -> String,
     ) -> Vec<Self> {
         let mut base = 0;
-        let per_element_size = get_element_type(r#type).size_of();
-        Self::process_initializer_rec(
-            &mut base,
-            false,
-            name,
-            init,
-            per_element_size,
-            symbols,
-            make_temp_var,
-        )
+        Self::process_initializer_rec(&mut base, false, name, init, r#type, symbols, make_temp_var)
     }
 
     pub(crate) fn parse_var_decl_with(

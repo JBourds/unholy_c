@@ -25,9 +25,6 @@ pub enum BaseType {
         element: Box<Type>,
         size: usize,
     },
-    Char {
-        signed: Option<bool>,
-    },
     // TODO: Implement later and make this a non unit variant
     Struct,
     Void,
@@ -75,9 +72,16 @@ impl PartialEq for BaseType {
                     signed: r_signed,
                 },
             ) => {
-                let l_signed = l_signed.is_none_or(|signed| signed);
-                let r_signed = r_signed.is_none_or(|signed| signed);
-                l_nbytes == r_nbytes && l_signed == r_signed
+                // `char`, `signed char`, and `unsigned char` are three distinct
+                // 1-byte types, so compare signedness exactly there. For wider
+                // ints, an unspecified sign means signed (`int` == `signed int`).
+                if *l_nbytes == 1 || *r_nbytes == 1 {
+                    l_nbytes == r_nbytes && l_signed == r_signed
+                } else {
+                    let l_signed = l_signed.is_none_or(|signed| signed);
+                    let r_signed = r_signed.is_none_or(|signed| signed);
+                    l_nbytes == r_nbytes && l_signed == r_signed
+                }
             }
             (Self::Float(l0), Self::Float(r0)) => l0 == r0,
             (Self::Double(l0), Self::Double(r0)) => l0 == r0,
@@ -111,7 +115,6 @@ impl PartialEq for BaseType {
                     size: r_size,
                 },
             ) => *l_element == *r_element && l_size == r_size,
-            (Self::Char { signed: lsigned }, Self::Char { signed: rsigned }) => lsigned == rsigned,
             _ => core::mem::discriminant(self) == core::mem::discriminant(other),
         }
     }
@@ -125,7 +128,6 @@ impl BaseType {
             BaseType::Double(nbytes) => *nbytes,
             BaseType::Ptr { .. } => core::mem::size_of::<usize>(),
             BaseType::Array { element, size } => element.base.nbytes() * size,
-            BaseType::Char { .. } => core::mem::size_of::<u8>(),
             BaseType::Fun { .. } => unreachable!(),
             BaseType::Struct => unreachable!(),
             BaseType::Void => unreachable!(),
@@ -139,7 +141,6 @@ impl BaseType {
             BaseType::Double(nbytes) => *nbytes,
             BaseType::Ptr { to, .. } => to.size_of(),
             BaseType::Array { element, .. } => element.base.size_of_base_type(),
-            BaseType::Char { .. } => self.nbytes(),
             BaseType::Fun { .. } => unreachable!(),
             BaseType::Struct => unreachable!(),
             BaseType::Void => unreachable!(),
@@ -158,20 +159,30 @@ impl BaseType {
         }
     }
 
+    /// A char is a 1-byte integer of any signedness (`char`, `signed char`,
+    /// `unsigned char`).
+    pub fn is_char(&self) -> bool {
+        matches!(self, Self::Int { nbytes: 1, .. })
+    }
+
+    /// A plain `char`: a 1-byte int with unspecified signedness, distinct from
+    /// `signed char`/`unsigned char`.
+    pub fn is_plain_char(&self) -> bool {
+        matches!(
+            self,
+            Self::Int {
+                nbytes: 1,
+                signed: None
+            }
+        )
+    }
+
     // Promotion rules
 
     fn rank(&self) -> Option<usize> {
         // Completely arbitrary numbers but this ensures that rank favors size,
         // and that floating point representations will always win out
         match self {
-            Self::Char { signed } => Some(
-                10 + 1
-                    + if signed.is_some_and(|signed| !signed) {
-                        1
-                    } else {
-                        0
-                    },
-            ),
             Self::Int { nbytes, signed } => Some(
                 *nbytes * 10
                     + 1
@@ -207,7 +218,6 @@ impl BaseType {
             Self::Array { element, size } => {
                 NonZeroUsize::new(calculate_alignment(element.alignment.get(), *size)).unwrap()
             }
-            Self::Char { .. } => NonZeroUsize::new(core::mem::size_of::<u8>()).unwrap(),
             Self::Struct => todo!(),
             Self::Void => todo!(),
         }
@@ -227,7 +237,7 @@ impl BaseType {
     fn default_promote(self) -> Self {
         match self {
             // Integer types get promoted to a basic signed int by default
-            Self::Int { .. } | Self::Char { .. } => {
+            Self::Int { .. } => {
                 let int = Self::default();
                 let int_rank = int.rank().expect("Integer does not have a rank?");
                 if self.rank().expect("Integer does not have a rank?") >= int_rank {
@@ -278,7 +288,7 @@ impl BaseType {
                 Token::Double => Ok((Self::Double(std::mem::size_of::<f64>()), &tokens[1..])),
                 // TODO: Recursive parsing logic for structs
                 Token::Struct => Ok((Self::Struct, &tokens[1..])),
-                Token::Char => Ok((Self::Char { signed: None }, &tokens[1..])),
+                Token::Char => Ok((Self::int(1, None), &tokens[1..])),
                 _ => bail!("Could not parse base type."),
             }
         } else {
@@ -328,15 +338,6 @@ impl std::fmt::Display for BaseType {
                 ret_t.fmt(f)
             }
             Self::Void => write!(f, "void"),
-            Self::Char { signed } => write!(
-                f,
-                "{}char",
-                match signed {
-                    Some(true) => "s",
-                    Some(false) => "u",
-                    None => "",
-                }
-            ),
         }
     }
 }
@@ -354,10 +355,8 @@ impl From<&Constant> for BaseType {
             Constant::U64(_) => Self::int(core::mem::size_of::<u64>(), Some(false)),
             Constant::F32(_) => Self::float(false),
             Constant::F64(_) => Self::float(true),
-            Constant::ICHAR(_) => Self::Char { signed: Some(true) },
-            Constant::UCHAR(_) => Self::Char {
-                signed: Some(false),
-            },
+            Constant::ICHAR(_) => Self::int(1, Some(true)),
+            Constant::UCHAR(_) => Self::int(1, Some(false)),
         }
     }
 }
@@ -420,7 +419,7 @@ impl Type {
     }
 
     pub fn char(signed: Option<bool>) -> Self {
-        let base = BaseType::Char { signed };
+        let base = BaseType::int(1, signed);
         let alignment = base.default_alignment();
         Self {
             base,
@@ -440,12 +439,12 @@ impl Type {
     pub fn is_arithmetic(&self) -> bool {
         matches!(
             self.base,
-            BaseType::Int { .. } | BaseType::Char { .. } | BaseType::Float(_) | BaseType::Double(_)
+            BaseType::Int { .. } | BaseType::Float(_) | BaseType::Double(_)
         )
     }
 
     pub fn is_integer(&self) -> bool {
-        matches!(self.base, BaseType::Int { .. } | BaseType::Char { .. })
+        matches!(self.base, BaseType::Int { .. })
     }
 
     pub fn is_float(&self) -> bool {
@@ -461,7 +460,7 @@ impl Type {
     }
 
     pub fn is_char(&self) -> bool {
-        matches!(&self.base, BaseType::Char { .. })
+        self.base.is_char()
     }
 
     pub fn deref(self) -> Self {
@@ -564,6 +563,16 @@ impl TypeBuilder {
                 .replace(BaseType::Double(std::mem::size_of::<f64>()));
         } else if self.n_longs > 0 || self.is_signed.is_some() || self.is_short {
             match self.base {
+                // char is a 1-byte int; it can't take long/short specifiers.
+                Some(BaseType::Int { nbytes: 1, .. }) => {
+                    if self.n_longs > 0 {
+                        bail!("TypeBuilder: long char is not a valid type");
+                    } else if self.is_short {
+                        bail!("TypeBuilder: short char is not a valid type");
+                    } else {
+                        self.base.replace(BaseType::int(1, self.is_signed));
+                    }
+                }
                 Some(BaseType::Int { .. }) | None => {
                     let nbytes = if self.n_longs > 0 {
                         std::mem::size_of::<i64>()
@@ -576,17 +585,6 @@ impl TypeBuilder {
                         nbytes,
                         signed: self.is_signed,
                     });
-                }
-                Some(BaseType::Char { .. }) => {
-                    if self.n_longs > 0 {
-                        bail!("TypeBuilder: long char is not a valid type");
-                    } else if self.is_short {
-                        bail!("TypeBuilder: short char is not a valid type");
-                    } else {
-                        self.base.replace(BaseType::Char {
-                            signed: self.is_signed,
-                        });
-                    }
                 }
                 _ => bail!(
                     "Cannot provide type specifiers specific to integers for non integer type."

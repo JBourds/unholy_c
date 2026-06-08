@@ -33,7 +33,7 @@ fn parse_normal_assignment(
             match t.base {
                 ast::BaseType::Array { element, size }
                     if matches!(rvalue, ast::Expr::String { .. })
-                        && matches!(element.base, ast::BaseType::Char { .. }) =>
+                        && element.is_char() =>
                 {
                     let ast::Expr::String { value } = rvalue else {
                         unreachable!()

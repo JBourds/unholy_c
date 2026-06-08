@@ -52,10 +52,6 @@ fn eval_constant(expr: ast::Expr) -> Result<Constant> {
                 },
                 ast::BaseType::Float(_) => Constant::F32(exp.cast::<f32>()),
                 ast::BaseType::Double(_) => Constant::F64(exp.cast::<f64>()),
-                ast::BaseType::Char { signed } => match signed {
-                    Some(false) => Constant::U8(exp.cast::<u8>()),
-                    None | Some(true) => Constant::I8(exp.cast::<i8>()),
-                },
                 _ => bail!(format!(
                     "Non constant base type cannot be const evaluated: {:#?}",
                     target.base

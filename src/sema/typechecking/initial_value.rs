@@ -84,7 +84,7 @@ impl InitialValue {
                 ast::Initializer::SingleInit(expr),
             ) => match &**expr {
                 ast::Expr::String { value } => {
-                    if !matches!(to.base, ast::BaseType::Char { signed: None }) {
+                    if !to.base.is_plain_char() {
                         bail!(
                             "Cannot assign string literal to non char pointer, including signed and unsigned char pointers"
                         );

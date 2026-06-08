@@ -197,9 +197,46 @@ impl Expr {
                         dst: dst.clone(),
                     });
                 }
-                // FIXME: Add chars here
+                ast::Type {
+                    base:
+                        ast::BaseType::Char {
+                            signed: Some(false),
+                        },
+                    ..
+                } => {
+                    let label = Rc::new(make_temp_var());
+                    symbols.new_entry(Rc::clone(&label), ast::Type::U32);
+                    let tmp = Val::Var(label);
+                    instructions.push(Instruction::DoubleToUInt {
+                        src: val,
+                        dst: tmp.clone(),
+                    });
+                    instructions.push(Instruction::Copy {
+                        src: tmp,
+                        dst: dst.clone(),
+                    });
+                }
+                ast::Type {
+                    base:
+                        ast::BaseType::Char {
+                            signed: None | Some(true),
+                        },
+                    ..
+                } => {
+                    let label = Rc::new(make_temp_var());
+                    symbols.new_entry(Rc::clone(&label), ast::Type::I32);
+                    let tmp = Val::Var(label);
+                    instructions.push(Instruction::DoubleToInt {
+                        src: val,
+                        dst: tmp.clone(),
+                    });
+                    instructions.push(Instruction::Copy {
+                        src: tmp,
+                        dst: dst.clone(),
+                    });
+                }
                 // We should not ever be trying to cast a double to
-                // anything other than an int
+                // anything other than an int or char
                 _ => unreachable!("Casting float type to {target:?}"),
             }
         } else if is_float(&target) {
@@ -230,7 +267,44 @@ impl Expr {
                         dst: dst.clone(),
                     });
                 }
-                // FIXME: Add chars here
+                ast::Type {
+                    base:
+                        ast::BaseType::Char {
+                            signed: Some(false),
+                        },
+                    ..
+                } => {
+                    let label = Rc::new(make_temp_var());
+                    symbols.new_entry(Rc::clone(&label), ast::Type::U32);
+                    let tmp = Val::Var(label);
+                    instructions.push(Instruction::Copy {
+                        src: val,
+                        dst: tmp.clone(),
+                    });
+                    instructions.push(Instruction::UIntToDouble {
+                        src: tmp.clone(),
+                        dst: dst.clone(),
+                    });
+                }
+                ast::Type {
+                    base:
+                        ast::BaseType::Char {
+                            signed: None | Some(true),
+                        },
+                    ..
+                } => {
+                    let label = Rc::new(make_temp_var());
+                    symbols.new_entry(Rc::clone(&label), ast::Type::I32);
+                    let tmp = Val::Var(label);
+                    instructions.push(Instruction::Copy {
+                        src: val,
+                        dst: tmp.clone(),
+                    });
+                    instructions.push(Instruction::IntToDouble {
+                        src: tmp.clone(),
+                        dst: dst.clone(),
+                    });
+                }
                 // We should not ever be trying to cast a double to
                 // anything other than an int
                 _ => unreachable!("Casting float type to {target:?}"),

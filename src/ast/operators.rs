@@ -85,6 +85,30 @@ impl BinaryOp {
         )
     }
 
+    pub fn is_shift(&self) -> bool {
+        matches!(*self, Self::LShift | Self::RShift)
+    }
+
+    /// Ordering comparisons (`<`, `<=`, `>`, `>=`); excludes `==`/`!=`.
+    pub fn is_ordering(&self) -> bool {
+        matches!(
+            *self,
+            Self::LessThan | Self::LessOrEqual | Self::GreaterThan | Self::GreaterOrEqual
+        )
+    }
+
+    pub fn is_mult_div_mod(&self) -> bool {
+        matches!(
+            *self,
+            Self::Multiply
+                | Self::Divide
+                | Self::Remainder
+                | Self::MultAssign
+                | Self::DivAssign
+                | Self::ModAssign
+        )
+    }
+
     pub fn does_assignment(&self) -> bool {
         matches!(
             *self,

@@ -1684,7 +1684,7 @@ impl Instruction<WithStorage> {
             InstructionType::Mov {
                 src: imm @ Operand::Imm(..),
                 dst: dst @ Operand::Memory { .. } | dst @ Operand::Data { .. },
-            } if imm.size() > 4 => {
+            } => {
                 let r10 = Operand::Reg(Reg::X64 {
                     reg: X64Reg::R10,
                     section: RegSection::from_size(dst.size()).expect("FIXME"),
@@ -1696,18 +1696,6 @@ impl Instruction<WithStorage> {
                     }),
                     Self::from_op(InstructionType::Mov { src: r10, dst }),
                 ]
-            }
-            InstructionType::Mov {
-                src: imm @ Operand::Imm(..),
-                dst,
-            } if dst.size() < imm.size() => {
-                let Operand::Imm(c) = imm else { unreachable!() };
-                // FIXME: Constant should probably provide some way to truncate here
-                let imm = match c {
-                    ast::Constant::I64(i) => Operand::Imm(ast::Constant::I32(i as i32)),
-                    _ => unreachable!(),
-                };
-                vec![Self::from_op(InstructionType::Mov { src: imm, dst })]
             }
             op => vec![Self::from_op(op)],
         }

@@ -33,6 +33,25 @@ pub enum BaseType {
     Void,
 }
 
+impl Type {
+    pub const U32: Self = Self {
+        base: BaseType::Int {
+            nbytes: core::mem::size_of::<u32>(),
+            signed: Some(true),
+        },
+        alignment: NonZeroUsize::new(core::mem::size_of::<u32>()).unwrap(),
+        is_const: false,
+    };
+    pub const I32: Self = Self {
+        base: BaseType::Int {
+            nbytes: core::mem::size_of::<i32>(),
+            signed: Some(false),
+        },
+        alignment: NonZeroUsize::new(core::mem::size_of::<i32>()).unwrap(),
+        is_const: false,
+    };
+}
+
 // Need to implement this since the optional signed parameter should
 // be considered signed by default or use the actual value
 impl PartialEq for BaseType {

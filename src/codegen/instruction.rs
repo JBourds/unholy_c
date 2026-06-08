@@ -925,6 +925,10 @@ impl Instruction<Initial> {
                 ..
             }
             | ast::Type {
+                base: ast::BaseType::Char { .. },
+                ..
+            }
+            | ast::Type {
                 base: ast::BaseType::Ptr { .. },
                 ..
             } => {

@@ -140,7 +140,7 @@ impl Expr {
             ast::Expr::FunCall { .. } => parse_fun_call(node, symbols, make_temp_var),
             ast::Expr::Cast { .. } => parse_cast(node, symbols, make_temp_var),
             ast::Expr::Subscript { .. } => parse_subscript(node, symbols, make_temp_var),
-            ast::Expr::String { .. } => parse_string(node, symbols, make_temp_var),
+            ast::Expr::String { .. } => parse_string(node, symbols),
         }
     }
 

@@ -2,15 +2,15 @@ use std::rc::Rc;
 
 use crate::{
     ast,
-    tacky::{self, ExprResult, Instruction, SymbolTable, Val},
+    tacky::{self, ExprResult, SymbolTable, Val},
 };
 
-/// Create the string object
-pub(crate) fn parse_string(
-    node: ast::Expr,
-    symbols: &mut SymbolTable,
-    make_temp_var: &mut impl FnMut() -> String,
-) -> ExprResult {
+/// Reference the static string object directly.
+///
+/// A string literal used as a value is an lvalue of array type; the array ->
+/// pointer decay the type checker inserts (an `AddrOf` wrapper) is what takes
+/// its address.
+pub(crate) fn parse_string(node: ast::Expr, symbols: &mut SymbolTable) -> ExprResult {
     let ast::Expr::String { value } = node else {
         unreachable!()
     };
@@ -18,18 +18,8 @@ pub(crate) fn parse_string(
         .get_string(&value)
         .map(Rc::clone)
         .expect("all string literals should be in symbol table");
-    let entry = symbols
-        .get(&string)
-        .expect("string must also be in symbol table");
-    let label = Rc::new(make_temp_var());
-    symbols.new_entry(Rc::clone(&label), entry.r#type.clone());
-    let tmp = Val::Var(label);
-    let instructions = vec![Instruction::GetAddress {
-        src: Val::Var(string),
-        dst: tmp.clone(),
-    }];
     ExprResult::PlainOperand(tacky::Expr {
-        instructions,
-        val: tmp,
+        instructions: vec![],
+        val: Val::Var(string),
     })
 }

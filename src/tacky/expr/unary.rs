@@ -337,9 +337,7 @@ fn addr_of(
                 } else {
                     ptr.r#type.clone()
                 };
-                let label = Rc::new(make_temp_var());
-                symbols.new_entry(Rc::clone(&label), dereferenced);
-                let tmp = Val::Var(label);
+                let tmp = Function::make_tacky_temp_var(dereferenced, symbols, make_temp_var);
                 instructions.push(Instruction::Copy {
                     src: val,
                     dst: tmp.clone(),

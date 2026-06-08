@@ -386,10 +386,7 @@ impl Expr {
         symbols: &mut SymbolTable,
         make_temp_var: &mut impl FnMut() -> String,
     ) -> Self {
-        Self::convert(
-            Self::parse_with(node, symbols, make_temp_var),
-            symbols,
-            make_temp_var,
-        )
+        let parsed = Self::parse_with(node, symbols, make_temp_var);
+        Self::convert(parsed, symbols, make_temp_var)
     }
 }

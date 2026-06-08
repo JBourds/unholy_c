@@ -114,4 +114,12 @@ impl Attribute {
             Self::Constant { .. } => false,
         }
     }
+
+    pub fn is_constant(&self) -> bool {
+        matches!(self, Self::Constant { .. })
+    }
+
+    pub fn is_static(&self) -> bool {
+        matches!(self, Self::Static { .. })
+    }
 }

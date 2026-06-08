@@ -1219,28 +1219,20 @@ impl Instruction<WithStorage> {
             } => {
                 match symbols.get(name) {
                     // 1. Check for static storage
-                    Some(entry)
-                        if matches!(entry.attribute, sema::tc::Attribute::Static { .. }) =>
-                    {
-                        Operand::Data {
-                            name: Rc::clone(name),
-                            size: entry.r#type.size_of(),
-                            r#type,
-                            is_const: false,
-                        }
-                    }
+                    Some(entry) if entry.attribute.is_static() => Operand::Data {
+                        name: Rc::clone(name),
+                        size: entry.r#type.size_of(),
+                        r#type,
+                        is_const: false,
+                    },
                     // 1b. rodata constants (e.g. string literals) live in their
                     // own `.L_`-prefixed section, not on the stack.
-                    Some(entry)
-                        if matches!(entry.attribute, sema::tc::Attribute::Constant(..)) =>
-                    {
-                        Operand::Data {
-                            name: Rc::clone(name),
-                            size: entry.r#type.size_of(),
-                            r#type,
-                            is_const: true,
-                        }
-                    }
+                    Some(entry) if entry.attribute.is_constant() => Operand::Data {
+                        name: Rc::clone(name),
+                        size: entry.r#type.size_of(),
+                        r#type,
+                        is_const: true,
+                    },
                     // 2. If it is not static, put it on the stack
                     _ => mappings
                         .entry(Rc::clone(name))
@@ -1260,28 +1252,20 @@ impl Instruction<WithStorage> {
             Operand::PseudoMem { ref name, offset } => {
                 match symbols.get(name) {
                     // 1. Check for static storage
-                    Some(entry)
-                        if matches!(entry.attribute, sema::tc::Attribute::Static { .. }) =>
-                    {
-                        Operand::Data {
-                            name: Rc::clone(name),
-                            size: entry.r#type.size_of(),
-                            r#type: AssemblyType::from_ast_type(get_element_type(&entry.r#type)),
-                            is_const: false,
-                        }
-                    }
+                    Some(entry) if entry.attribute.is_static() => Operand::Data {
+                        name: Rc::clone(name),
+                        size: entry.r#type.size_of(),
+                        r#type: AssemblyType::from_ast_type(get_element_type(&entry.r#type)),
+                        is_const: false,
+                    },
                     // 1b. String literals and other rodata constants live in
                     // their own `.L_`-prefixed section, not on the stack.
-                    Some(entry)
-                        if matches!(entry.attribute, sema::tc::Attribute::Constant(..)) =>
-                    {
-                        Operand::Data {
-                            name: Rc::clone(name),
-                            size: entry.r#type.size_of(),
-                            r#type: AssemblyType::from_ast_type(get_element_type(&entry.r#type)),
-                            is_const: true,
-                        }
-                    }
+                    Some(entry) if entry.attribute.is_constant() => Operand::Data {
+                        name: Rc::clone(name),
+                        size: entry.r#type.size_of(),
+                        r#type: AssemblyType::from_ast_type(get_element_type(&entry.r#type)),
+                        is_const: true,
+                    },
                     // 2. If it is not static, put it on the stack
                     Some(entry) => {
                         let entry = mappings

@@ -122,13 +122,27 @@ pub mod x64 {
             ) => Some(r#type.size_bytes()),
             _ => None,
         };
+        size.map(mem_suffix).unwrap_or_default()
+    }
+
+    fn mem_suffix(size: usize) -> &'static str {
         match size {
-            None => "",
-            Some(1) => "byte ptr ",
-            Some(2) => "word ptr ",
-            Some(4) => "dword ptr ",
-            Some(8) => "qword ptr ",
+            1 => "byte ptr ",
+            2 => "word ptr ",
+            4 => "dword ptr ",
+            8 => "qword ptr ",
             _ => unreachable!("Cannot have a destination size other than 1, 2, 4, or 8."),
+        }
+    }
+
+    /// Intel-syntax size specifier for a memory operand accessed at the given
+    /// assembly type.
+    fn mem_specifier(op: &Operand, r#type: &codegen::AssemblyType) -> &'static str {
+        match op {
+            Operand::Memory { .. } | Operand::Data { .. } | Operand::Indexed { .. } => {
+                mem_suffix(r#type.size_bytes())
+            }
+            _ => "",
         }
     }
 

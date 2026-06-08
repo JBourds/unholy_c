@@ -327,8 +327,16 @@ fn addr_of(
             if let Val::Var(ref name) = val
                 && let Some(ptr) = symbols.get(name)
             {
-                // Copy into new value with dereferenced type
-                let dereferenced = ptr.r#type.clone().deref().maybe_decay();
+                // Taking the address of a dereferenced pointer yields the
+                // pointer itself. If the pointee is an array it decays to a
+                // pointer-to-element; otherwise the result keeps the original
+                // pointer type.
+                let pointee = ptr.r#type.clone().deref();
+                let dereferenced = if pointee.is_array() {
+                    pointee.maybe_decay()
+                } else {
+                    ptr.r#type.clone()
+                };
                 let label = Rc::new(make_temp_var());
                 symbols.new_entry(Rc::clone(&label), dereferenced);
                 let tmp = Val::Var(label);

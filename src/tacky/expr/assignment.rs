@@ -86,9 +86,15 @@ fn handle_upcast(
     make_temp_var: &mut impl FnMut() -> String,
 ) -> Expr {
     if matches!(op, ast::BinaryOp::LShift | ast::BinaryOp::RShift) {
-        Expr {
-            instructions: vec![],
-            val: val.clone(),
+        // Shifts don't convert the LHS to the RHS/common type, but the LHS
+        // still undergoes integer promotion (char -> int).
+        if val.get_type(symbols).is_char() {
+            Expr::cast(val.clone(), ast::Type::int(4, None), symbols, make_temp_var)
+        } else {
+            Expr {
+                instructions: vec![],
+                val: val.clone(),
+            }
         }
     } else {
         Expr::cast(val.clone(), arg_type, symbols, make_temp_var)

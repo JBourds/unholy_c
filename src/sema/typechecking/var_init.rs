@@ -32,13 +32,13 @@ pub fn typecheck_var_decl(decl: ast::VarDecl, symbols: &mut SymbolTable) -> Resu
     }
     let decl = match decl.init {
         Some(init) => {
-            // Make sure the init is fixed up
-            let init = pad_compound_init(target, init, symbols, &decl.name)?;
             if let Attribute::Static {
                 initial_value: _,
                 external_linkage,
             } = entry.attribute
             {
+                // Make sure the init is fixed up
+                let init = pad_compound_init(target, init, symbols, &decl.name)?;
                 let attribute = Attribute::Static {
                     initial_value: InitialValue::from_initializer(target, &init, symbols)
                         .context("unable to create initial value from initializer")?,
@@ -47,14 +47,15 @@ pub fn typecheck_var_decl(decl: ast::VarDecl, symbols: &mut SymbolTable) -> Resu
                 if let Some(entry) = symbols.get_mut(&decl.name) {
                     entry.attribute = attribute;
                 }
-            }
-            // AST rewrite happens here, make sure we do this after creating
-            // the InitialValue for globals/statics otherwise it gets rewritten
-            // twice causing typechecking to fail.
-            let init = typecheck_init(target, init, symbols, &decl.name)?;
-            ast::VarDecl {
-                init: Some(init),
-                ..decl
+                ast::VarDecl {
+                    init: Some(init),
+                    ..decl
+                }
+            } else {
+                ast::VarDecl {
+                    init: Some(typecheck_init(target, init, symbols, &decl.name)?),
+                    ..decl
+                }
             }
         }
         None => ast::VarDecl { init: None, ..decl },

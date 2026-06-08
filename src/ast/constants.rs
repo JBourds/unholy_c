@@ -300,16 +300,10 @@ impl std::fmt::Display for Constant {
             Constant::U64(v) => write!(f, "{v}"),
             Constant::F32(v) => write!(f, "{v}"),
             Constant::F64(v) => write!(f, "{v}"),
-            Constant::ICHAR(v) => write!(
-                f,
-                "{}",
-                char::from_u32(*v as u32).unwrap_or_else(|| { '�' })
-            ),
-            Constant::UCHAR(v) => write!(
-                f,
-                "{}",
-                char::from_u32(*v as u32).unwrap_or_else(|| { '�' })
-            ),
+            // Chars store their numeric codepoint; this Display feeds assembly
+            // immediates, so emit the value (a glyph like NUL/0x01 corrupts asm).
+            Constant::ICHAR(v) => write!(f, "{v}"),
+            Constant::UCHAR(v) => write!(f, "{v}"),
         }
     }
 }

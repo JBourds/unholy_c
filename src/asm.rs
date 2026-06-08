@@ -164,11 +164,30 @@ pub mod x64 {
                     "\tcmov{cond_code}{suffix} {specifier}{dst}, {src}\n",
                 ))?;
             }
-            codegen::InstructionType::Movsx { src, dst } => {
-                w.write_fmt(format_args!(
-                    "\tmovslq {}{dst}, {src}\n",
-                    get_specifier(Some(&src), &dst)
-                ))?;
+            codegen::InstructionType::Movsx {
+                src,
+                dst,
+                src_t,
+                dst_t: _,
+            } => {
+                // `movsx` covers 8/16-bit sources; the 32->64 widening has its
+                // own mnemonic (`movsxd`) in Intel syntax.
+                let mnemonic = if src_t == codegen::AssemblyType::Longword {
+                    "movsxd"
+                } else {
+                    "movsx"
+                };
+                let specifier = mem_specifier(&src, &src_t);
+                w.write_fmt(format_args!("\t{mnemonic} {dst}, {specifier}{src}\n"))?;
+            }
+            codegen::InstructionType::MovZeroExtend {
+                src_t,
+                dst_t: _,
+                src,
+                dst,
+            } => {
+                let specifier = mem_specifier(&src, &src_t);
+                w.write_fmt(format_args!("\tmovzx {dst}, {specifier}{src}\n"))?;
             }
             codegen::InstructionType::Ret => {
                 w.write_str("\tmov rsp, rbp\n")?;
@@ -301,7 +320,6 @@ pub mod x64 {
                 let suffix = instr_suffix(codegen::AssemblyType::from(&dst));
                 w.write_fmt(format_args!("\tdiv{suffix} {specifier}{dst}, {src}\n"))?;
             }
-            codegen::InstructionType::MovZeroExtend { .. } => unreachable!(),
             codegen::InstructionType::Lea { src, dst } => {
                 w.write_fmt(format_args!("\tlea {dst}, {src}\n"))?;
             }

@@ -28,10 +28,14 @@ pub enum InstructionType {
         cond_code: CondCode,
     },
     Movsx {
+        src_t: AssemblyType,
+        dst_t: AssemblyType,
         src: Operand,
         dst: Operand,
     },
     MovZeroExtend {
+        src_t: AssemblyType,
+        dst_t: AssemblyType,
         src: Operand,
         dst: Operand,
     },
@@ -141,9 +145,15 @@ impl Instruction<Initial> {
                 Self::return_val(val, symbols, float_constants)
             }
             tacky::Instruction::SignExtend { src, dst } => {
+                let src_t = AssemblyType::from_ast_type(src.get_type(symbols));
+                let src = Operand::from_tacky(src, symbols, float_constants);
+                let dst_t = AssemblyType::from_ast_type(dst.get_type(symbols));
+                let dst = Operand::from_tacky(dst, symbols, float_constants);
                 vec![Self::new(InstructionType::Movsx {
-                    src: Operand::from_tacky(src, symbols, float_constants),
-                    dst: Operand::from_tacky(dst, symbols, float_constants),
+                    src_t,
+                    dst_t,
+                    src,
+                    dst,
                 })]
             }
             tacky::Instruction::Truncate { src, dst } => {
@@ -200,9 +210,15 @@ impl Instruction<Initial> {
                 Self::fun_call(name, args, dst, symbols, float_constants)
             }
             tacky::Instruction::ZeroExtend { src, dst } => {
+                let src_t = AssemblyType::from_ast_type(src.get_type(symbols));
+                let src = Operand::from_tacky(src, symbols, float_constants);
+                let dst_t = AssemblyType::from_ast_type(dst.get_type(symbols));
+                let dst = Operand::from_tacky(dst, symbols, float_constants);
                 vec![Self::new(InstructionType::MovZeroExtend {
-                    src: Operand::from_tacky(src, symbols, float_constants),
-                    dst: Operand::from_tacky(dst, symbols, float_constants),
+                    src_t,
+                    dst_t,
+                    src,
+                    dst,
                 })]
             }
             tacky::Instruction::DoubleToInt { src, dst } => {
@@ -1094,7 +1110,9 @@ impl Instruction<Initial> {
         float_constants: &mut HashSet<StaticConstant>,
         make_label: &mut impl FnMut(String) -> String,
     ) -> Vec<Self> {
+        let src_t = AssemblyType::from_ast_type(src.get_type(symbols));
         let src = Operand::from_tacky(src, symbols, float_constants);
+        let dst_t = AssemblyType::from_ast_type(dst.get_type(symbols));
         let dst = Operand::from_tacky(dst, symbols, float_constants);
 
         // Fast path when we are just dealing with unsigned ints
@@ -1102,6 +1120,8 @@ impl Instruction<Initial> {
         if matches!(src_type, AssemblyType::Longword) {
             return vec![
                 Self::new(InstructionType::MovZeroExtend {
+                    src_t,
+                    dst_t,
                     src: src.clone(),
                     dst: Operand::Reg(Reg::X86 {
                         reg: X86Reg::Ax,
@@ -1275,11 +1295,25 @@ impl Instruction<WithStorage> {
                     dst: convert_operand_offset(dst),
                     cond_code,
                 },
-                InstructionType::Movsx { src, dst } => InstructionType::Movsx {
+                InstructionType::Movsx {
+                    src_t,
+                    dst_t,
+                    src,
+                    dst,
+                } => InstructionType::Movsx {
+                    src_t,
+                    dst_t,
                     src: convert_operand_offset(src),
                     dst: convert_operand_offset(dst),
                 },
-                InstructionType::MovZeroExtend { src, dst } => InstructionType::MovZeroExtend {
+                InstructionType::MovZeroExtend {
+                    src_t,
+                    dst_t,
+                    src,
+                    dst,
+                } => InstructionType::MovZeroExtend {
+                    src_t,
+                    dst_t,
                     src: convert_operand_offset(src),
                     dst: convert_operand_offset(dst),
                 },
@@ -1366,24 +1400,38 @@ impl Instruction<WithStorage> {
                     })
                 },
             ),
-            InstructionType::Movsx { src, dst } => rewrite_move(
+            InstructionType::Movsx {
+                src,
+                dst,
+                src_t,
+                dst_t,
+            } => rewrite_move(
                 src,
                 dst,
                 RewriteRule::new(ImmRewrite::Require, MemRewrite::Default, false),
                 RewriteRule::new(ImmRewrite::Error, MemRewrite::StoreNoUse, false),
-                |src, dst| Self::from_op(InstructionType::Movsx { src, dst }),
+                |src, dst| {
+                    Self::from_op(InstructionType::Movsx {
+                        src,
+                        dst,
+                        src_t: src_t.clone(),
+                        dst_t: dst_t.clone(),
+                    })
+                },
             ),
+            // A 32-bit source zero-extends for free: writing a 32-bit register
+            // clears the upper half, so `mov` is equivalent and cheaper.
             InstructionType::MovZeroExtend {
                 src,
-                dst: reg @ Operand::Reg(_),
-            } => {
-                vec![Self::from_op(InstructionType::Mov { src, dst: reg })]
-            }
-            InstructionType::MovZeroExtend {
-                src,
-                dst: dst @ Operand::Memory { .. },
-            } => {
-                vec![
+                dst,
+                src_t: AssemblyType::Longword,
+                dst_t,
+            } => match dst {
+                Operand::Reg(reg) => vec![Self::from_op(InstructionType::Mov {
+                    src,
+                    dst: Operand::Reg(reg.as_section(dst_t.into())),
+                })],
+                dst => vec![
                     Self::from_op(InstructionType::Mov {
                         src,
                         dst: Operand::Reg(Reg::X64 {
@@ -1394,11 +1442,58 @@ impl Instruction<WithStorage> {
                     Self::from_op(InstructionType::Mov {
                         src: Operand::Reg(Reg::X64 {
                             reg: X64Reg::R11,
-                            section: RegSection::Qword,
+                            section: dst_t.into(),
                         }),
                         dst,
                     }),
-                ]
+                ],
+            },
+            // An 8/16-bit source needs a real `movzx`, which requires a
+            // non-immediate source and a register destination.
+            InstructionType::MovZeroExtend {
+                src,
+                dst,
+                src_t,
+                dst_t,
+            } => {
+                let mut instrs = vec![];
+                let src = if let Operand::Imm(..) = src {
+                    let tmp = Operand::Reg(Reg::X64 {
+                        reg: X64Reg::R10,
+                        section: src_t.clone().into(),
+                    });
+                    instrs.push(Self::from_op(InstructionType::Mov {
+                        src,
+                        dst: tmp.clone(),
+                    }));
+                    tmp
+                } else {
+                    src
+                };
+                match dst {
+                    Operand::Reg(..) => {
+                        instrs.push(Self::from_op(InstructionType::MovZeroExtend {
+                            src,
+                            dst,
+                            src_t,
+                            dst_t,
+                        }))
+                    }
+                    dst => {
+                        let r11 = Operand::Reg(Reg::X64 {
+                            reg: X64Reg::R11,
+                            section: dst_t.clone().into(),
+                        });
+                        instrs.push(Self::from_op(InstructionType::MovZeroExtend {
+                            src,
+                            dst: r11.clone(),
+                            src_t,
+                            dst_t,
+                        }));
+                        instrs.push(Self::from_op(InstructionType::Mov { src: r11, dst }));
+                    }
+                }
+                instrs
             }
             InstructionType::Binary { op, src, dst } => rewrite_move(
                 src,

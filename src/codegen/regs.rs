@@ -1,6 +1,8 @@
 use anyhow::{Result, bail};
 use std::fmt;
 
+use crate::codegen::AssemblyType;
+
 #[derive(Debug, PartialEq, Clone, Copy)]
 pub enum Reg {
     X86 { reg: X86Reg, section: RegSection },
@@ -15,6 +17,20 @@ pub enum RegSection {
     Word,
     Dword,
     Qword,
+}
+
+impl From<AssemblyType> for RegSection {
+    fn from(t: AssemblyType) -> Self {
+        match t {
+            AssemblyType::Byte => Self::LowByte,
+            AssemblyType::Word => Self::Word,
+            AssemblyType::Longword => Self::Dword,
+            AssemblyType::Quadword | AssemblyType::Pointer => Self::Qword,
+            AssemblyType::Float => Self::Dword,
+            AssemblyType::Double => Self::Qword,
+            AssemblyType::ByteArray { .. } => todo!(),
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Clone, Copy)]

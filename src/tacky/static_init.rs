@@ -48,8 +48,11 @@ impl StaticInit {
                 data,
                 null_terminated,
             } => {
+                // GAS reads `\ddd` after a backslash as octal, so every byte
+                // must be a 3-digit zero-padded octal escape. Fixed width keeps
+                // the assembler from greedily merging into a following digit.
                 let octal_escaped = data.iter().fold(String::new(), |mut s, c| {
-                    s.push_str(format!("\\{c:0}").as_str());
+                    s.push_str(format!("\\{c:03o}").as_str());
                     s
                 });
                 if *null_terminated {

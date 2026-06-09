@@ -360,8 +360,17 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
                 },
             })
         }
-        ast::Expr::SizeOf(_) => todo!(),
-        ast::Expr::SizeOfT(_) => todo!(),
+        ast::Expr::SizeOf(expr) => {
+            let TypedExpr { expr: _, r#type } = typecheck_expr(expr, symbols)?;
+            Ok(TypedExpr {
+                expr: ast::Expr::SizeOfT(r#type),
+                r#type: ast::Type::USIZE,
+            })
+        }
+        expr @ ast::Expr::SizeOfT(_) => Ok(TypedExpr {
+            expr: expr.clone(),
+            r#type: ast::Type::USIZE,
+        }),
     }
 }
 

@@ -464,6 +464,25 @@ impl Type {
             is_const: false,
         }
     }
+
+    pub fn is_scalar(&self) -> bool {
+        !(self.is_array() || self.is_function() || self.is_void())
+    }
+
+    pub fn is_complete(&self) -> bool {
+        !self.is_void()
+    }
+
+    pub fn is_pointer_to_complete(&self) -> bool {
+        match self {
+            Self {
+                base: BaseType::Ptr { to, .. },
+                ..
+            } => to.is_complete(),
+            _ => false,
+        }
+    }
+
     pub fn size_of(&self) -> usize {
         self.base.nbytes()
     }

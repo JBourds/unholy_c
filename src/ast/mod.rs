@@ -74,9 +74,6 @@ impl RawParameterList {
         let remaining = match tokens {
             [Token::RParen, tokens @ ..] => &tokens[1..],
             [Token::Void, Token::RParen, ..] => &tokens[2..],
-            [Token::Void, t, ..] => {
-                bail!("Expected closing parentheses but found \"{}\"", t)
-            }
             _ => {
                 let mut keep_going = true;
                 let mut remaining = tokens;

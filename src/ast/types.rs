@@ -219,7 +219,8 @@ impl BaseType {
                 NonZeroUsize::new(calculate_alignment(element.alignment.get(), *size)).unwrap()
             }
             Self::Struct => todo!(),
-            Self::Void => todo!(),
+            // Sentinel value- don't ever let an instance of void be created
+            Self::Void => NonZeroUsize::new(1).unwrap(),
         }
     }
 

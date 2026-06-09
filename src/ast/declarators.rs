@@ -234,8 +234,7 @@ impl Declarator {
             )),
             [Token::LParen, tokens @ ..] => {
                 let (decl, tokens) = Self::consume(tokens)?;
-                let tokens =
-                    eat_rparen(tokens).context("Expected \")\" to close declarator")?;
+                let tokens = eat_rparen(tokens).context("Expected \")\" to close declarator")?;
                 Ok((decl, tokens))
             }
             _ => bail!(

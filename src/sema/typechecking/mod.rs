@@ -64,6 +64,10 @@ fn get_common_pointer_type(
         Ok(e2_t)
     } else if is_null_pointer_constant(e2) {
         Ok(e1_t)
+    } else if e1_t.is_void_pointer() && e2_t.is_pointer()
+        || e2_t.is_void_pointer() && e1_t.is_pointer()
+    {
+        Ok(Type::pointer(Box::new(Type::VOID)))
     } else {
         bail!(format!(
             "{e1:#?} and {e2:#?} are not compatable pointer types: {e1_t:#?} vs. {e2_t:#?}"
@@ -72,11 +76,16 @@ fn get_common_pointer_type(
 }
 
 fn convert_by_assignment(e: ast::Expr, e_t: &ast::Type, target: &ast::Type) -> Result<ast::Expr> {
+    let null_pointer_convertable = || {
+        e_t.is_arithmetic() && target.is_arithmetic()
+            || is_null_pointer_constant(&e) && target.is_pointer()
+    };
+    let void_pointer_convertable = || {
+        target.is_void_pointer() && e_t.is_pointer() || e_t.is_void_pointer() && target.is_pointer()
+    };
     if e_t == target {
         Ok(e)
-    } else if e_t.is_arithmetic() && target.is_arithmetic()
-        || is_null_pointer_constant(&e) && target.is_pointer()
-    {
+    } else if null_pointer_convertable() || void_pointer_convertable() {
         try_implicit_cast(target, e, e_t)
     } else {
         bail!("Cannot convert type for assignment.")

@@ -31,12 +31,30 @@ pub enum BaseType {
 }
 
 impl Type {
+    pub const USIZE: Self = Self::U64;
+    pub const U64: Self = Self {
+        base: BaseType::Int {
+            nbytes: core::mem::size_of::<u64>(),
+            signed: Some(false),
+        },
+        alignment: NonZeroUsize::new(core::mem::size_of::<u64>()).unwrap(),
+        is_const: false,
+    };
     pub const U32: Self = Self {
         base: BaseType::Int {
             nbytes: core::mem::size_of::<u32>(),
             signed: Some(false),
         },
         alignment: NonZeroUsize::new(core::mem::size_of::<u32>()).unwrap(),
+        is_const: false,
+    };
+    pub const ISIZE: Self = Self::I64;
+    pub const I64: Self = Self {
+        base: BaseType::Int {
+            nbytes: core::mem::size_of::<i64>(),
+            signed: Some(true),
+        },
+        alignment: NonZeroUsize::new(core::mem::size_of::<i64>()).unwrap(),
         is_const: false,
     };
     pub const I32: Self = Self {

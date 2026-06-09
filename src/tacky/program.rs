@@ -9,14 +9,17 @@ pub struct Program {
 impl From<sema::ValidAst> for Program {
     fn from(ast: sema::ValidAst) -> Self {
         let sema::ValidAst { program, symbols } = ast;
-        let mut statics = vec![];
+        let mut top_level = vec![];
         for (name, symbol) in symbols.global.iter() {
             if let Some(r#static) = StaticVariable::from_symbol_with_name(Rc::clone(name), symbol) {
-                statics.push(r#static);
+                top_level.push(TopLevel::StaticVariable(r#static));
+            } else if let Some(constant) =
+                StaticConstant::from_symbol_with_name(Rc::clone(name), symbol)
+            {
+                top_level.push(TopLevel::StaticConstant(constant));
             }
         }
         let mut symbols = SymbolTable::from(symbols);
-        let mut valid_functions = vec![];
         for decl in program.declarations.into_iter() {
             match decl {
                 // Only declarations with bodies will be returned here.
@@ -25,17 +28,12 @@ impl From<sema::ValidAst> for Program {
                 // that the function gets defined as static.
                 ast::Declaration::FunDecl(f) => {
                     if let Some(f) = Function::from_symbol(f, &mut symbols) {
-                        valid_functions.push(f);
+                        top_level.push(TopLevel::Fun(f));
                     }
                 }
                 ast::Declaration::VarDecl(_) => {}
             };
         }
-        let top_level = valid_functions
-            .into_iter()
-            .map(TopLevel::Fun)
-            .chain(statics.into_iter().map(TopLevel::Static))
-            .collect::<Vec<TopLevel>>();
         Self { top_level, symbols }
     }
 }

@@ -320,16 +320,35 @@ fn addr_of(
                 val: dst,
             })
         }
-        ExprResult::DereferencedPointer(expr) => {
-            if let Val::Var(ref name) = expr.val
-                && let Some(ptr) = symbols.get_mut(name)
+        ExprResult::DereferencedPointer(Expr {
+            mut instructions,
+            val,
+        }) => {
+            if let Val::Var(ref name) = val
+                && let Some(ptr) = symbols.get(name)
             {
-                let dereferenced = ptr.r#type.clone().deref().maybe_decay();
-                ptr.r#type = dereferenced;
+                // Taking the address of a dereferenced pointer yields the
+                // pointer itself. If the pointee is an array it decays to a
+                // pointer-to-element; otherwise the result keeps the original
+                // pointer type.
+                let pointee = ptr.r#type.clone().deref();
+                let dereferenced = if pointee.is_array() {
+                    pointee.maybe_decay()
+                } else {
+                    ptr.r#type.clone()
+                };
+                let tmp = Function::make_tacky_temp_var(dereferenced, symbols, make_temp_var);
+                instructions.push(Instruction::Copy {
+                    src: val,
+                    dst: tmp.clone(),
+                });
+                ExprResult::PlainOperand(Expr {
+                    instructions,
+                    val: tmp,
+                })
             } else {
                 unreachable!("cannot have constant expression for dereferenced pointer.");
             }
-            ExprResult::PlainOperand(expr)
         }
     }
 }

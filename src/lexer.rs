@@ -40,6 +40,8 @@ pub enum ConstantFlag {
     Unsigned,
     UnsignedLong,
     Float,
+    Char,
+    String,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -141,7 +143,7 @@ impl std::fmt::Display for ConstantFlag {
             Self::Long => write!(f, "l"),
             Self::Unsigned => write!(f, "u"),
             Self::UnsignedLong => write!(f, "ul"),
-            Self::Float => write!(f, ""),
+            Self::Float | Self::Char | Self::String => write!(f, ""),
         }
     }
 }
@@ -243,8 +245,8 @@ impl std::fmt::Display for Token {
 
 impl Token {
     const IDENT: &'static str = r"^[a-zA-Z_]\w*\b";
-    const STRING: &'static str = r#""(?:[^"\\]|\\[\s\S])*""#;
-    const CHAR: &'static str = r"'[^'\\]|\\[\s\S]'";
+    const STRING: &'static str = r#""([^"\\\n]|\\['"?\\abfnrtv])*""#;
+    const CHAR: &'static str = r#"'([^'\\\n]|\\['"?\\abfnrtv])'"#;
     const FLOAT: &'static str =
         r"(([0-9]*\.[0-9]+|[0-9]+\.?)[Ee][+-]?[0-9]+|[0-9]*\.[0-9]+|[0-9]+\.)[^\w.]";
 
@@ -391,19 +393,27 @@ impl Token {
         if let Some((token, len)) = {
             match stream.chars().next() {
                 Some('\'') => Self::match_regex(stream, Self::CHAR).map_or(None, |s| {
+                    assert!(
+                        s.len() > 0,
+                        "Matched chars should always contain wrapping single quotes"
+                    );
                     Some((
                         Token::Constant {
-                            text: Rc::new(s.to_string()),
-                            flag: None,
+                            text: Rc::new(s[1..s.len() - 1].to_string()),
+                            flag: Some(ConstantFlag::Char),
                         },
                         s.len(),
                     ))
                 }),
                 Some('"') => Self::match_regex(stream, Self::STRING).map_or(None, |s| {
+                    assert!(
+                        s.len() > 0,
+                        "Matched string literals should always contain wrapping double quotes"
+                    );
                     Some((
                         Token::Constant {
-                            text: Rc::new(s.to_string()),
-                            flag: None,
+                            text: Rc::new(s[1..s.len() - 1].to_string()),
+                            flag: Some(ConstantFlag::String),
                         },
                         s.len(),
                     ))

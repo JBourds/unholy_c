@@ -3,8 +3,8 @@ use super::*;
 #[derive(Debug, PartialEq)]
 pub struct StaticVariable {
     pub identifier: Rc<String>,
-    pub external_linkage: bool,
-    pub init: Vec<Rc<[u8]>>,
+    pub global: bool,
+    pub init: Vec<StaticInit>,
 }
 
 impl StaticVariable {
@@ -20,17 +20,19 @@ impl StaticVariable {
             } => match initial_value {
                 sema::tc::InitialValue::Initial(i) => Some(StaticVariable {
                     identifier: name,
-                    external_linkage: *external_linkage,
-                    init: i.to_vec(),
+                    global: *external_linkage,
+                    init: i.clone(),
                 }),
                 sema::tc::InitialValue::Tentative => Some(StaticVariable {
                     identifier: name,
-                    external_linkage: *external_linkage,
-                    init: vec![vec![0; symbol.r#type.base.nbytes()].into()],
+                    global: *external_linkage,
+                    init: vec![StaticInit::Zero(symbol.r#type.base.nbytes())],
                 }),
                 sema::tc::InitialValue::None => None,
             },
             sema::tc::Attribute::Local => None,
+            // Constants are `StaticConstant` not variable
+            sema::tc::Attribute::Constant { .. } => None,
         }
     }
 }

@@ -12,7 +12,7 @@ pub mod x64 {
     use super::AsmGen;
     use crate::{
         codegen::{self, Operand},
-        tacky,
+        tacky::{self, StaticInit},
     };
     use anyhow::{Result, bail, ensure};
     use std::fmt::Write;
@@ -44,20 +44,17 @@ pub mod x64 {
         Ok(())
     }
 
-    fn gen_static_const(w: &mut impl Write, constant: codegen::StaticConstant) -> Result<()> {
+    fn gen_static_const(w: &mut impl Write, constant: tacky::StaticConstant) -> Result<()> {
         w.write_str("\t.section .rodata\n")?;
         w.write_fmt(format_args!("\t.align {}\n", constant.alignment))?;
         w.write_fmt(format_args!("\".L_{}\":\n", constant.id))?;
-        match constant.val {
-            codegen::FpNumber::F32(val) => w.write_fmt(format_args!("\t.long {}\n\n", val))?,
-            codegen::FpNumber::F64(val) => w.write_fmt(format_args!("\t.quad {}\n\n", val))?,
-        }
+        w.write_str(constant.val.asm_block().as_str())?;
         Ok(())
     }
 
     fn gen_static_var(
         w: &mut impl Write,
-        var: codegen::StaticVariable,
+        var: tacky::StaticVariable,
         symbols: &tacky::SymbolTable,
     ) -> Result<()> {
         let symbol = symbols.get(&var.identifier).unwrap();
@@ -68,7 +65,7 @@ pub mod x64 {
             !var.init.is_empty(),
             "all statics have some init after tacky?"
         );
-        let in_bss = var.init.iter().flat_map(|s| s.iter()).all(|x| *x == 0);
+        let in_bss = var.init.iter().all(|x| matches!(x, StaticInit::Zero(_)));
         if in_bss {
             w.write_fmt(format_args!("\t.bss\n"))?;
         } else {
@@ -80,15 +77,7 @@ pub mod x64 {
             w.write_fmt(format_args!("\t.zero {}\n", symbol.r#type.size_of()))?;
         } else {
             for init in &var.init {
-                // 16 is arbitrary, just mean to prevent super long files
-                for chunk in init.chunks(16) {
-                    let bytes = chunk
-                        .iter()
-                        .map(|b| format!("0x{b:02x}"))
-                        .collect::<Vec<_>>()
-                        .join(", ");
-                    writeln!(w, "\t.byte {}", bytes)?;
-                }
+                writeln!(w, "{}", init.asm_block())?;
             }
         }
         w.write_char('\n')?;
@@ -133,13 +122,27 @@ pub mod x64 {
             ) => Some(r#type.size_bytes()),
             _ => None,
         };
+        size.map(mem_suffix).unwrap_or_default()
+    }
+
+    fn mem_suffix(size: usize) -> &'static str {
         match size {
-            None => "",
-            Some(1) => "byte ptr ",
-            Some(2) => "word ptr ",
-            Some(4) => "dword ptr ",
-            Some(8) => "qword ptr ",
+            1 => "byte ptr ",
+            2 => "word ptr ",
+            4 => "dword ptr ",
+            8 => "qword ptr ",
             _ => unreachable!("Cannot have a destination size other than 1, 2, 4, or 8."),
+        }
+    }
+
+    /// Intel-syntax size specifier for a memory operand accessed at the given
+    /// assembly type.
+    fn mem_specifier(op: &Operand, r#type: &codegen::AssemblyType) -> &'static str {
+        match op {
+            Operand::Memory { .. } | Operand::Data { .. } | Operand::Indexed { .. } => {
+                mem_suffix(r#type.size_bytes())
+            }
+            _ => "",
         }
     }
 
@@ -161,11 +164,30 @@ pub mod x64 {
                     "\tcmov{cond_code}{suffix} {specifier}{dst}, {src}\n",
                 ))?;
             }
-            codegen::InstructionType::Movsx { src, dst } => {
-                w.write_fmt(format_args!(
-                    "\tmovslq {}{dst}, {src}\n",
-                    get_specifier(Some(&src), &dst)
-                ))?;
+            codegen::InstructionType::Movsx {
+                src,
+                dst,
+                src_t,
+                dst_t: _,
+            } => {
+                // `movsx` covers 8/16-bit sources; the 32->64 widening has its
+                // own mnemonic (`movsxd`) in Intel syntax.
+                let mnemonic = if src_t == codegen::AssemblyType::Longword {
+                    "movsxd"
+                } else {
+                    "movsx"
+                };
+                let specifier = mem_specifier(&src, &src_t);
+                w.write_fmt(format_args!("\t{mnemonic} {dst}, {specifier}{src}\n"))?;
+            }
+            codegen::InstructionType::MovZeroExtend {
+                src_t,
+                dst_t: _,
+                src,
+                dst,
+            } => {
+                let specifier = mem_specifier(&src, &src_t);
+                w.write_fmt(format_args!("\tmovzx {dst}, {specifier}{src}\n"))?;
             }
             codegen::InstructionType::Ret => {
                 w.write_str("\tmov rsp, rbp\n")?;
@@ -298,7 +320,6 @@ pub mod x64 {
                 let suffix = instr_suffix(codegen::AssemblyType::from(&dst));
                 w.write_fmt(format_args!("\tdiv{suffix} {specifier}{dst}, {src}\n"))?;
             }
-            codegen::InstructionType::MovZeroExtend { .. } => unreachable!(),
             codegen::InstructionType::Lea { src, dst } => {
                 w.write_fmt(format_args!("\tlea {dst}, {src}\n"))?;
             }

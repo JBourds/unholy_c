@@ -26,7 +26,8 @@ impl From<tacky::Program> for Program {
                     );
                     top_level.push(TopLevel::Fun(fun));
                 }
-                tacky::TopLevel::Static(s) => top_level.push(TopLevel::StaticVariable(s.into())),
+                tacky::TopLevel::StaticVariable(s) => top_level.push(TopLevel::StaticVariable(s)),
+                tacky::TopLevel::StaticConstant(c) => top_level.push(TopLevel::StaticConstant(c)),
             }
         }
         top_level.extend(

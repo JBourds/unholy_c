@@ -129,7 +129,7 @@ fn resolve_init(
         ast::Initializer::SingleInit(expr) => Ok(ast::Initializer::SingleInit(
             resolve_expr(*expr, ident_map)?.into(),
         )),
-        ast::Initializer::CompundInit(inits) => Ok(ast::Initializer::CompundInit(
+        ast::Initializer::CompoundInit(inits) => Ok(ast::Initializer::CompoundInit(
             inits
                 .into_iter()
                 .map(|i| resolve_init(i, ident_map))
@@ -435,5 +435,6 @@ fn resolve_expr(expr: ast::Expr, ident_map: &HashMap<Rc<String>, IdentEntry>) ->
             expr: resolve_expr(*expr, ident_map)?.into(),
             index: resolve_expr(*index, ident_map)?.into(),
         }),
+        expr @ ast::Expr::String { .. } => Ok(expr),
     }
 }

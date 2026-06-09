@@ -2,6 +2,8 @@ use super::*;
 #[derive(Debug, Default)]
 pub struct SymbolTable {
     pub table: HashMap<Rc<String>, SymbolEntry>,
+
+    string_pool: HashMap<Rc<String>, Rc<String>>,
 }
 
 #[derive(Clone, Debug)]
@@ -26,15 +28,21 @@ impl From<sema::tc::SymbolTable> for SymbolTable {
                     )
                 })
                 .collect(),
+            string_pool: value.string_pool,
         }
     }
 }
 
 impl SymbolTable {
+    pub fn get_string(&self, key: &Rc<String>) -> Option<&Rc<String>> {
+        self.string_pool.get(key)
+    }
+
     pub fn get(&self, key: &Rc<String>) -> Option<&SymbolEntry> {
         self.table.get(key)
     }
 
+    #[allow(dead_code)]
     pub fn get_mut(&mut self, key: &Rc<String>) -> Option<&mut SymbolEntry> {
         self.table.get_mut(key)
     }

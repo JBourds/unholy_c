@@ -1,3 +1,5 @@
+use crate::tacky;
+
 use super::*;
 
 pub(crate) fn parse_assignment(
@@ -22,24 +24,44 @@ fn parse_normal_assignment(
     make_temp_var: &mut impl FnMut() -> String,
 ) -> ExprResult {
     let lval = Expr::parse_with(lvalue, symbols, make_temp_var);
-    let rval = Expr::parse_with_and_convert(rvalue, symbols, make_temp_var);
     match lval {
         ExprResult::PlainOperand(Expr {
             mut instructions,
             val,
         }) => {
-            instructions.extend(rval.instructions);
+            let t = val.get_type(symbols);
+            match t.base {
+                ast::BaseType::Array { element, size }
+                    if matches!(rvalue, ast::Expr::String { .. })
+                        && element.is_char() =>
+                {
+                    let ast::Expr::String { value } = rvalue else {
+                        unreachable!()
+                    };
+                    let tacky::Val::Var(dst) = val.clone() else {
+                        unreachable!()
+                    };
+                    let instructions: Vec<_> =
+                        mov_chunker::MovChunker::new(value.as_bytes(), dst, size, 0).collect();
+                    ExprResult::PlainOperand(Expr { instructions, val })
+                }
+                _ => {
+                    let rval = Expr::parse_with_and_convert(rvalue.clone(), symbols, make_temp_var);
+                    instructions.extend(rval.instructions);
 
-            instructions.push(Instruction::Copy {
-                src: rval.val,
-                dst: val.clone(),
-            });
-            ExprResult::PlainOperand(Expr { instructions, val })
+                    instructions.push(Instruction::Copy {
+                        src: rval.val,
+                        dst: val.clone(),
+                    });
+                    ExprResult::PlainOperand(Expr { instructions, val })
+                }
+            }
         }
         ExprResult::DereferencedPointer(Expr {
             mut instructions,
             val,
         }) => {
+            let rval = Expr::parse_with_and_convert(rvalue.clone(), symbols, make_temp_var);
             instructions.extend(rval.instructions);
             instructions.push(Instruction::Store {
                 src: rval.val.clone(),
@@ -64,9 +86,15 @@ fn handle_upcast(
     make_temp_var: &mut impl FnMut() -> String,
 ) -> Expr {
     if matches!(op, ast::BinaryOp::LShift | ast::BinaryOp::RShift) {
-        Expr {
-            instructions: vec![],
-            val: val.clone(),
+        // Shifts don't convert the LHS to the RHS/common type, but the LHS
+        // still undergoes integer promotion (char -> int).
+        if val.get_type(symbols).is_char() {
+            Expr::cast(val.clone(), ast::Type::int(4, None), symbols, make_temp_var)
+        } else {
+            Expr {
+                instructions: vec![],
+                val: val.clone(),
+            }
         }
     } else {
         Expr::cast(val.clone(), arg_type, symbols, make_temp_var)

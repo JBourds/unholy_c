@@ -10,6 +10,10 @@ use crate::ast;
 use std::num::NonZeroUsize;
 use std::rc::Rc;
 
+fn is_scalar(t: &ast::Type) -> bool {
+    !(t.is_array() || t.is_function() || t.is_void())
+}
+
 pub fn typecheck_expr_and_convert(
     expr: &ast::Expr,
     symbols: &mut SymbolTable,
@@ -87,6 +91,12 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
                     )),
                 "Cannot perform a bitwise unary operation on a floating point value."
             );
+            if matches!(op, ast::UnaryOp::Not) {
+                ensure!(
+                    is_scalar(&r#type),
+                    "Cannot have a non-scalar controlling value."
+                );
+            }
             let operand_is_char = r#type.is_char();
             let r#type = match op {
                 ast::UnaryOp::AddrOf if expr.is_lvalue() => ast::Type {
@@ -393,6 +403,10 @@ fn typecheck_binary(
 
     // Logical operands are evaluated in a boolean context.
     if op.is_logical() {
+        ensure!(
+            is_scalar(&left_t) && is_scalar(&right_t),
+            "Cannot have a non-scalar controlling value."
+        );
         return Ok(TypedExpr {
             expr: ast::Expr::Binary {
                 op,

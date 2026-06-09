@@ -432,7 +432,9 @@ fn validate_pointer_comparison(
     right_t: &ast::Type,
 ) -> Result<()> {
     if left_t.is_pointer() && op.is_relational() {
-        if is_null_pointer_constant(left) || is_null_pointer_constant(right) {
+        if (is_null_pointer_constant(left) || is_null_pointer_constant(right))
+            || (left_t.is_void_pointer() ^ right_t.is_void_pointer())
+        {
             ensure!(
                 matches!(op, ast::BinaryOp::Equal | ast::BinaryOp::NotEqual),
                 format!(

@@ -416,6 +416,11 @@ impl Type {
         NonZeroUsize::new(core::mem::size_of::<usize>()).unwrap();
 
     pub const PTRDIFF_T: Self = Self::int(core::mem::size_of::<isize>(), Some(true));
+    pub const VOID: Self = Self {
+        base: BaseType::Void,
+        alignment: NonZeroUsize::new(1).unwrap(),
+        is_const: false,
+    };
 
     pub fn bool() -> Self {
         Self::int(core::mem::size_of::<i32>(), None)
@@ -447,12 +452,30 @@ impl Type {
         }
     }
 
+    pub fn pointer(to: Box<Self>) -> Self {
+        Self {
+            base: BaseType::Ptr {
+                to,
+                is_restrict: false,
+            },
+            alignment: Self::PTR_ALIGNMENT,
+            is_const: false,
+        }
+    }
     pub fn size_of(&self) -> usize {
         self.base.nbytes()
     }
 
     pub fn is_pointer(&self) -> bool {
         matches!(self.base, BaseType::Ptr { .. })
+    }
+
+    pub fn is_void_pointer(&self) -> bool {
+        if let BaseType::Ptr { to, .. } = &self.base {
+            to.base == BaseType::Void
+        } else {
+            false
+        }
     }
 
     pub fn is_arithmetic(&self) -> bool {

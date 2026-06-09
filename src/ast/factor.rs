@@ -2,7 +2,10 @@ use anyhow::{Context, Result, bail, ensure};
 use std::rc::Rc;
 
 use super::{AbstractDeclarator, Constant, Expr, TypeBuilder, UnaryOp};
-use crate::lexer::{ConstantFlag, Token};
+use crate::{
+    ast::token_stream::{eat_rbracket, eat_rparen},
+    lexer::{ConstantFlag, Token},
+};
 
 pub struct Factor;
 
@@ -11,10 +14,8 @@ impl Factor {
         match tokens {
             [Token::LBracket, tokens @ ..] => {
                 let (rhs, tokens) = Expr::parse(tokens, 0)?;
-                ensure!(
-                    tokens.first() == Some(&Token::RBracket),
-                    "ast.Factor.check_for_postfix(): subscript expression missing closing bracket"
-                );
+                let tokens = eat_rbracket(tokens)
+                    .context("check_for_postfix(): Missing \"]\" to close subscript expression")?;
                 Self::check_for_postfix(
                     Expr::Subscript {
                         expr: expr.into(),
@@ -141,16 +142,12 @@ impl Factor {
                     if let Ok((stream_offset, r#type, storage_class)) =
                         TypeBuilder::new(tokens).build_with_abstract_declarator()
                     {
-                        let tokens = &tokens[stream_offset..];
-                        ensure!(
-                            matches!(tokens.first(), Some(Token::RParen)),
-                            "Expected closing parentheses in type cast."
-                        );
                         ensure!(
                             storage_class.is_none(),
                             "Cannot have storage specifier in type cast."
                         );
-                        let tokens = &tokens[1..];
+                        let tokens = eat_rparen(&tokens[stream_offset..])
+                            .context("Expected \")\" to close type cast")?;
                         let (expr, tokens) = Factor::parse(tokens)
                             .context("Parsing grammer rule: \"(\" <exp> \")\" failed")?;
                         Self::check_for_call(

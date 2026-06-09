@@ -5,9 +5,13 @@ pub mod exprs;
 pub mod factor;
 pub mod operators;
 pub mod statements;
+mod token_stream;
 pub mod types;
 
-use crate::lexer::Token;
+use crate::{
+    ast::token_stream::{eat_rparen, eat_semi},
+    lexer::Token,
+};
 
 use anyhow::{Context, Result, bail, ensure};
 
@@ -94,12 +98,7 @@ impl RawParameterList {
                         remaining = tokens;
                     }
                 }
-                if remaining.first().is_none_or(|t| *t != Token::RParen) {
-                    bail!(
-                        "ast.ParameterList.consume(): Expected opening parentheses in parameter list."
-                    );
-                }
-                &remaining[1..]
+                eat_rparen(remaining).context("Expected \")\" to close function parameter list")?
             }
         };
         Ok((Self(signature), remaining))
@@ -265,11 +264,9 @@ impl ForInit {
                 _ => {
                     let (expr, tokens) = Expr::parse(tokens, 0)
                         .context("Expected decleration or expression but failed to parse both")?;
-                    if let Some(Token::Semi) = tokens.first() {
-                        Ok((ForInit::Expr(Some(expr)), &tokens[1..]))
-                    } else {
-                        bail!("Missing semicolon after init expression.")
-                    }
+                    let tokens = eat_semi(tokens)
+                        .context("Missing semicolon after for-loop init expression")?;
+                    Ok((ForInit::Expr(Some(expr)), tokens))
                 }
             },
         }

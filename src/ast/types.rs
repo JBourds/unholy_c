@@ -148,7 +148,8 @@ impl BaseType {
             BaseType::Array { element, size } => element.base.nbytes() * size,
             BaseType::Fun { .. } => unreachable!(),
             BaseType::Struct => unreachable!(),
-            BaseType::Void => unreachable!(),
+            // Sentinel value
+            BaseType::Void => 0,
         }
     }
 
@@ -161,7 +162,8 @@ impl BaseType {
             BaseType::Array { element, .. } => element.base.size_of_base_type(),
             BaseType::Fun { .. } => unreachable!(),
             BaseType::Struct => unreachable!(),
-            BaseType::Void => unreachable!(),
+            // Sentinel value
+            BaseType::Void => 0,
         }
     }
 

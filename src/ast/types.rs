@@ -472,6 +472,10 @@ impl Type {
         matches!(self.base, BaseType::Ptr { .. })
     }
 
+    pub fn is_void(&self) -> bool {
+        *self == Self::VOID
+    }
+
     pub fn is_void_pointer(&self) -> bool {
         if let BaseType::Ptr { to, .. } = &self.base {
             to.base == BaseType::Void

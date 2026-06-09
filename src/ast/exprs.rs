@@ -1,8 +1,8 @@
 use anyhow::{Context, Result, bail};
 use std::rc::Rc;
 
-use super::{BinaryOp, Constant, Factor, Type, UnaryOp};
-use crate::lexer::Token;
+use super::{BinaryOp, Constant, Type, UnaryOp};
+use crate::{ast::cast_expr::CastExpr, lexer::Token};
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum Expr {
@@ -81,7 +81,7 @@ impl Expr {
     }
 
     pub fn parse<'a>(tokens: &'a [Token], min_precedence: u32) -> Result<(Expr, &'a [Token])> {
-        let (mut left, mut tokens) = Factor::parse(tokens)?;
+        let (mut left, mut tokens) = CastExpr::parse(tokens)?;
         loop {
             let Some((operator, tokens_inner)) = BinaryOp::parse(tokens)? else {
                 break;

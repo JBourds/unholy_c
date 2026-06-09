@@ -207,9 +207,14 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
                     else_type.clone(),
                 )?
             } else {
-                let (then_base, _) =
-                    ast::BaseType::lift(then_type.base.clone(), else_type.base.clone())
-                        .context("Ternary expression branches evaluate to different types.")?;
+                let then_base = match (&then_type.base, &else_type.base) {
+                    (ast::BaseType::Void, ast::BaseType::Void) => ast::BaseType::Void,
+                    (then_base, else_base) => {
+                        ast::BaseType::lift(then_base.clone(), else_base.clone())
+                            .context("Ternary expression branches evaluate to different types.")?
+                            .1
+                    }
+                };
                 ast::Type {
                     base: then_base,
                     alignment: std::cmp::max(then_type.alignment, else_type.alignment),

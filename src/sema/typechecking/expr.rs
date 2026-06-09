@@ -360,6 +360,8 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
                 },
             })
         }
+        ast::Expr::SizeOf(_) => todo!(),
+        ast::Expr::SizeOfT(_) => todo!(),
     }
 }
 

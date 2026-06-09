@@ -4,7 +4,7 @@ use std::rc::Rc;
 use super::{BinaryOp, Constant, Factor, Type, UnaryOp};
 use crate::lexer::Token;
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum Expr {
     Var(Rc<String>),
     Assignment {
@@ -41,6 +41,8 @@ pub enum Expr {
     String {
         value: Rc<String>,
     },
+    SizeOf(Box<Expr>),
+    SizeOfT(Type),
 }
 
 impl Expr {

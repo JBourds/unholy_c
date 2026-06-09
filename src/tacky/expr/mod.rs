@@ -141,6 +141,8 @@ impl Expr {
             ast::Expr::Cast { .. } => parse_cast(node, symbols, make_temp_var),
             ast::Expr::Subscript { .. } => parse_subscript(node, symbols, make_temp_var),
             ast::Expr::String { .. } => parse_string(node, symbols),
+            ast::Expr::SizeOf(_) => todo!(),
+            ast::Expr::SizeOfT(_) => todo!(),
         }
     }
 

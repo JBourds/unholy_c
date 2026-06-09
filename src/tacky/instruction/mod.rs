@@ -1,4 +1,4 @@
-use crate::{ast::get_element_type, tacky::mov_chunker::MovChunker};
+use crate::tacky::mov_chunker::MovChunker;
 
 use super::*;
 

@@ -1,6 +1,6 @@
 use super::*;
 use crate::ast::get_element_type;
-use crate::{ast, sema, tacky};
+use crate::{ast, tacky};
 use std::collections::{HashMap, HashSet};
 use std::marker::PhantomData;
 use std::rc::Rc;

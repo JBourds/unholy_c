@@ -42,6 +42,7 @@ impl SymbolTable {
         self.table.get(key)
     }
 
+    #[allow(dead_code)]
     pub fn get_mut(&mut self, key: &Rc<String>) -> Option<&mut SymbolEntry> {
         self.table.get_mut(key)
     }

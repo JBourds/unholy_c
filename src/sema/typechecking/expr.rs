@@ -303,10 +303,14 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
             if target.is_float() && r#type.is_pointer() {
                 bail!("Cannot cast pointer to floating point number");
             }
-
-            if target.is_array() {
-                bail!("Cannot cast to array");
-            }
+            ensure!(
+                is_scalar(target) || target.is_void(),
+                "Can only cast to scalar and void types"
+            );
+            ensure!(
+                is_scalar(&r#type) || target.is_void(),
+                "Can only cast a non-scalar type to void"
+            );
 
             let expr = if *target != r#type {
                 expr.cast_to(target.clone())

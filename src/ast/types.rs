@@ -1,4 +1,4 @@
-use crate::{codegen::MAX_AGGREGATE_ALIGNMENT, lexer::Token};
+use crate::{ast::AbstractDeclarator, codegen::MAX_AGGREGATE_ALIGNMENT, lexer::Token};
 
 use anyhow::{Context, Result, bail};
 use std::num::NonZeroUsize;
@@ -523,7 +523,8 @@ impl std::fmt::Display for Type {
 }
 
 #[derive(Debug, Default, Clone, PartialEq)]
-pub struct TypeBuilder {
+pub struct TypeBuilder<'a> {
+    tokens: &'a [Token],
     stream_offset: usize,
     n_longs: usize,
     is_signed: Option<bool>,
@@ -534,13 +535,16 @@ pub struct TypeBuilder {
     base: Option<BaseType>,
 }
 
-impl TypeBuilder {
-    pub fn new() -> Self {
-        Self::default()
+impl<'a> TypeBuilder<'a> {
+    pub fn new(tokens: &'a [Token]) -> Self {
+        Self {
+            tokens,
+            ..Default::default()
+        }
     }
 
-    pub fn get_base(mut self, tokens: &[Token]) -> Result<Self> {
-        let mut remaining = tokens;
+    fn get_base(&mut self) -> Result<&mut Self> {
+        let mut remaining = self.tokens;
         while let Some(t) = remaining.first() {
             if self.check_for_specifier(t)? || self.check_for_storage(t)? || self.check_for_const(t)
             {
@@ -592,12 +596,12 @@ impl TypeBuilder {
             }
         }
 
-        self.stream_offset = tokens.len() - remaining.len();
+        self.stream_offset = self.tokens.len() - remaining.len();
 
         Ok(self)
     }
 
-    fn check_for_base_type<'a>(&mut self, tokens: &'a [Token]) -> Result<(bool, &'a [Token])> {
+    fn check_for_base_type(&mut self, tokens: &'a [Token]) -> Result<(bool, &'a [Token])> {
         if let Ok((r#type, tokens)) = BaseType::consume(tokens) {
             if self.base.is_some() {
                 bail!("Error: Found two conflicting types.");
@@ -675,24 +679,39 @@ impl TypeBuilder {
         }
     }
 
-    pub fn into_type(self) -> Result<(usize, Type, Option<StorageClass>)> {
-        if let Some(base) = self.base {
+    fn _into_type(&mut self) -> Result<Type> {
+        if let Some(base) = self.base.take() {
             let alignment = self.alignment.unwrap_or(base.default_alignment());
             if !alignment.is_power_of_two() {
                 bail!("Alignment must be a power of 2");
             }
 
-            Ok((
-                self.stream_offset,
-                Type {
-                    base,
-                    alignment,
-                    is_const: self.is_const,
-                },
-                self.storage,
-            ))
+            Ok(Type {
+                base,
+                alignment,
+                is_const: self.is_const,
+            })
         } else {
             bail!("Type builder has not parsed a base type yet");
         }
+    }
+    pub fn build(mut self) -> Result<(usize, Type, Option<StorageClass>)> {
+        self.get_base()?
+            ._into_type()
+            .map(|ty| (self.stream_offset, ty, self.storage))
+    }
+
+    /// Build the current type then parse for an optional abstract declarator
+    /// after it.
+    pub fn build_with_abstract_declarator(mut self) -> Result<(usize, Type, Option<StorageClass>)> {
+        let ty = self.get_base()?._into_type()?;
+        let tokens = &self.tokens[self.stream_offset..];
+        let (ty, new_tokens) = if let Ok((decl, tokens)) = AbstractDeclarator::consume(tokens) {
+            (AbstractDeclarator::process(decl, ty)?, tokens)
+        } else {
+            (ty, tokens)
+        };
+        self.stream_offset += tokens.len() - new_tokens.len();
+        Ok((self.stream_offset, ty, self.storage))
     }
 }

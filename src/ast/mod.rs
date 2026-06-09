@@ -77,9 +77,8 @@ impl RawParameterList {
                 let mut keep_going = true;
                 let mut remaining = tokens;
                 while keep_going {
-                    let (stream_offset, r#type, storage) = TypeBuilder::new()
-                        .get_base(remaining)
-                        .and_then(|b| b.into_type())
+                    let (stream_offset, r#type, storage) = TypeBuilder::new(remaining)
+                        .build()
                         .context("Error building base type from token stream.")?;
                     ensure!(
                         storage.is_none(),

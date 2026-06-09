@@ -138,18 +138,10 @@ impl Factor {
                 }
                 // Could be parentheses for a type cast or expression precedence
                 [Token::LParen, tokens @ ..] => {
-                    if let Ok((stream_offset, r#type, storage_class)) = TypeBuilder::new()
-                        .get_base(tokens)
-                        .and_then(|b| b.into_type())
+                    if let Ok((stream_offset, r#type, storage_class)) =
+                        TypeBuilder::new(tokens).build_with_abstract_declarator()
                     {
                         let tokens = &tokens[stream_offset..];
-                        let (r#type, tokens) =
-                            if let Ok((decl, tokens)) = AbstractDeclarator::consume(tokens) {
-                                (AbstractDeclarator::process(decl, r#type)?, tokens)
-                            } else {
-                                (r#type, tokens)
-                            };
-
                         ensure!(
                             matches!(tokens.first(), Some(Token::RParen)),
                             "Expected closing parentheses in type cast."

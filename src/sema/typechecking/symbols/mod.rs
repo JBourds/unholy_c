@@ -3,7 +3,7 @@ use crate::tacky::StaticInit;
 
 use super::Attribute;
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result, bail, ensure};
 
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -357,6 +357,7 @@ impl SymbolTable {
             for (r#type, name) in decl.signature()
                 .context("sema.typechecking.declare_fun(): Error getting function declaration in signature.")?
                 .into_iter() {
+                ensure!(r#type != ast::Type::VOID, "Cannot have void function argument");
                 if let Some(name) = name {
                     let param_decl = ast::Declaration::VarDecl(ast::VarDecl {
                         name: Rc::clone(name),

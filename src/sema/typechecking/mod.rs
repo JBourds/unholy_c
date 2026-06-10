@@ -164,3 +164,35 @@ fn maybe_decay_expr(texpr: TypedExpr) -> TypedExpr {
         TypedExpr { expr, r#type }
     }
 }
+
+pub(super) fn validate_type_specifier(ty: &ast::Type) -> Result<()> {
+    match ty {
+        ast::Type {
+            base: ast::BaseType::Array { element, .. },
+            ..
+        } => {
+            ensure!(
+                element.is_complete(),
+                "Cannot have array of incomplete elements"
+            );
+            validate_type_specifier(element)?;
+        }
+        ast::Type {
+            base: ast::BaseType::Ptr { to, .. },
+            ..
+        } => {
+            validate_type_specifier(to)?;
+        }
+        ast::Type {
+            base: ast::BaseType::Fun { ret_t, param_types },
+            ..
+        } => {
+            validate_type_specifier(ret_t)?;
+            for ty in param_types.iter() {
+                validate_type_specifier(ty)?;
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}

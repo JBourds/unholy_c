@@ -1,5 +1,6 @@
 use super::{Attribute, InitialValue, Scope, SymbolTable, typecheck_init};
 use crate::ast::StorageClass;
+use crate::sema::typechecking::validate_type_specifier;
 use crate::{ast, sema::typechecking::init::pad_compound_init};
 
 use anyhow::{Context, Result, ensure};
@@ -17,6 +18,7 @@ pub fn typecheck_global_var_decl(
 
 pub fn typecheck_var_decl(decl: ast::VarDecl, symbols: &mut SymbolTable) -> Result<ast::VarDecl> {
     let target = &decl.r#type;
+    validate_type_specifier(target).context("Invalid type in variable declaration")?;
     let entry = symbols.declare_var(&decl).context(format!(
         "Failed to typecheck local variable declaration: for {}",
         decl.name

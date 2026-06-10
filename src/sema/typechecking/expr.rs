@@ -317,7 +317,10 @@ fn typecheck_unary(
         _ => typecheck_expr_and_convert(expr, symbols),
     }
     .context("Failed to typecheck nested unary expression.")?;
-
+    ensure!(
+        !r#type.is_void(),
+        "Cannot perform unary operation on void type."
+    );
     ensure!(
         !(op.is_bitwise()
             && matches!(

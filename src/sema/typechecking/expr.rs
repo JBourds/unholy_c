@@ -583,14 +583,14 @@ fn try_pointer_binary(
         }));
     }
     if matches!(op, ast::BinaryOp::Subtract | ast::BinaryOp::SubAssign)
-        && !left_t.is_pointer_to_complete()
-        && right_t.is_pointer_to_complete()
+        && !left_t.is_pointer()
+        && right_t.is_pointer()
     {
         bail!("Cannot subtract pointer from non pointer type")
     }
     if matches!(op, ast::BinaryOp::Add | ast::BinaryOp::AddAssign)
-        && left_t.is_pointer_to_complete()
-        && right_t.is_pointer_to_complete()
+        && left_t.is_pointer()
+        && right_t.is_pointer()
     {
         bail!("cannot add two pointers together")
     }

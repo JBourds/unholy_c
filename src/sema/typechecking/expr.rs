@@ -482,22 +482,26 @@ fn validate_pointer_comparison(
     right: &ast::Expr,
     right_t: &ast::Type,
 ) -> Result<()> {
-    if left_t.is_pointer() && op.is_relational() {
-        if (is_null_pointer_constant(left) || is_null_pointer_constant(right))
-            || (left_t.is_void_pointer() ^ right_t.is_void_pointer())
-        {
+    if op.is_relational() {
+        // Can only compare mismatched pointer types with == or !=
+        if left_t.is_pointer() && right_t.is_pointer() && left_t != right_t {
             ensure!(
-                matches!(op, ast::BinaryOp::Equal | ast::BinaryOp::NotEqual),
-                format!(
-                    "Error in \"{op:#?}\" comparison: lefthand side with type {left_t:#?} and righthand side with type {right_t:#?}. Expressions: \nLeft: {left:#?}\nRight: {right:#?}"
-                )
+                op.checks_equality(),
+                "Can only perform == and != when pointer types do not match"
             );
-        } else {
+        }
+
+        // Can do any relational op if we have a null pointer constant
+        if left_t.is_pointer() && !right_t.is_pointer() {
             ensure!(
-                left_t == right_t,
-                format!(
-                    "Error in \"{op:#?}\" comparison: lefthand side with type {left_t:#?} and righthand side with type {right_t:#?}. Expressions: \nLeft: {left:#?}\nRight: {right:#?}"
-                )
+                is_null_pointer_constant(right),
+                "RHS expression must be null pointer constant if it's not a pointer"
+            );
+        }
+        if right_t.is_pointer() && !left_t.is_pointer() {
+            ensure!(
+                is_null_pointer_constant(left),
+                "LHS expression must be null pointer constant if it's not a pointer"
             );
         }
     }
@@ -596,13 +600,6 @@ fn try_pointer_binary(
     {
         bail!("cannot add two pointers together")
     }
-    // All pointer expressions should have been taken care of- if we hit this
-    // branch then we are trying to do an operation with a void* which should
-    // be rejected
-    ensure!(
-        !(left_t.is_pointer() || right_t.is_pointer()) || op.checks_equality(),
-        format!("Cannot do operation {op:?} on void pointer")
-    );
 
     Ok(None)
 }

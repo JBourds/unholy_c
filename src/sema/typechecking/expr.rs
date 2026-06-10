@@ -6,6 +6,7 @@ use super::{
 use anyhow::{Context, Result, bail, ensure};
 
 use crate::ast;
+use crate::sema::typechecking::validate_type_specifier;
 
 use std::num::NonZeroUsize;
 use std::rc::Rc;
@@ -290,15 +291,24 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
         }
         ast::Expr::SizeOf(expr) => {
             let TypedExpr { expr: _, r#type } = typecheck_expr(expr, symbols)?;
+            validate_type_specifier(&r#type).context("Invalid expression to get the size of")?;
+            ensure!(
+                r#type.is_complete(),
+                "Cannot get size of an incomplete type"
+            );
             Ok(TypedExpr {
                 expr: ast::Expr::SizeOfT(r#type),
                 r#type: ast::Type::USIZE,
             })
         }
-        expr @ ast::Expr::SizeOfT(_) => Ok(TypedExpr {
-            expr: expr.clone(),
-            r#type: ast::Type::USIZE,
-        }),
+        ast::Expr::SizeOfT(ty) => {
+            validate_type_specifier(ty).context("Invalid expression to get the size of")?;
+            ensure!(ty.is_complete(), "Cannot get size of an incomplete type");
+            Ok(TypedExpr {
+                expr: ast::Expr::SizeOfT(ty.clone()),
+                r#type: ast::Type::USIZE,
+            })
+        }
     }
 }
 

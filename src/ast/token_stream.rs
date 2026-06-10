@@ -18,15 +18,6 @@ pub(super) fn semi_terminated_expr(stream: &[Token]) -> Result<(Expr, &[Token])>
 pub(super) fn eat_rbracket(stream: &[Token]) -> Result<&[Token]> {
     eat_tok(stream, Token::RBracket)
 }
-pub(super) fn eat_lbracket(stream: &[Token]) -> Result<&[Token]> {
-    eat_tok(stream, Token::LBracket)
-}
-pub(super) fn eat_rsquirly(stream: &[Token]) -> Result<&[Token]> {
-    eat_tok(stream, Token::RSquirly)
-}
-pub(super) fn eat_lsquirly(stream: &[Token]) -> Result<&[Token]> {
-    eat_tok(stream, Token::LSquirly)
-}
 
 pub(super) fn eat_rparen(stream: &[Token]) -> Result<&[Token]> {
     eat_tok(stream, Token::RParen)

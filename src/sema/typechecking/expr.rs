@@ -594,6 +594,13 @@ fn try_pointer_binary(
     {
         bail!("cannot add two pointers together")
     }
+    // All pointer expressions should have been taken care of- if we hit this
+    // branch then we are trying to do an operation with a void* which should
+    // be rejected
+    ensure!(
+        !(left_t.is_pointer() || right_t.is_pointer()) || op.checks_equality(),
+        format!("Cannot do operation {op:?} on void pointer")
+    );
 
     Ok(None)
 }

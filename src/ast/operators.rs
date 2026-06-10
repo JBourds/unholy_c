@@ -54,6 +54,10 @@ impl BinaryOp {
         )
     }
 
+    pub fn checks_equality(&self) -> bool {
+        matches!(self, Self::Equal | Self::NotEqual)
+    }
+
     pub fn is_add(&self) -> bool {
         matches!(*self, Self::Add | Self::AddAssign)
     }
@@ -245,7 +249,6 @@ impl UnaryOp {
             UnaryOp::PreInc | UnaryOp::PreDec | UnaryOp::PostInc | UnaryOp::PostDec
         )
     }
-
     pub fn is_valid_for(&self, expr: &Expr) -> bool {
         !matches!(
             self,

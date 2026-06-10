@@ -500,14 +500,14 @@ fn validate_pointer_comparison(
         // Can do any relational op if we have a null pointer constant
         if left_t.is_pointer() && !right_t.is_pointer() {
             ensure!(
-                is_null_pointer_constant(right),
-                "RHS expression must be null pointer constant if it's not a pointer"
+                op.checks_equality() && is_null_pointer_constant(right),
+                "Can only perform == and != when intermixing pointer and null-pointer constant"
             );
         }
         if right_t.is_pointer() && !left_t.is_pointer() {
             ensure!(
-                is_null_pointer_constant(left),
-                "LHS expression must be null pointer constant if it's not a pointer"
+                op.checks_equality() && is_null_pointer_constant(left),
+                "Can only perform == and != when intermixing pointer and null-pointer constant"
             );
         }
     }

@@ -96,6 +96,10 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
                 r#type: condition_type,
             } = typecheck_expr_and_convert(condition, symbols)
                 .context("Failed to typecheck ternary expression then branch.")?;
+            ensure!(
+                condition_type.is_scalar(),
+                "Condition for ternary expression must be scalar."
+            );
 
             let TypedExpr {
                 expr: then_expr,

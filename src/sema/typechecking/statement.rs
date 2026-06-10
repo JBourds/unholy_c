@@ -65,8 +65,11 @@ pub fn typecheck_stmt(
             r#else,
         } => {
             let condition = typecheck_expr_and_convert(&condition, symbols)
-                .context("Failed to typecheck if block condition.")?
-                .expr;
+                .context("Failed to typecheck if block condition.")?;
+            ensure!(
+                condition.r#type.is_scalar(),
+                "If condition expression must be scalar"
+            );
             let then = typecheck_stmt(*then, symbols, function.clone())
                 .context("Failed to typecheck if branch of conditional.")?;
             let r#else = if let Some(r#else) = r#else {
@@ -78,7 +81,7 @@ pub fn typecheck_stmt(
                 None
             };
             Ok(ast::Stmt::If {
-                condition,
+                condition: condition.expr,
                 then: Box::new(then),
                 r#else: r#else.map(Box::new),
             })
@@ -89,13 +92,16 @@ pub fn typecheck_stmt(
             label,
         } => {
             let condition = typecheck_expr_and_convert(&condition, symbols)
-                .context("Failed to typecheck for loop condition.")?
-                .expr;
+                .context("Failed to typecheck if block condition.")?;
+            ensure!(
+                condition.r#type.is_scalar(),
+                "While condition expression must be scalar"
+            );
             let body = typecheck_stmt(*body, symbols, function)
                 .context("Failed to typecheck for loop body.")?;
             Ok(ast::Stmt::While {
                 body: Box::new(body),
-                condition,
+                condition: condition.expr,
                 label,
             })
         }
@@ -105,13 +111,16 @@ pub fn typecheck_stmt(
             label,
         } => {
             let condition = typecheck_expr_and_convert(&condition, symbols)
-                .context("Failed to typecheck for loop condition.")?
-                .expr;
+                .context("Failed to typecheck for loop condition.")?;
+            ensure!(
+                condition.r#type.is_scalar(),
+                "Do-While condition expression must be scalar"
+            );
             let body = typecheck_stmt(*body, symbols, function)
                 .context("Failed to typecheck for loop body.")?;
             Ok(ast::Stmt::DoWhile {
                 body: Box::new(body),
-                condition,
+                condition: condition.expr,
                 label,
             })
         }
@@ -152,11 +161,13 @@ pub fn typecheck_stmt(
                 None
             };
             let condition = if let Some(condition) = condition {
-                Some(
-                    typecheck_expr_and_convert(&condition, symbols)
-                        .context("Failed to typecheck for loop condition.")?
-                        .expr,
-                )
+                let condition = typecheck_expr_and_convert(&condition, symbols)
+                    .context("Failed to typecheck for loop condition.")?;
+                ensure!(
+                    condition.r#type.is_scalar(),
+                    "For-Loop condition expression must be scalar"
+                );
+                Some(condition.expr)
             } else {
                 None
             };
@@ -194,6 +205,10 @@ pub fn typecheck_stmt(
                 r#type: condition_type,
             } = typecheck_expr_and_convert(&condition, symbols)
                 .context("Failed to typecheck switch expression.")?;
+            ensure!(
+                condition_type.is_scalar(),
+                "Switch statement condition must be scalar"
+            );
 
             if condition_type.is_function() || condition_type.is_pointer() {
                 bail!("Cannot switch on {condition:#?} as it has type {condition_type:#?}");

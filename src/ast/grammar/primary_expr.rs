@@ -54,8 +54,8 @@ impl PrimaryExpr {
                 let (lit, tokens) = Constant::consume(tokens)?;
                 Ok((Expr::Constant(lit), tokens))
             }
-            // <identifier> + <identifier> "(" [ <argument-list> ] ")"
-            [Token::Ident(s), tokens @ ..] => Self::check_for_call(Expr::Var(Rc::clone(s)), tokens),
+            // <identifier> (a following call is handled as a postfix op)
+            [Token::Ident(s), tokens @ ..] => Ok((Expr::Var(Rc::clone(s)), tokens)),
             // "(" <exp> ")"
             [Token::LParen, tokens @ ..] => {
                 let (expr, tokens) = Expr::parse(tokens, 0)

@@ -26,6 +26,12 @@ impl PostfixExpr {
                     tokens,
                 )
             }
+            // A call binds as a postfix op, so it applies to any named operand,
+            // including a parenthesized one like "(foo)(args)".
+            [Token::LParen, ..] if matches!(expr, Expr::Var(_)) => {
+                let (expr, tokens) = PrimaryExpr::check_for_call(expr, tokens)?;
+                Self::check_for_postfix(expr, tokens)
+            }
             _ => match UnaryOp::consume_postfix(tokens) {
                 Ok((op, tokens)) => Self::check_for_postfix(
                     Expr::Unary {

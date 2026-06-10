@@ -137,8 +137,8 @@ impl Stmt {
                 } else {
                     (None, tokens)
                 };
-                let tokens = eat_rparen(tokens)
-                    .context("Expected \")\" to close for-loop clauses")?;
+                let tokens =
+                    eat_rparen(tokens).context("Expected \")\" to close for-loop clauses")?;
                 let (body, tokens) =
                     Stmt::consume(tokens).context("Failed to parse for-loop body")?;
 
@@ -211,8 +211,8 @@ impl Stmt {
             [Token::If, Token::LParen, tokens @ ..] => {
                 let (condition, tokens) = Expr::parse(tokens, 0)
                     .context("Failed to parse expression for if statement conditional")?;
-                let tokens =
-                    eat_rparen(tokens).context("Expected \")\" to close if statement conditional")?;
+                let tokens = eat_rparen(tokens)
+                    .context("Expected \")\" to close if statement conditional")?;
                 let (then, tokens) =
                     Stmt::consume(tokens).context("Failed to parse then branch")?;
 

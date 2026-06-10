@@ -139,7 +139,7 @@ impl Declaration {
     }
 
     pub fn consume(tokens: &[Token]) -> Result<(Self, &[Token])> {
-        let (stream_offset, base, storage_class) = TypeBuilder::new(&tokens)
+        let (stream_offset, base, storage_class) = TypeBuilder::new(tokens)
             .build()
             .context("Error building base type from token stream.")?;
         let (declarator, tokens) = Declarator::consume(&tokens[stream_offset..])

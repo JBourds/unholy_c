@@ -139,11 +139,11 @@ impl BlockItem {
             return Ok((Self::Stmt(stmt), tokens));
         }
 
-        return Err(decl_consume
+        Err(decl_consume
             .context(stmt_consume.err().unwrap())
             .context("Unable to parse a valid block item")
             .err()
-            .unwrap());
+            .unwrap())
     }
 }
 

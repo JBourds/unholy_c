@@ -62,103 +62,7 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
                 r#type: left_t,
             })
         }
-        ast::Expr::Unary { op, expr } => {
-            let TypedExpr { expr, r#type } = match op {
-                // Don't lvalue convert in these cases
-                ast::UnaryOp::AddrOf
-                | ast::UnaryOp::PreInc
-                | ast::UnaryOp::PostInc
-                | ast::UnaryOp::PreDec
-                | ast::UnaryOp::PostDec => typecheck_expr(expr, symbols),
-                _ => typecheck_expr_and_convert(expr, symbols),
-            }
-            .context("Failed to typecheck nested unary expression.")?;
-
-            ensure!(
-                !(op.is_bitwise()
-                    && matches!(
-                        r#type,
-                        ast::Type {
-                            base: ast::BaseType::Float(_)
-                                | ast::BaseType::Double(_)
-                                | ast::BaseType::Ptr { .. },
-                            ..
-                        }
-                    )),
-                "Cannot perform a bitwise unary operation on a floating point value."
-            );
-            if matches!(op, ast::UnaryOp::Not) {
-                ensure!(
-                    r#type.is_scalar(),
-                    "Cannot have a non-scalar controlling value."
-                );
-            }
-            let operand_is_char = r#type.is_char();
-            let r#type = match op {
-                ast::UnaryOp::AddrOf if expr.is_lvalue() => ast::Type {
-                    base: ast::BaseType::Ptr {
-                        to: Box::new(r#type),
-                        is_restrict: false,
-                    },
-                    alignment: NonZeroUsize::new(core::mem::size_of::<usize>()).unwrap(),
-                    is_const: false,
-                },
-                ast::UnaryOp::AddrOf => bail!("Cannot take the address of a non-lvalue"),
-                ast::UnaryOp::Deref => {
-                    ensure!(
-                        r#type.is_pointer_to_complete(),
-                        "Cannot dereference pointer to incomplete (void) type"
-                    );
-                    r#type.deref()
-                }
-                ast::UnaryOp::Negate => {
-                    if r#type.is_pointer() {
-                        bail!("Cannot apply unary negate operation to pointer.")
-                    } else if r#type.is_char() {
-                        ast::Type::int(4, None)
-                    } else {
-                        r#type
-                    }
-                }
-                ast::UnaryOp::Complement => {
-                    if r#type.is_pointer() {
-                        bail!("Cannot apply unary complement operation to pointer.")
-                    } else if r#type.is_char() {
-                        ast::Type::int(4, None)
-                    } else {
-                        r#type
-                    }
-                }
-                op @ ast::UnaryOp::PostInc
-                | op @ ast::UnaryOp::PostDec
-                | op @ ast::UnaryOp::PreInc
-                | op @ ast::UnaryOp::PreDec => {
-                    if !expr.is_modifiable_lvalue(&r#type) {
-                        bail!("Cannot apply unary {op:?} to non-lvalues");
-                    }
-                    r#type
-                }
-                ast::UnaryOp::Not => ast::Type::bool(),
-            };
-            // Integer-promote a char operand for negate/complement so the
-            // operation actually runs at int width (the result type was already
-            // widened above); otherwise it computes in char width and is only
-            // correct when something later re-promotes it.
-            let expr = if operand_is_char
-                && matches!(op, ast::UnaryOp::Negate | ast::UnaryOp::Complement)
-            {
-                expr.cast_to(ast::Type::int(4, None))
-            } else {
-                expr
-            };
-            Ok(TypedExpr {
-                expr: ast::Expr::Unary {
-                    op: *op,
-                    expr: Box::new(expr),
-                },
-                r#type,
-            })
-        }
+        ast::Expr::Unary { op, expr } => typecheck_unary(*op, expr, symbols),
         ast::Expr::Binary { op, left, right } => {
             let TypedExpr {
                 expr: left,
@@ -398,6 +302,106 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
     }
 }
 
+fn typecheck_unary(
+    op: ast::UnaryOp,
+    expr: &ast::Expr,
+    symbols: &mut SymbolTable,
+) -> Result<TypedExpr> {
+    let TypedExpr { expr, r#type } = match op {
+        // Don't lvalue convert in these cases
+        ast::UnaryOp::AddrOf
+        | ast::UnaryOp::PreInc
+        | ast::UnaryOp::PostInc
+        | ast::UnaryOp::PreDec
+        | ast::UnaryOp::PostDec => typecheck_expr(expr, symbols),
+        _ => typecheck_expr_and_convert(expr, symbols),
+    }
+    .context("Failed to typecheck nested unary expression.")?;
+
+    ensure!(
+        !(op.is_bitwise()
+            && matches!(
+                r#type,
+                ast::Type {
+                    base: ast::BaseType::Float(_)
+                        | ast::BaseType::Double(_)
+                        | ast::BaseType::Ptr { .. },
+                    ..
+                }
+            )),
+        "Cannot perform a bitwise unary operation on a floating point value."
+    );
+    if matches!(op, ast::UnaryOp::Not) {
+        ensure!(
+            r#type.is_scalar(),
+            "Cannot have a non-scalar controlling value."
+        );
+    }
+    let operand_is_char = r#type.is_char();
+    let r#type = match op {
+        ast::UnaryOp::AddrOf if expr.is_lvalue() => ast::Type {
+            base: ast::BaseType::Ptr {
+                to: Box::new(r#type),
+                is_restrict: false,
+            },
+            alignment: NonZeroUsize::new(core::mem::size_of::<usize>()).unwrap(),
+            is_const: false,
+        },
+        ast::UnaryOp::AddrOf => bail!("Cannot take the address of a non-lvalue"),
+        ast::UnaryOp::Deref => {
+            ensure!(
+                r#type.is_pointer_to_complete(),
+                "Cannot dereference pointer to incomplete (void) type"
+            );
+            r#type.deref()
+        }
+        ast::UnaryOp::Negate => {
+            if r#type.is_pointer() {
+                bail!("Cannot apply unary negate operation to pointer.")
+            } else if r#type.is_char() {
+                ast::Type::int(4, None)
+            } else {
+                r#type
+            }
+        }
+        ast::UnaryOp::Complement => {
+            if r#type.is_pointer() {
+                bail!("Cannot apply unary complement operation to pointer.")
+            } else if r#type.is_char() {
+                ast::Type::int(4, None)
+            } else {
+                r#type
+            }
+        }
+        op @ ast::UnaryOp::PostInc
+        | op @ ast::UnaryOp::PostDec
+        | op @ ast::UnaryOp::PreInc
+        | op @ ast::UnaryOp::PreDec => {
+            if !expr.is_modifiable_lvalue(&r#type) {
+                bail!("Cannot apply unary {op:?} to non-lvalues");
+            }
+            r#type
+        }
+        ast::UnaryOp::Not => ast::Type::bool(),
+    };
+    // Integer-promote a char operand for negate/complement so the
+    // operation actually runs at int width (the result type was already
+    // widened above); otherwise it computes in char width and is only
+    // correct when something later re-promotes it.
+    let expr = if operand_is_char && matches!(op, ast::UnaryOp::Negate | ast::UnaryOp::Complement) {
+        expr.cast_to(ast::Type::int(4, None))
+    } else {
+        expr
+    };
+    Ok(TypedExpr {
+        expr: ast::Expr::Unary {
+            op,
+            expr: Box::new(expr),
+        },
+        r#type,
+    })
+}
+
 /// Typecheck a binary expression whose operands have already been checked.
 /// Dispatches to the rule that applies: logical, pointer arithmetic/comparison,
 /// shift, or ordinary arithmetic.
@@ -429,6 +433,11 @@ fn typecheck_binary(
     if let Some(result) = try_pointer_binary(op, &left, &left_t, &right, &right_t)? {
         return Ok(result);
     }
+
+    ensure!(
+        left_t.is_complete() && right_t.is_complete(),
+        "LHS and RHS arguments must either be pointers or arithmetic types. Cannot be incomplete (void) types."
+    );
 
     let common_t = compute_common_type(op, &left, &left_t, &right, &right_t)?;
 

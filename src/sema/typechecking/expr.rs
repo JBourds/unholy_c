@@ -10,10 +10,6 @@ use crate::ast;
 use std::num::NonZeroUsize;
 use std::rc::Rc;
 
-fn is_scalar(t: &ast::Type) -> bool {
-    !(t.is_array() || t.is_function() || t.is_void())
-}
-
 pub fn typecheck_expr_and_convert(
     expr: &ast::Expr,
     symbols: &mut SymbolTable,
@@ -93,7 +89,7 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
             );
             if matches!(op, ast::UnaryOp::Not) {
                 ensure!(
-                    is_scalar(&r#type),
+                    r#type.is_scalar(),
                     "Cannot have a non-scalar controlling value."
                 );
             }
@@ -304,11 +300,11 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
                 bail!("Cannot cast pointer to floating point number");
             }
             ensure!(
-                is_scalar(target) || target.is_void(),
+                target.is_scalar() || target.is_void(),
                 "Can only cast to scalar and void types"
             );
             ensure!(
-                is_scalar(&r#type) || target.is_void(),
+                r#type.is_scalar() || target.is_void(),
                 "Can only cast a non-scalar type to void"
             );
 
@@ -408,7 +404,7 @@ fn typecheck_binary(
     // Logical operands are evaluated in a boolean context.
     if op.is_logical() {
         ensure!(
-            is_scalar(&left_t) && is_scalar(&right_t),
+            left_t.is_scalar() && right_t.is_scalar(),
             "Cannot have a non-scalar controlling value."
         );
         return Ok(TypedExpr {

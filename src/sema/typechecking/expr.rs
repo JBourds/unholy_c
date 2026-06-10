@@ -437,8 +437,6 @@ fn typecheck_binary(
     right: ast::Expr,
     right_t: ast::Type,
 ) -> Result<TypedExpr> {
-    validate_pointer_comparison(op, &left, &left_t, &right, &right_t)?;
-
     // Logical operands are evaluated in a boolean context.
     if op.is_logical() {
         ensure!(
@@ -455,6 +453,7 @@ fn typecheck_binary(
         });
     }
 
+    validate_pointer_comparison(op, &left, &left_t, &right, &right_t)?;
     if let Some(result) = try_pointer_binary(op, &left, &left_t, &right, &right_t)? {
         return Ok(result);
     }
@@ -594,6 +593,7 @@ fn try_pointer_binary(
             r#type: ast::Type::bool(),
         }));
     }
+
     if matches!(op, ast::BinaryOp::Subtract | ast::BinaryOp::SubAssign)
         && !left_t.is_pointer()
         && right_t.is_pointer()

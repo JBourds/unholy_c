@@ -401,6 +401,10 @@ fn typecheck_unary(
             if !expr.is_modifiable_lvalue(&r#type) {
                 bail!("Cannot apply unary {op:?} to non-lvalues");
             }
+            ensure!(
+                r#type.is_integer() || r#type.is_float() || r#type.is_pointer_to_complete(),
+                "Can only increment/decrement floats, integers, and complete pointers"
+            );
             r#type
         }
         ast::UnaryOp::Not => ast::Type::bool(),

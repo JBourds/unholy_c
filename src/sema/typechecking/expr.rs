@@ -606,6 +606,18 @@ fn try_pointer_binary(
     {
         bail!("cannot add two pointers together")
     }
+    if matches!(
+        op,
+        ast::BinaryOp::Subtract
+            | ast::BinaryOp::SubAssign
+            | ast::BinaryOp::Add
+            | ast::BinaryOp::AddAssign
+    ) {
+        ensure!(
+            !(left_t.is_void_pointer() || right_t.is_void_pointer()),
+            "Cannot subtract or add anything with void pointer"
+        );
+    }
 
     Ok(None)
 }

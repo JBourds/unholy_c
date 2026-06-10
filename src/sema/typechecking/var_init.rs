@@ -19,6 +19,7 @@ pub fn typecheck_global_var_decl(
 pub fn typecheck_var_decl(decl: ast::VarDecl, symbols: &mut SymbolTable) -> Result<ast::VarDecl> {
     let target = &decl.r#type;
     validate_type_specifier(target).context("Invalid type in variable declaration")?;
+    ensure!(!target.is_void(), "Unholy C does not allow void variables!");
     let entry = symbols.declare_var(&decl).context(format!(
         "Failed to typecheck local variable declaration: for {}",
         decl.name

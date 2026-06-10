@@ -480,7 +480,7 @@ fn try_pointer_binary(
 
     // ptr +/- int
     if matches!(op, ast::BinaryOp::Add | ast::BinaryOp::Subtract)
-        && left_t.is_pointer()
+        && left_t.is_pointer_to_complete()
         && right_t.is_integer()
     {
         return Ok(Some(TypedExpr {
@@ -494,7 +494,7 @@ fn try_pointer_binary(
     }
     // ptr (+/-)= int
     if matches!(op, ast::BinaryOp::AddAssign | ast::BinaryOp::SubAssign)
-        && left_t.is_pointer()
+        && left_t.is_pointer_to_complete()
         && right_t.is_integer()
         && left.is_lvalue()
     {
@@ -511,7 +511,7 @@ fn try_pointer_binary(
         }));
     }
     // int + ptr
-    if matches!(op, ast::BinaryOp::Add) && left_t.is_integer() && right_t.is_pointer() {
+    if matches!(op, ast::BinaryOp::Add) && left_t.is_integer() && right_t.is_pointer_to_complete() {
         return Ok(Some(TypedExpr {
             expr: ast::Expr::Binary {
                 op: ast::BinaryOp::Add,
@@ -523,8 +523,8 @@ fn try_pointer_binary(
     }
     // ptr1 - ptr2
     if matches!(op, ast::BinaryOp::Subtract)
-        && left_t.is_pointer()
-        && right_t.is_pointer()
+        && left_t.is_pointer_to_complete()
+        && right_t.is_pointer_to_complete()
         && left_t == right_t
     {
         return Ok(Some(TypedExpr {
@@ -537,7 +537,7 @@ fn try_pointer_binary(
         }));
     }
     // ptr1 </<=/>/>= ptr2
-    if op.is_ordering() && left_t.is_pointer() && right_t.is_pointer() {
+    if op.is_ordering() && left_t.is_pointer_to_complete() && right_t.is_pointer_to_complete() {
         return Ok(Some(TypedExpr {
             expr: ast::Expr::Binary {
                 op,
@@ -548,14 +548,14 @@ fn try_pointer_binary(
         }));
     }
     if matches!(op, ast::BinaryOp::Subtract | ast::BinaryOp::SubAssign)
-        && !left_t.is_pointer()
-        && right_t.is_pointer()
+        && !left_t.is_pointer_to_complete()
+        && right_t.is_pointer_to_complete()
     {
         bail!("Cannot subtract pointer from non pointer type")
     }
     if matches!(op, ast::BinaryOp::Add | ast::BinaryOp::AddAssign)
-        && left_t.is_pointer()
-        && right_t.is_pointer()
+        && left_t.is_pointer_to_complete()
+        && right_t.is_pointer_to_complete()
     {
         bail!("cannot add two pointers together")
     }

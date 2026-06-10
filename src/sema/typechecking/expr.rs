@@ -104,7 +104,13 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
                     is_const: false,
                 },
                 ast::UnaryOp::AddrOf => bail!("Cannot take the address of a non-lvalue"),
-                ast::UnaryOp::Deref => r#type.deref(),
+                ast::UnaryOp::Deref => {
+                    ensure!(
+                        r#type.is_pointer_to_complete(),
+                        "Cannot dereference pointer to incomplete (void) type"
+                    );
+                    r#type.deref()
+                }
                 ast::UnaryOp::Negate => {
                     if r#type.is_pointer() {
                         bail!("Cannot apply unary negate operation to pointer.")
@@ -337,25 +343,28 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
                 expr: index,
                 r#type: index_t,
             } = typecheck_expr_and_convert(index, symbols)?;
-            match (expr_t, index_t) {
-                (expr_t, index_t) if expr_t.is_pointer() && index_t.is_integer() => Ok(TypedExpr {
-                    expr: ast::Expr::Subscript {
-                        expr: Box::new(expr),
-                        index: Box::new(index.cast_to(ast::Type::PTRDIFF_T)),
-                    },
-                    r#type: expr_t.deref(),
-                }),
-                (expr_t, index_t) if expr_t.is_integer() && index_t.is_pointer() => Ok(TypedExpr {
-                    expr: ast::Expr::Subscript {
-                        expr: Box::new(expr.cast_to(ast::Type::PTRDIFF_T)),
-                        index: Box::new(index),
-                    },
-                    r#type: index_t.deref(),
-                }),
+            let (ptr, ptr_t, index) = match (expr_t, index_t) {
+                (expr_t, index_t) if expr_t.is_pointer() && index_t.is_integer() => {
+                    (expr, expr_t, index)
+                }
+                (expr_t, index_t) if expr_t.is_integer() && index_t.is_pointer() => {
+                    (index, index_t, expr)
+                }
                 (expr_t, index_t) => bail!(
                     "Subscript takes one pointer type and one integer type, got: {expr_t:#?}, {index_t:#?}"
                 ),
-            }
+            };
+            ensure!(
+                ptr_t.is_pointer_to_complete(),
+                "Cannot subscript pointer to incomplete (void) type"
+            );
+            Ok(TypedExpr {
+                expr: ast::Expr::Subscript {
+                    expr: Box::new(ptr),
+                    index: Box::new(index.cast_to(ast::Type::PTRDIFF_T)),
+                },
+                r#type: ptr_t.deref(),
+            })
         }
         ast::Expr::String { value } => {
             let base = ast::BaseType::Array {

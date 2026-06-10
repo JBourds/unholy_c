@@ -222,6 +222,8 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
                 r#type.is_scalar() || target.is_void(),
                 "Can only cast a non-scalar type to void"
             );
+            validate_type_specifier(target)
+                .context("Cast target must be a valid type specifier")?;
 
             let expr = if *target != r#type {
                 expr.cast_to(target.clone())

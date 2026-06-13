@@ -17,6 +17,10 @@ impl Val {
             }
         }
     }
+
+    pub fn dummy() -> Self {
+        Val::Var(Rc::new("DUMMY".to_string()))
+    }
 }
 
 impl From<ast::Constant> for Val {

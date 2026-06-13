@@ -161,7 +161,11 @@ impl Expr {
         }
 
         let mut emitter = CastEmitter::new(symbols, make_temp_var);
-        let dst = emitter.temp(target.clone());
+        let dst = if target.is_void() {
+            Val::dummy()
+        } else {
+            emitter.temp(target.clone())
+        };
         match (Scalar::of(&val_type), Scalar::of(&target)) {
             (
                 Scalar::Int { bytes: src, signed },

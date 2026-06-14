@@ -685,6 +685,8 @@ fn typecheck_arithmetic(
     let casted_right = (common_t != right_t).then(|| right.clone().cast_to(common_t.clone()));
     let result_type = if op.is_relational() {
         ast::Type::I32
+    } else if op.compound_op().is_some() {
+        left_t.clone()
     } else {
         common_t
     };

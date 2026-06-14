@@ -213,31 +213,33 @@ impl Expr {
         } else {
             emitter.temp(target.clone())
         };
-        match (Scalar::of(&val_type), Scalar::of(&target)) {
-            (
-                Scalar::Int { bytes: src, signed },
-                Scalar::Int {
-                    bytes: dst_bytes, ..
-                },
-            ) => {
-                emitter.resize(val, src, signed, dst.clone(), dst_bytes);
-            }
-            (Scalar::Int { bytes, signed }, Scalar::F64) => {
-                emitter.int_to_double(val, bytes, signed, dst.clone());
-            }
-            (Scalar::F64, Scalar::Int { bytes, signed }) => {
-                emitter.double_to_int(val, dst.clone(), bytes, signed);
-            }
-            // We don't have f32 but this is where we would slot them in
-            (Scalar::Int { .. }, Scalar::F32)
-            | (Scalar::F32, Scalar::Int { .. })
-            | (Scalar::F32, Scalar::F64)
-            | (Scalar::F64, Scalar::F32) => {
-                todo!("conversions involving 32-bit float are not implemented yet")
-            }
-            // Same-type float casts are caught by the early `target == val_type`.
-            (Scalar::F32, Scalar::F32) | (Scalar::F64, Scalar::F64) => {
-                unreachable!("identity float cast should have returned early")
+        if !target.is_void() {
+            match (Scalar::of(&val_type), Scalar::of(&target)) {
+                (
+                    Scalar::Int { bytes: src, signed },
+                    Scalar::Int {
+                        bytes: dst_bytes, ..
+                    },
+                ) => {
+                    emitter.resize(val, src, signed, dst.clone(), dst_bytes);
+                }
+                (Scalar::Int { bytes, signed }, Scalar::F64) => {
+                    emitter.int_to_double(val, bytes, signed, dst.clone());
+                }
+                (Scalar::F64, Scalar::Int { bytes, signed }) => {
+                    emitter.double_to_int(val, dst.clone(), bytes, signed);
+                }
+                // We don't have f32 but this is where we would slot them in
+                (Scalar::Int { .. }, Scalar::F32)
+                | (Scalar::F32, Scalar::Int { .. })
+                | (Scalar::F32, Scalar::F64)
+                | (Scalar::F64, Scalar::F32) => {
+                    todo!("conversions involving 32-bit float are not implemented yet")
+                }
+                // Same-type float casts are caught by the early `target == val_type`.
+                (Scalar::F32, Scalar::F32) | (Scalar::F64, Scalar::F64) => {
+                    unreachable!("identity float cast should have returned early")
+                }
             }
         }
         Self {

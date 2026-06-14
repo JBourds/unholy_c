@@ -5,6 +5,7 @@ mod binary;
 mod cast;
 mod conditional;
 mod fun_call;
+mod sizeof;
 mod string;
 mod subscript;
 mod unary;
@@ -14,6 +15,7 @@ use binary::*;
 use cast::*;
 use conditional::*;
 use fun_call::*;
+use sizeof::*;
 use string::*;
 use subscript::*;
 use unary::*;
@@ -186,8 +188,8 @@ impl Expr {
             ast::Expr::Cast { .. } => parse_cast(node, symbols, make_temp_var),
             ast::Expr::Subscript { .. } => parse_subscript(node, symbols, make_temp_var),
             ast::Expr::String { .. } => parse_string(node, symbols),
-            ast::Expr::SizeOf(_) => todo!(),
-            ast::Expr::SizeOfT(_) => todo!(),
+            ast::Expr::SizeOf(_) => parse_sizeof(node, symbols),
+            ast::Expr::SizeOfT(_) => parse_sizeof_type(node, symbols),
         }
     }
 

@@ -837,7 +837,7 @@ impl Instruction<Initial> {
     fn fun_call(
         name: Rc<String>,
         args: Vec<tacky::Val>,
-        dst: tacky::Val,
+        dst: Option<tacky::Val>,
         symbols: &tacky::SymbolTable,
         float_constants: &mut HashSet<StaticConstant>,
     ) -> Vec<Self> {
@@ -914,39 +914,40 @@ impl Instruction<Initial> {
                 bytes_to_remove,
             )));
         }
-        let dst_type = dst.get_type(symbols);
-        let dst_sz = dst_type.size_of();
-        let dst = Operand::from_tacky(dst, symbols, float_constants);
+        if let Some(dst) = dst {
+            let dst_type = dst.get_type(symbols);
+            let dst_sz = dst_type.size_of();
+            let dst = Operand::from_tacky(dst, symbols, float_constants);
 
-        // Determine how to get the return value into the destination
-        match dst_type {
-            ast::Type {
-                base: ast::BaseType::Int { .. },
-                ..
+            // Determine how to get the return value into the destination
+            match dst_type {
+                ast::Type {
+                    base: ast::BaseType::Int { .. },
+                    ..
+                }
+                | ast::Type {
+                    base: ast::BaseType::Ptr { .. },
+                    ..
+                } => {
+                    let ax = Operand::Reg(Reg::X86 {
+                        reg: X86Reg::Ax,
+                        section: RegSection::from_size(dst_sz).expect("NOT IMPLEMENTED YET :("),
+                    });
+                    v.push(Self::new(InstructionType::Mov { src: ax, dst }));
+                }
+                ast::Type {
+                    base: ast::BaseType::Float(_) | ast::BaseType::Double(_),
+                    ..
+                } => {
+                    let xmm0 = Operand::Reg(Reg::Xmm {
+                        reg: XmmReg::XMM0,
+                        section: RegSection::from_size(dst_sz).expect("NOT IMPLEMENTED YET :("),
+                    });
+                    v.push(Self::new(InstructionType::Mov { src: xmm0, dst }));
+                }
+                _ => unimplemented!(),
             }
-            | ast::Type {
-                base: ast::BaseType::Ptr { .. },
-                ..
-            } => {
-                let ax = Operand::Reg(Reg::X86 {
-                    reg: X86Reg::Ax,
-                    section: RegSection::from_size(dst_sz).expect("NOT IMPLEMENTED YET :("),
-                });
-                v.push(Self::new(InstructionType::Mov { src: ax, dst }));
-            }
-            ast::Type {
-                base: ast::BaseType::Float(_) | ast::BaseType::Double(_),
-                ..
-            } => {
-                let xmm0 = Operand::Reg(Reg::Xmm {
-                    reg: XmmReg::XMM0,
-                    section: RegSection::from_size(dst_sz).expect("NOT IMPLEMENTED YET :("),
-                });
-                v.push(Self::new(InstructionType::Mov { src: xmm0, dst }));
-            }
-            _ => unimplemented!(),
         }
-
         v
     }
 

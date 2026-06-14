@@ -17,7 +17,7 @@ use anyhow::Context;
 use crate::ast::{Expr, Type};
 pub use attribute::Attribute;
 pub use initial_value::InitialValue;
-pub use symbols::{Scope, SymbolEntry, SymbolTable};
+pub use symbols::{Scope, SymbolEntry, SymbolTable, SymbolTableGetType};
 
 use super::*;
 use block::{typecheck_block, typecheck_block_item};

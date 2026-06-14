@@ -1,5 +1,3 @@
-use super::*;
-
 use crate::{
     ast,
     tacky::{self, ExprResult, SymbolTable, Val},
@@ -9,7 +7,7 @@ pub(crate) fn parse_sizeof(node: ast::Expr, symbols: &mut SymbolTable) -> ExprRe
     let ast::Expr::SizeOf(expr) = node else {
         unreachable!()
     };
-    let r#type = Expr::get_ast_expr_type(&*expr, symbols);
+    let r#type = expr.get_type_of_already_typed_function(symbols);
 
     ExprResult::PlainOperand(tacky::Expr {
         instructions: vec![],

@@ -32,7 +32,9 @@ struct SemaStage<T> {
 
 // Public re-exports
 pub mod tc {
-    pub use super::typechecking::{Attribute, InitialValue, SymbolEntry, SymbolTable};
+    pub use super::typechecking::{
+        Attribute, InitialValue, SymbolEntry, SymbolTable, SymbolTableGetType,
+    };
 }
 
 pub struct ValidAst {

@@ -113,51 +113,6 @@ impl Expr {
         }
     }
 
-    fn get_ast_expr_type(expr: &ast::Expr, symbols: &SymbolTable) -> ast::Type {
-        match expr {
-            ast::Expr::Var(symbol) => symbols
-                .get(&symbol)
-                .expect("get_ast_expr_type: all variables should be in the symbol table")
-                .r#type
-                .clone(),
-            ast::Expr::Assignment { lvalue, .. } => Self::get_ast_expr_type(lvalue, symbols),
-            ast::Expr::Cast { target, .. } => target.clone(),
-            ast::Expr::Constant(constant) => constant.get_type(),
-            ast::Expr::Unary { expr, .. } => Self::get_ast_expr_type(expr, symbols),
-            ast::Expr::Binary { left, .. } => Self::get_ast_expr_type(left, symbols),
-            ast::Expr::Conditional { then, .. } => Self::get_ast_expr_type(then, symbols),
-            ast::Expr::FunCall { name, .. } => {
-                let ast::Type {
-                    base: ast::BaseType::Fun { ret_t, .. },
-                    ..
-                } = symbols
-                    .get(name)
-                    .expect("get_ast_expr_type: all functions should be in the symbol table")
-                    .r#type
-                    .clone()
-                else {
-                    unreachable!()
-                };
-                *ret_t
-            }
-            ast::Expr::Subscript { expr, index } => {
-                let expr_t = Self::get_ast_expr_type(expr, symbols);
-                if expr_t.is_integer() {
-                    Self::get_ast_expr_type(index, symbols)
-                } else {
-                    expr_t
-                }
-            }
-            ast::Expr::String { value } => symbols
-                .get(value)
-                .expect("get_ast_expr_type: all strings should be in symbol table")
-                .r#type
-                .clone(),
-            ast::Expr::SizeOf(expr) => Self::get_ast_expr_type(expr, symbols),
-            ast::Expr::SizeOfT(r#type) => r#type.clone(),
-        }
-    }
-
     fn parse_with(
         node: ast::Expr,
         symbols: &mut SymbolTable,

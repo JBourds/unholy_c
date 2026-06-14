@@ -62,3 +62,12 @@ impl SymbolTable {
         );
     }
 }
+
+impl sema::tc::SymbolTableGetType for SymbolTable {
+    fn get_type(&self, symbol: &Rc<String>) -> ast::Type {
+        self.get(symbol)
+            .expect("SymbolTableGetType should only be used for values in the symbol table")
+            .r#type
+            .clone()
+    }
+}

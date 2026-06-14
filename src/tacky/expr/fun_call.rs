@@ -46,6 +46,6 @@ pub(crate) fn parse_fun_call(
     });
     ExprResult::PlainOperand(Expr {
         instructions,
-        val: Val::dummy(),
+        val: dst.unwrap_or(Val::dummy()),
     })
 }

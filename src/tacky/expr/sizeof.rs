@@ -20,7 +20,7 @@ pub(crate) fn parse_sizeof(node: ast::Expr, symbols: &mut SymbolTable) -> ExprRe
     })
 }
 
-pub(crate) fn parse_sizeof_type(node: ast::Expr, symbols: &mut SymbolTable) -> ExprResult {
+pub(crate) fn parse_sizeof_type(node: ast::Expr) -> ExprResult {
     let ast::Expr::SizeOfT(r#type) = node else {
         unreachable!()
     };

@@ -1,10 +1,10 @@
 use anyhow::{Context, Result, bail};
 use std::rc::Rc;
 
-use super::{BinaryOp, Constant, Factor, Type, UnaryOp};
-use crate::lexer::Token;
+use super::{BaseType, BinaryOp, Constant, Type, UnaryOp};
+use crate::{ast::cast_expr::CastExpr, lexer::Token};
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum Expr {
     Var(Rc<String>),
     Assignment {
@@ -41,6 +41,8 @@ pub enum Expr {
     String {
         value: Rc<String>,
     },
+    SizeOf(Box<Expr>),
+    SizeOfT(Type),
 }
 
 impl Expr {
@@ -78,8 +80,46 @@ impl Expr {
         }
     }
 
+    /// This function is only for use in tacky and beyond or in special circustances like
+    /// evaluating sizeof expressions for typechecking
+    pub fn get_type_of_already_typed_function<T: crate::sema::tc::SymbolTableGetType>(
+        &self,
+        symbols: &T,
+    ) -> Type {
+        match self {
+            Self::Var(symbol) => symbols.get_type(symbol),
+            Self::Assignment { lvalue, .. } => lvalue.get_type_of_already_typed_function(symbols),
+            Self::Cast { target, .. } => target.clone(),
+            Self::Constant(constant) => constant.get_type(),
+            Self::Unary { expr, .. } => expr.get_type_of_already_typed_function(symbols),
+            Self::Binary { left, .. } => left.get_type_of_already_typed_function(symbols),
+            Self::Conditional { then, .. } => then.get_type_of_already_typed_function(symbols),
+            Self::FunCall { name, .. } => {
+                let Type {
+                    base: BaseType::Fun { ret_t, .. },
+                    ..
+                } = symbols.get_type(name)
+                else {
+                    unreachable!()
+                };
+                *ret_t
+            }
+            Self::Subscript { expr, index } => {
+                let expr_t = expr.get_type_of_already_typed_function(symbols);
+                if expr_t.is_integer() {
+                    index.get_type_of_already_typed_function(symbols)
+                } else {
+                    expr_t
+                }
+            }
+            Self::String { value } => symbols.get_type(value),
+            Self::SizeOf(expr) => expr.get_type_of_already_typed_function(symbols),
+            Self::SizeOfT(r#type) => r#type.clone(),
+        }
+    }
+
     pub fn parse<'a>(tokens: &'a [Token], min_precedence: u32) -> Result<(Expr, &'a [Token])> {
-        let (mut left, mut tokens) = Factor::parse(tokens)?;
+        let (mut left, mut tokens) = CastExpr::parse(tokens)?;
         loop {
             let Some((operator, tokens_inner)) = BinaryOp::parse(tokens)? else {
                 break;

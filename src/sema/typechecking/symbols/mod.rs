@@ -3,7 +3,7 @@ use crate::tacky::StaticInit;
 
 use super::Attribute;
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result, bail, ensure};
 
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -25,6 +25,10 @@ pub struct SymbolTable {
     scopes: Vec<HashMap<Rc<String>, SymbolEntry>>,
 }
 
+pub trait SymbolTableGetType {
+    fn get_type(&self, symbol: &Rc<String>) -> ast::Type;
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Scope {
     Global,
@@ -39,6 +43,15 @@ impl Scope {
             (Self::Local(_), Self::Global) => true,
             (Self::Local(n1), Self::Local(n2)) => n1 > n2,
         }
+    }
+}
+
+impl SymbolTableGetType for SymbolTable {
+    fn get_type(&self, symbol: &Rc<String>) -> ast::Type {
+        self.get(symbol)
+            .expect("Don't use SymbolTableGetType for values not in the symbol table")
+            .r#type
+            .clone()
     }
 }
 
@@ -357,6 +370,7 @@ impl SymbolTable {
             for (r#type, name) in decl.signature()
                 .context("sema.typechecking.declare_fun(): Error getting function declaration in signature.")?
                 .into_iter() {
+                ensure!(r#type != ast::Type::VOID, "Cannot have void function argument");
                 if let Some(name) = name {
                     let param_decl = ast::Declaration::VarDecl(ast::VarDecl {
                         name: Rc::clone(name),

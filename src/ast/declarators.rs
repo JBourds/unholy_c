@@ -3,7 +3,10 @@ use std::num::NonZeroUsize;
 use std::rc::Rc;
 
 use super::{BaseType, Constant, RawParameterList, Type};
-use crate::{ast::types::calculate_alignment, lexer::Token};
+use crate::{
+    ast::{token_stream::eat_rparen, types::calculate_alignment},
+    lexer::Token,
+};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum AbstractDeclarator {
@@ -55,15 +58,12 @@ impl AbstractDeclarator {
             [Token::LParen, tokens @ ..] => {
                 let (decl, tokens) =
                     Self::consume(tokens).context("Failed to parse abstract declarator.")?;
-                ensure!(
-                    tokens.first().is_some_and(|t| *t == Token::RParen),
-                    "Expected closing \")\" in abstract declarator."
-                );
-
-                let (decl, tokens, _) = Self::consume_subscript(Some(decl), &tokens[1..])?;
-
+                let tokens =
+                    eat_rparen(tokens).context("Expected \")\" to close abstract declarator")?;
+                let (decl, tokens, _) = Self::consume_subscript(Some(decl), tokens)?;
                 Ok((decl, tokens))
             }
+
             [Token::LBracket, ..] => {
                 let (decl, tokens, consumed) = Self::consume_subscript(None, tokens)?;
                 ensure!(
@@ -234,11 +234,8 @@ impl Declarator {
             )),
             [Token::LParen, tokens @ ..] => {
                 let (decl, tokens) = Self::consume(tokens)?;
-                ensure!(
-                    tokens.first().is_some_and(|t| *t == Token::RParen),
-                    "Expected closing parentheses in declarator."
-                );
-                Ok((decl, &tokens[1..]))
+                let tokens = eat_rparen(tokens).context("Expected \")\" to close declarator")?;
+                Ok((decl, tokens))
             }
             _ => bail!(
                 "ast.Declarator.consume_direct_declarator(): Error parsing direct declarator."

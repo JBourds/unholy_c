@@ -394,7 +394,7 @@ impl Token {
             match stream.chars().next() {
                 Some('\'') => Self::match_regex(stream, Self::CHAR).map_or(None, |s| {
                     assert!(
-                        s.len() > 0,
+                        !s.is_empty(),
                         "Matched chars should always contain wrapping single quotes"
                     );
                     Some((
@@ -407,7 +407,7 @@ impl Token {
                 }),
                 Some('"') => Self::match_regex(stream, Self::STRING).map_or(None, |s| {
                     assert!(
-                        s.len() > 0,
+                        !s.is_empty(),
                         "Matched string literals should always contain wrapping double quotes"
                     );
                     Some((

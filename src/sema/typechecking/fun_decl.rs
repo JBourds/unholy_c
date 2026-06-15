@@ -1,4 +1,4 @@
-use crate::ast;
+use crate::{ast, sema::typechecking::validate_type_specifier};
 
 use super::{SymbolTable, typecheck_block_item};
 
@@ -9,9 +9,22 @@ pub fn typecheck_fun_decl(decl: ast::FunDecl, symbols: &mut SymbolTable) -> Resu
     // function parameters get put into the same scope as the block items
     symbols.push_scope();
 
+    // Make sure that the function does not take or return incomplete types
+    validate_type_specifier(&decl.r#type).context("Invalid type in variable declaration")?;
+    let ast::BaseType::Fun {
+        ref ret_t,
+        ref param_types,
+    } = decl.r#type.base
+    else {
+        panic!("Function declaration type isn't a function type?");
+    };
     ensure!(
-        !matches!(decl.r#type.base.clone(), ast::BaseType::Fun { ret_t, .. } if ret_t.is_array()),
-        "Cannot have functions return array types",
+        !param_types.iter().any(|ty| ty.is_void()),
+        "Cannot have void function parameter arguments"
+    );
+    ensure!(
+        !ret_t.is_array(),
+        "Cannot have functions return array types"
     );
 
     symbols.declare_fun(&decl)?;

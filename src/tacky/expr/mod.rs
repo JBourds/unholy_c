@@ -5,6 +5,7 @@ mod binary;
 mod cast;
 mod conditional;
 mod fun_call;
+mod sizeof;
 mod string;
 mod subscript;
 mod unary;
@@ -14,6 +15,7 @@ use binary::*;
 use cast::*;
 use conditional::*;
 use fun_call::*;
+use sizeof::*;
 use string::*;
 use subscript::*;
 use unary::*;
@@ -141,6 +143,10 @@ impl Expr {
             ast::Expr::Cast { .. } => parse_cast(node, symbols, make_temp_var),
             ast::Expr::Subscript { .. } => parse_subscript(node, symbols, make_temp_var),
             ast::Expr::String { .. } => parse_string(node, symbols),
+            ast::Expr::SizeOfT(_) => parse_sizeof_type(node),
+            ast::Expr::SizeOf(_) => unreachable!(
+                "This branch should have been rewritten to SizeOfT during typechecking"
+            ),
         }
     }
 
@@ -159,32 +165,38 @@ impl Expr {
         }
 
         let mut emitter = CastEmitter::new(symbols, make_temp_var);
-        let dst = emitter.temp(target.clone());
-        match (Scalar::of(&val_type), Scalar::of(&target)) {
-            (
-                Scalar::Int { bytes: src, signed },
-                Scalar::Int {
-                    bytes: dst_bytes, ..
-                },
-            ) => {
-                emitter.resize(val, src, signed, dst.clone(), dst_bytes);
-            }
-            (Scalar::Int { bytes, signed }, Scalar::F64) => {
-                emitter.int_to_double(val, bytes, signed, dst.clone());
-            }
-            (Scalar::F64, Scalar::Int { bytes, signed }) => {
-                emitter.double_to_int(val, dst.clone(), bytes, signed);
-            }
-            // We don't have f32 but this is where we would slot them in
-            (Scalar::Int { .. }, Scalar::F32)
-            | (Scalar::F32, Scalar::Int { .. })
-            | (Scalar::F32, Scalar::F64)
-            | (Scalar::F64, Scalar::F32) => {
-                todo!("conversions involving 32-bit float are not implemented yet")
-            }
-            // Same-type float casts are caught by the early `target == val_type`.
-            (Scalar::F32, Scalar::F32) | (Scalar::F64, Scalar::F64) => {
-                unreachable!("identity float cast should have returned early")
+        let dst = if target.is_void() {
+            Val::dummy()
+        } else {
+            emitter.temp(target.clone())
+        };
+        if !target.is_void() {
+            match (Scalar::of(&val_type), Scalar::of(&target)) {
+                (
+                    Scalar::Int { bytes: src, signed },
+                    Scalar::Int {
+                        bytes: dst_bytes, ..
+                    },
+                ) => {
+                    emitter.resize(val, src, signed, dst.clone(), dst_bytes);
+                }
+                (Scalar::Int { bytes, signed }, Scalar::F64) => {
+                    emitter.int_to_double(val, bytes, signed, dst.clone());
+                }
+                (Scalar::F64, Scalar::Int { bytes, signed }) => {
+                    emitter.double_to_int(val, dst.clone(), bytes, signed);
+                }
+                // We don't have f32 but this is where we would slot them in
+                (Scalar::Int { .. }, Scalar::F32)
+                | (Scalar::F32, Scalar::Int { .. })
+                | (Scalar::F32, Scalar::F64)
+                | (Scalar::F64, Scalar::F32) => {
+                    todo!("conversions involving 32-bit float are not implemented yet")
+                }
+                // Same-type float casts are caught by the early `target == val_type`.
+                (Scalar::F32, Scalar::F32) | (Scalar::F64, Scalar::F64) => {
+                    unreachable!("identity float cast should have returned early")
+                }
             }
         }
         Self {

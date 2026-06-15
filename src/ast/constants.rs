@@ -237,7 +237,7 @@ impl Constant {
                         Ok((val, &tokens[1..]))
                     }
                     Some(ConstantFlag::Char) => {
-                        let text = normalize_text(&text);
+                        let text = normalize_text(text);
                         ensure!(
                             text.len() == 1,
                             "Somehow parsed a character literal with more than one character?"

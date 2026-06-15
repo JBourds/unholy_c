@@ -2,12 +2,17 @@ pub mod constants;
 pub mod declaration;
 pub mod declarators;
 pub mod exprs;
-pub mod factor;
+mod grammar;
+use grammar::*;
 pub mod operators;
 pub mod statements;
+mod token_stream;
 pub mod types;
 
-use crate::lexer::Token;
+use crate::{
+    ast::token_stream::{eat_rparen, eat_semi},
+    lexer::Token,
+};
 
 use anyhow::{Context, Result, bail, ensure};
 
@@ -16,7 +21,6 @@ pub use constants::Constant;
 pub use declaration::{Declaration, FunDecl, VarDecl};
 pub use declarators::{AbstractDeclarator, Declarator};
 pub use exprs::Expr;
-pub use factor::Factor;
 pub use operators::{BinaryOp, UnaryOp};
 pub use statements::Stmt;
 pub use types::{BaseType, Type, TypeBuilder};
@@ -70,16 +74,12 @@ impl RawParameterList {
         let remaining = match tokens {
             [Token::RParen, tokens @ ..] => &tokens[1..],
             [Token::Void, Token::RParen, ..] => &tokens[2..],
-            [Token::Void, t, ..] => {
-                bail!("Expected closing parentheses but found \"{}\"", t)
-            }
             _ => {
                 let mut keep_going = true;
                 let mut remaining = tokens;
                 while keep_going {
-                    let (stream_offset, r#type, storage) = TypeBuilder::new()
-                        .get_base(remaining)
-                        .and_then(|b| b.into_type())
+                    let (stream_offset, r#type, storage) = TypeBuilder::new(remaining)
+                        .build()
                         .context("Error building base type from token stream.")?;
                     ensure!(
                         storage.is_none(),
@@ -95,12 +95,7 @@ impl RawParameterList {
                         remaining = tokens;
                     }
                 }
-                if remaining.first().is_none_or(|t| *t != Token::RParen) {
-                    bail!(
-                        "ast.ParameterList.consume(): Expected opening parentheses in parameter list."
-                    );
-                }
-                &remaining[1..]
+                eat_rparen(remaining).context("Expected \")\" to close function parameter list")?
             }
         };
         Ok((Self(signature), remaining))
@@ -144,11 +139,11 @@ impl BlockItem {
             return Ok((Self::Stmt(stmt), tokens));
         }
 
-        return Err(decl_consume
+        Err(decl_consume
             .context(stmt_consume.err().unwrap())
             .context("Unable to parse a valid block item")
             .err()
-            .unwrap());
+            .unwrap())
     }
 }
 
@@ -266,11 +261,9 @@ impl ForInit {
                 _ => {
                     let (expr, tokens) = Expr::parse(tokens, 0)
                         .context("Expected decleration or expression but failed to parse both")?;
-                    if let Some(Token::Semi) = tokens.first() {
-                        Ok((ForInit::Expr(Some(expr)), &tokens[1..]))
-                    } else {
-                        bail!("Missing semicolon after init expression.")
-                    }
+                    let tokens = eat_semi(tokens)
+                        .context("Missing semicolon after for-loop init expression")?;
+                    Ok((ForInit::Expr(Some(expr)), tokens))
                 }
             },
         }

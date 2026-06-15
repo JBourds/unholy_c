@@ -6,6 +6,7 @@ use super::{
 use anyhow::{Context, Result, bail, ensure};
 
 use crate::ast;
+use crate::sema::typechecking::validate_type_specifier;
 
 use std::num::NonZeroUsize;
 use std::rc::Rc;
@@ -62,91 +63,7 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
                 r#type: left_t,
             })
         }
-        ast::Expr::Unary { op, expr } => {
-            let TypedExpr { expr, r#type } = match op {
-                // Don't lvalue convert in these cases
-                ast::UnaryOp::AddrOf
-                | ast::UnaryOp::PreInc
-                | ast::UnaryOp::PostInc
-                | ast::UnaryOp::PreDec
-                | ast::UnaryOp::PostDec => typecheck_expr(expr, symbols),
-                _ => typecheck_expr_and_convert(expr, symbols),
-            }
-            .context("Failed to typecheck nested unary expression.")?;
-
-            ensure!(
-                !(op.is_bitwise()
-                    && matches!(
-                        r#type,
-                        ast::Type {
-                            base: ast::BaseType::Float(_)
-                                | ast::BaseType::Double(_)
-                                | ast::BaseType::Ptr { .. },
-                            ..
-                        }
-                    )),
-                "Cannot perform a bitwise unary operation on a floating point value."
-            );
-            let operand_is_char = r#type.is_char();
-            let r#type = match op {
-                ast::UnaryOp::AddrOf if expr.is_lvalue() => ast::Type {
-                    base: ast::BaseType::Ptr {
-                        to: Box::new(r#type),
-                        is_restrict: false,
-                    },
-                    alignment: NonZeroUsize::new(core::mem::size_of::<usize>()).unwrap(),
-                    is_const: false,
-                },
-                ast::UnaryOp::AddrOf => bail!("Cannot take the address of a non-lvalue"),
-                ast::UnaryOp::Deref => r#type.deref(),
-                ast::UnaryOp::Negate => {
-                    if r#type.is_pointer() {
-                        bail!("Cannot apply unary negate operation to pointer.")
-                    } else if r#type.is_char() {
-                        ast::Type::int(4, None)
-                    } else {
-                        r#type
-                    }
-                }
-                ast::UnaryOp::Complement => {
-                    if r#type.is_pointer() {
-                        bail!("Cannot apply unary complement operation to pointer.")
-                    } else if r#type.is_char() {
-                        ast::Type::int(4, None)
-                    } else {
-                        r#type
-                    }
-                }
-                op @ ast::UnaryOp::PostInc
-                | op @ ast::UnaryOp::PostDec
-                | op @ ast::UnaryOp::PreInc
-                | op @ ast::UnaryOp::PreDec => {
-                    if !expr.is_modifiable_lvalue(&r#type) {
-                        bail!("Cannot apply unary {op:?} to non-lvalues");
-                    }
-                    r#type
-                }
-                ast::UnaryOp::Not => ast::Type::bool(),
-            };
-            // Integer-promote a char operand for negate/complement so the
-            // operation actually runs at int width (the result type was already
-            // widened above); otherwise it computes in char width and is only
-            // correct when something later re-promotes it.
-            let expr = if operand_is_char
-                && matches!(op, ast::UnaryOp::Negate | ast::UnaryOp::Complement)
-            {
-                expr.cast_to(ast::Type::int(4, None))
-            } else {
-                expr
-            };
-            Ok(TypedExpr {
-                expr: ast::Expr::Unary {
-                    op: *op,
-                    expr: Box::new(expr),
-                },
-                r#type,
-            })
-        }
+        ast::Expr::Unary { op, expr } => typecheck_unary(*op, expr, symbols),
         ast::Expr::Binary { op, left, right } => {
             let TypedExpr {
                 expr: left,
@@ -179,6 +96,10 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
                 r#type: condition_type,
             } = typecheck_expr_and_convert(condition, symbols)
                 .context("Failed to typecheck ternary expression then branch.")?;
+            ensure!(
+                condition_type.is_scalar(),
+                "Condition for ternary expression must be scalar."
+            );
 
             let TypedExpr {
                 expr: then_expr,
@@ -207,9 +128,14 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
                     else_type.clone(),
                 )?
             } else {
-                let (then_base, _) =
-                    ast::BaseType::lift(then_type.base.clone(), else_type.base.clone())
-                        .context("Ternary expression branches evaluate to different types.")?;
+                let then_base = match (&then_type.base, &else_type.base) {
+                    (ast::BaseType::Void, ast::BaseType::Void) => ast::BaseType::Void,
+                    (then_base, else_base) => {
+                        ast::BaseType::lift(then_base.clone(), else_base.clone())
+                            .context("Ternary expression branches evaluate to different types.")?
+                            .1
+                    }
+                };
                 ast::Type {
                     base: then_base,
                     alignment: std::cmp::max(then_type.alignment, else_type.alignment),
@@ -288,10 +214,16 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
             if target.is_float() && r#type.is_pointer() {
                 bail!("Cannot cast pointer to floating point number");
             }
-
-            if target.is_array() {
-                bail!("Cannot cast to array");
-            }
+            ensure!(
+                target.is_scalar() || target.is_void(),
+                "Can only cast to scalar and void types"
+            );
+            ensure!(
+                r#type.is_scalar() || target.is_void(),
+                "Can only cast a non-scalar type to void"
+            );
+            validate_type_specifier(target)
+                .context("Cast target must be a valid type specifier")?;
 
             let expr = if *target != r#type {
                 expr.cast_to(target.clone())
@@ -322,25 +254,28 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
                 expr: index,
                 r#type: index_t,
             } = typecheck_expr_and_convert(index, symbols)?;
-            match (expr_t, index_t) {
-                (expr_t, index_t) if expr_t.is_pointer() && index_t.is_integer() => Ok(TypedExpr {
-                    expr: ast::Expr::Subscript {
-                        expr: Box::new(expr),
-                        index: Box::new(index.cast_to(ast::Type::PTRDIFF_T)),
-                    },
-                    r#type: expr_t.deref(),
-                }),
-                (expr_t, index_t) if expr_t.is_integer() && index_t.is_pointer() => Ok(TypedExpr {
-                    expr: ast::Expr::Subscript {
-                        expr: Box::new(expr.cast_to(ast::Type::PTRDIFF_T)),
-                        index: Box::new(index),
-                    },
-                    r#type: index_t.deref(),
-                }),
+            let (ptr, ptr_t, index) = match (expr_t, index_t) {
+                (expr_t, index_t) if expr_t.is_pointer() && index_t.is_integer() => {
+                    (expr, expr_t, index)
+                }
+                (expr_t, index_t) if expr_t.is_integer() && index_t.is_pointer() => {
+                    (index, index_t, expr)
+                }
                 (expr_t, index_t) => bail!(
                     "Subscript takes one pointer type and one integer type, got: {expr_t:#?}, {index_t:#?}"
                 ),
-            }
+            };
+            ensure!(
+                ptr_t.is_pointer_to_complete(),
+                "Cannot subscript pointer to incomplete (void) type"
+            );
+            Ok(TypedExpr {
+                expr: ast::Expr::Subscript {
+                    expr: Box::new(ptr),
+                    index: Box::new(index.cast_to(ast::Type::PTRDIFF_T)),
+                },
+                r#type: ptr_t.deref(),
+            })
         }
         ast::Expr::String { value } => {
             let base = ast::BaseType::Array {
@@ -360,7 +295,136 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
                 },
             })
         }
+        ast::Expr::SizeOf(expr) => {
+            let TypedExpr { expr: _, r#type } = typecheck_expr(expr, symbols)?;
+            validate_type_specifier(&r#type).context("Invalid expression to get the size of")?;
+            ensure!(
+                r#type.is_complete(),
+                "Cannot get size of an incomplete type"
+            );
+            ensure!(!r#type.is_function(), "Cannot get size of a function");
+            Ok(TypedExpr {
+                expr: ast::Expr::SizeOfT(r#type),
+                r#type: ast::Type::USIZE,
+            })
+        }
+        ast::Expr::SizeOfT(ty) => {
+            validate_type_specifier(ty).context("Invalid expression to get the size of")?;
+            ensure!(ty.is_complete(), "Cannot get size of an incomplete type");
+            ensure!(!ty.is_function(), "Cannot get size of a function");
+            Ok(TypedExpr {
+                expr: ast::Expr::SizeOfT(ty.clone()),
+                r#type: ast::Type::USIZE,
+            })
+        }
     }
+}
+
+fn typecheck_unary(
+    op: ast::UnaryOp,
+    expr: &ast::Expr,
+    symbols: &mut SymbolTable,
+) -> Result<TypedExpr> {
+    let TypedExpr { expr, r#type } = match op {
+        // Don't lvalue convert in these cases
+        ast::UnaryOp::AddrOf
+        | ast::UnaryOp::PreInc
+        | ast::UnaryOp::PostInc
+        | ast::UnaryOp::PreDec
+        | ast::UnaryOp::PostDec => typecheck_expr(expr, symbols),
+        _ => typecheck_expr_and_convert(expr, symbols),
+    }
+    .context("Failed to typecheck nested unary expression.")?;
+    ensure!(
+        !r#type.is_void(),
+        "Cannot perform unary operation on void type."
+    );
+    ensure!(
+        !(op.is_bitwise()
+            && matches!(
+                r#type,
+                ast::Type {
+                    base: ast::BaseType::Float(_)
+                        | ast::BaseType::Double(_)
+                        | ast::BaseType::Ptr { .. },
+                    ..
+                }
+            )),
+        "Cannot perform a bitwise unary operation on a floating point value."
+    );
+    if matches!(op, ast::UnaryOp::Not) {
+        ensure!(
+            r#type.is_scalar(),
+            "Cannot have a non-scalar controlling value."
+        );
+    }
+    let operand_is_char = r#type.is_char();
+    let r#type = match op {
+        ast::UnaryOp::AddrOf if expr.is_lvalue() => ast::Type {
+            base: ast::BaseType::Ptr {
+                to: Box::new(r#type),
+                is_restrict: false,
+            },
+            alignment: NonZeroUsize::new(core::mem::size_of::<usize>()).unwrap(),
+            is_const: false,
+        },
+        ast::UnaryOp::AddrOf => bail!("Cannot take the address of a non-lvalue"),
+        ast::UnaryOp::Deref => {
+            ensure!(
+                r#type.is_pointer_to_complete(),
+                "Cannot dereference pointer to incomplete (void) type"
+            );
+            r#type.deref()
+        }
+        ast::UnaryOp::Negate => {
+            if r#type.is_pointer() {
+                bail!("Cannot apply unary negate operation to pointer.")
+            } else if r#type.is_char() {
+                ast::Type::int(4, None)
+            } else {
+                r#type
+            }
+        }
+        ast::UnaryOp::Complement => {
+            if r#type.is_pointer() {
+                bail!("Cannot apply unary complement operation to pointer.")
+            } else if r#type.is_char() {
+                ast::Type::int(4, None)
+            } else {
+                r#type
+            }
+        }
+        op @ ast::UnaryOp::PostInc
+        | op @ ast::UnaryOp::PostDec
+        | op @ ast::UnaryOp::PreInc
+        | op @ ast::UnaryOp::PreDec => {
+            if !expr.is_modifiable_lvalue(&r#type) {
+                bail!("Cannot apply unary {op:?} to non-lvalues");
+            }
+            ensure!(
+                r#type.is_integer() || r#type.is_float() || r#type.is_pointer_to_complete(),
+                "Can only increment/decrement floats, integers, and complete pointers"
+            );
+            r#type
+        }
+        ast::UnaryOp::Not => ast::Type::bool(),
+    };
+    // Integer-promote a char operand for negate/complement so the
+    // operation actually runs at int width (the result type was already
+    // widened above); otherwise it computes in char width and is only
+    // correct when something later re-promotes it.
+    let expr = if operand_is_char && matches!(op, ast::UnaryOp::Negate | ast::UnaryOp::Complement) {
+        expr.cast_to(ast::Type::int(4, None))
+    } else {
+        expr
+    };
+    Ok(TypedExpr {
+        expr: ast::Expr::Unary {
+            op,
+            expr: Box::new(expr),
+        },
+        r#type,
+    })
 }
 
 /// Typecheck a binary expression whose operands have already been checked.
@@ -373,10 +437,12 @@ fn typecheck_binary(
     right: ast::Expr,
     right_t: ast::Type,
 ) -> Result<TypedExpr> {
-    validate_pointer_comparison(op, &left, &left_t, &right, &right_t)?;
-
     // Logical operands are evaluated in a boolean context.
     if op.is_logical() {
+        ensure!(
+            left_t.is_scalar() && right_t.is_scalar(),
+            "Cannot have a non-scalar controlling value."
+        );
         return Ok(TypedExpr {
             expr: ast::Expr::Binary {
                 op,
@@ -387,9 +453,15 @@ fn typecheck_binary(
         });
     }
 
+    validate_pointer_comparison(op, &left, &left_t, &right, &right_t)?;
     if let Some(result) = try_pointer_binary(op, &left, &left_t, &right, &right_t)? {
         return Ok(result);
     }
+
+    ensure!(
+        left_t.is_complete() && right_t.is_complete(),
+        "LHS and RHS arguments must either be pointers or arithmetic types. Cannot be incomplete (void) types."
+    );
 
     let common_t = compute_common_type(op, &left, &left_t, &right, &right_t)?;
 
@@ -415,20 +487,26 @@ fn validate_pointer_comparison(
     right: &ast::Expr,
     right_t: &ast::Type,
 ) -> Result<()> {
-    if left_t.is_pointer() && op.is_relational() {
-        if is_null_pointer_constant(left) || is_null_pointer_constant(right) {
+    if op.is_relational() {
+        // Can only compare mismatched pointer types with == or !=
+        if left_t.is_pointer() && right_t.is_pointer() && left_t != right_t {
             ensure!(
-                matches!(op, ast::BinaryOp::Equal | ast::BinaryOp::NotEqual),
-                format!(
-                    "Error in \"{op:#?}\" comparison: lefthand side with type {left_t:#?} and righthand side with type {right_t:#?}. Expressions: \nLeft: {left:#?}\nRight: {right:#?}"
-                )
+                op.checks_equality(),
+                "Can only perform == and != when pointer types do not match"
             );
-        } else {
+        }
+
+        // Can do any relational op if we have a null pointer constant
+        if left_t.is_pointer() && !right_t.is_pointer() {
             ensure!(
-                left_t == right_t,
-                format!(
-                    "Error in \"{op:#?}\" comparison: lefthand side with type {left_t:#?} and righthand side with type {right_t:#?}. Expressions: \nLeft: {left:#?}\nRight: {right:#?}"
-                )
+                op.checks_equality() && is_null_pointer_constant(right),
+                "Can only perform == and != when intermixing pointer and null-pointer constant"
+            );
+        }
+        if right_t.is_pointer() && !left_t.is_pointer() {
+            ensure!(
+                op.checks_equality() && is_null_pointer_constant(left),
+                "Can only perform == and != when intermixing pointer and null-pointer constant"
             );
         }
     }
@@ -448,7 +526,7 @@ fn try_pointer_binary(
 
     // ptr +/- int
     if matches!(op, ast::BinaryOp::Add | ast::BinaryOp::Subtract)
-        && left_t.is_pointer()
+        && left_t.is_pointer_to_complete()
         && right_t.is_integer()
     {
         return Ok(Some(TypedExpr {
@@ -462,7 +540,7 @@ fn try_pointer_binary(
     }
     // ptr (+/-)= int
     if matches!(op, ast::BinaryOp::AddAssign | ast::BinaryOp::SubAssign)
-        && left_t.is_pointer()
+        && left_t.is_pointer_to_complete()
         && right_t.is_integer()
         && left.is_lvalue()
     {
@@ -479,7 +557,7 @@ fn try_pointer_binary(
         }));
     }
     // int + ptr
-    if matches!(op, ast::BinaryOp::Add) && left_t.is_integer() && right_t.is_pointer() {
+    if matches!(op, ast::BinaryOp::Add) && left_t.is_integer() && right_t.is_pointer_to_complete() {
         return Ok(Some(TypedExpr {
             expr: ast::Expr::Binary {
                 op: ast::BinaryOp::Add,
@@ -491,8 +569,8 @@ fn try_pointer_binary(
     }
     // ptr1 - ptr2
     if matches!(op, ast::BinaryOp::Subtract)
-        && left_t.is_pointer()
-        && right_t.is_pointer()
+        && left_t.is_pointer_to_complete()
+        && right_t.is_pointer_to_complete()
         && left_t == right_t
     {
         return Ok(Some(TypedExpr {
@@ -505,7 +583,7 @@ fn try_pointer_binary(
         }));
     }
     // ptr1 </<=/>/>= ptr2
-    if op.is_ordering() && left_t.is_pointer() && right_t.is_pointer() {
+    if op.is_ordering() && left_t.is_pointer_to_complete() && right_t.is_pointer_to_complete() {
         return Ok(Some(TypedExpr {
             expr: ast::Expr::Binary {
                 op,
@@ -515,6 +593,7 @@ fn try_pointer_binary(
             r#type: ast::Type::bool(),
         }));
     }
+
     if matches!(op, ast::BinaryOp::Subtract | ast::BinaryOp::SubAssign)
         && !left_t.is_pointer()
         && right_t.is_pointer()
@@ -526,6 +605,18 @@ fn try_pointer_binary(
         && right_t.is_pointer()
     {
         bail!("cannot add two pointers together")
+    }
+    if matches!(
+        op,
+        ast::BinaryOp::Subtract
+            | ast::BinaryOp::SubAssign
+            | ast::BinaryOp::Add
+            | ast::BinaryOp::AddAssign
+    ) {
+        ensure!(
+            !(left_t.is_void_pointer() || right_t.is_void_pointer()),
+            "Cannot subtract or add anything with void pointer"
+        );
     }
 
     Ok(None)
@@ -594,6 +685,8 @@ fn typecheck_arithmetic(
     let casted_right = (common_t != right_t).then(|| right.clone().cast_to(common_t.clone()));
     let result_type = if op.is_relational() {
         ast::Type::I32
+    } else if op.compound_op().is_some() {
+        left_t.clone()
     } else {
         common_t
     };

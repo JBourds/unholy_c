@@ -2,7 +2,10 @@ use anyhow::{Context, Result, bail};
 use std::rc::Rc;
 
 use super::{Block, Constant, Expr, ForInit};
-use crate::lexer::Token;
+use crate::{
+    ast::token_stream::{eat_rparen, eat_semi, semi_terminated_expr},
+    lexer::Token,
+};
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Stmt {
@@ -60,16 +63,6 @@ pub enum Stmt {
 
 impl Stmt {
     pub fn consume(tokens: &[Token]) -> Result<(Stmt, &[Token])> {
-        let semi_terminated_expr = |tokens| {
-            let (expr, tokens) = Expr::parse(tokens, 0).context(
-                "Expected return statement to return an expression but could not parse one.",
-            )?;
-            if let Some(Token::Semi) = tokens.first() {
-                Ok((expr, &tokens[1..]))
-            } else {
-                bail!("Missing semicolon after return expression.")
-            }
-        };
         match tokens {
             [Token::LSquirly, ..] => {
                 let (block, tokens) = Block::consume(tokens)?;
@@ -94,12 +87,8 @@ impl Stmt {
             [Token::While, Token::LParen, tokens @ ..] => {
                 let (condition, tokens) = Expr::parse(tokens, 0)
                     .context("Failed to parse expression for while statement conditional")?;
-
-                let tokens = if let Some(Token::RParen) = tokens.first() {
-                    &tokens[1..]
-                } else {
-                    bail!("While statment conditional must be closed with right paren");
-                };
+                let tokens =
+                    eat_rparen(tokens).context("Expected \")\" to close while-loop conditional")?;
                 let (body, tokens) = Stmt::consume(tokens).context("Failed to parse while body")?;
 
                 Ok((
@@ -118,17 +107,10 @@ impl Stmt {
                         let (condition, tokens) = Expr::parse(tokens, 0).context(
                             "Failed to parse expression for do while statement conditional",
                         )?;
-
-                        let tokens = if let Some(Token::RParen) = tokens.first() {
-                            &tokens[1..]
-                        } else {
-                            bail!("Do-while statment conditional must be closed with right paren");
-                        };
-                        let tokens = if let Some(Token::Semi) = tokens.first() {
-                            &tokens[1..]
-                        } else {
-                            bail!("Do-while statment conditional must end with semi colon");
-                        };
+                        let tokens = eat_rparen(tokens)
+                            .context("Expected \")\" to end while-loop conditional")?;
+                        let tokens = eat_semi(tokens)
+                            .context("Expected \";\" to end while-loop statement")?;
                         Ok((
                             Self::DoWhile {
                                 body: Box::new(body),
@@ -146,27 +128,17 @@ impl Stmt {
                     ForInit::consume(tokens).context("Failed to parse ForInit for for-loop")?;
                 let (condition, tokens) = match tokens {
                     [Token::Semi, tokens @ ..] => (None, tokens),
-                    tokens => {
-                        let (expr, tokens) = Expr::parse(tokens, 0)
-                            .context("Expected expression but failed to parse one")?;
-                        if let Some(Token::Semi) = tokens.first() {
-                            (Some(expr), &tokens[1..])
-                        } else {
-                            bail!("Missing semicolon after condtition expression.")
-                        }
-                    }
+                    _ => semi_terminated_expr(tokens)
+                        .map(|(expr, tokens)| (Some(expr), tokens))
+                        .context("Invalid for-loop condition expression")?,
                 };
                 let (post, tokens) = if let Ok((expr, tokens)) = Expr::parse(tokens, 0) {
                     (Some(expr), tokens)
                 } else {
                     (None, tokens)
                 };
-
-                let tokens = if let Some(Token::RParen) = tokens.first() {
-                    &tokens[1..]
-                } else {
-                    bail!("For statment must be closed with right paren");
-                };
+                let tokens =
+                    eat_rparen(tokens).context("Expected \")\" to close for-loop clauses")?;
                 let (body, tokens) =
                     Stmt::consume(tokens).context("Failed to parse for-loop body")?;
 
@@ -216,11 +188,8 @@ impl Stmt {
             [Token::Switch, Token::LParen, tokens @ ..] => {
                 let (condition, tokens) = Expr::parse(tokens, 0)
                     .context("Failed to parse expression for switch statement conditional")?;
-                let tokens = if let Some(Token::RParen) = tokens.first() {
-                    &tokens[1..]
-                } else {
-                    bail!("Switch statment conditional must be closed with right paren");
-                };
+                let tokens = eat_rparen(tokens)
+                    .context("Expected \")\" to close switch statement conditional")?;
                 let (body, tokens) =
                     Stmt::consume(tokens).context("Failed to parse body of switch statement")?;
                 Ok((
@@ -242,11 +211,8 @@ impl Stmt {
             [Token::If, Token::LParen, tokens @ ..] => {
                 let (condition, tokens) = Expr::parse(tokens, 0)
                     .context("Failed to parse expression for if statement conditional")?;
-                let tokens = if let Some(Token::RParen) = tokens.first() {
-                    &tokens[1..]
-                } else {
-                    bail!("If statment conditional must be closed with right paren");
-                };
+                let tokens = eat_rparen(tokens)
+                    .context("Expected \")\" to close if statement conditional")?;
                 let (then, tokens) =
                     Stmt::consume(tokens).context("Failed to parse then branch")?;
 

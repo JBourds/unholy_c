@@ -21,7 +21,15 @@ pub(crate) fn parse_fun_call(
     else {
         unreachable!("Function name '{name}' resulted in non-function type in symbol table");
     };
-    let dst = Function::make_tacky_temp_var(*ret_t.clone(), symbols, make_temp_var);
+    let dst = if ret_t.is_void() {
+        None
+    } else {
+        Some(Function::make_tacky_temp_var(
+            *ret_t.clone(),
+            symbols,
+            make_temp_var,
+        ))
+    };
     let (mut instructions, args) =
         args.into_iter()
             .fold((vec![], vec![]), |(mut instrs, mut args), arg| {
@@ -38,6 +46,6 @@ pub(crate) fn parse_fun_call(
     });
     ExprResult::PlainOperand(Expr {
         instructions,
-        val: dst,
+        val: dst.unwrap_or_else(Val::dummy),
     })
 }

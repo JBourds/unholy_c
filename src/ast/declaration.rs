@@ -2,7 +2,7 @@ use anyhow::{Context, Result, bail, ensure};
 use std::rc::Rc;
 
 use super::{BaseType, Block, Declarator, Initializer, StorageClass, Type, TypeBuilder};
-use crate::lexer::Token;
+use crate::{ast::token_stream::eat_semi, lexer::Token};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct FunDecl {
@@ -97,11 +97,10 @@ impl VarDecl {
         match tokens {
             [Token::Assign, tokens @ ..] => {
                 let (initializer, tokens) = Initializer::consume(tokens)?;
-                if tokens.first().is_some_and(|x| *x != Token::Semi) {
-                    bail!("Semicolon required after expression in variable declaration.")
-                }
+                let tokens = eat_semi(tokens)
+                    .context("Semicolon required after expression in variable declaration")?;
                 self.init = Some(initializer);
-                Ok((self, &tokens[1..]))
+                Ok((self, tokens))
             }
             [Token::Semi, tokens @ ..] => Ok((self, tokens)),
             _ => bail!("Unable to parse valid variable declaration."),
@@ -140,9 +139,8 @@ impl Declaration {
     }
 
     pub fn consume(tokens: &[Token]) -> Result<(Self, &[Token])> {
-        let (stream_offset, base, storage_class) = TypeBuilder::new()
-            .get_base(tokens)
-            .and_then(|b| b.into_type())
+        let (stream_offset, base, storage_class) = TypeBuilder::new(tokens)
+            .build()
             .context("Error building base type from token stream.")?;
         let (declarator, tokens) = Declarator::consume(&tokens[stream_offset..])
             .context("ast.Declaration.consume(): Error while parsing declarator.")?;

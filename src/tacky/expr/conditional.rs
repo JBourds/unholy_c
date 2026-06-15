@@ -34,14 +34,20 @@ pub(crate) fn parse_conditional(
         val: e1_val,
     } = Expr::parse_with_and_convert(*then, symbols, make_temp_var);
 
-    let result =
-        Function::make_tacky_temp_var(e1_val.get_type(symbols).clone(), symbols, make_temp_var);
+    let e1_type = e1_val.get_type(symbols).clone();
+    let result = if e1_type.is_void() {
+        Val::dummy()
+    } else {
+        Function::make_tacky_temp_var(e1_type.clone(), symbols, make_temp_var)
+    };
 
     instructions.extend(e1_instructions);
-    instructions.push(Instruction::Copy {
-        src: e1_val,
-        dst: result.clone(),
-    });
+    if !e1_type.is_void() {
+        instructions.push(Instruction::Copy {
+            src: e1_val,
+            dst: result.clone(),
+        });
+    }
 
     instructions.push(Instruction::Jump(Rc::clone(&end_label)));
     instructions.push(Instruction::Label(Rc::clone(&e2_label)));
@@ -53,10 +59,13 @@ pub(crate) fn parse_conditional(
 
     instructions.extend(e2_instructions);
 
-    instructions.push(Instruction::Copy {
-        src: e2_val,
-        dst: result.clone(),
-    });
+    let e2_type = e2_val.get_type(symbols).clone();
+    if !e2_type.is_void() {
+        instructions.push(Instruction::Copy {
+            src: e2_val,
+            dst: result.clone(),
+        });
+    }
 
     instructions.push(Instruction::Label(end_label));
 

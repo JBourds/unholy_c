@@ -79,7 +79,7 @@ pub enum Instruction {
     FunCall {
         name: Rc<String>,
         args: Vec<Val>,
-        dst: Val,
+        dst: Option<Val>,
     },
     AddPtr {
         ptr: Val,

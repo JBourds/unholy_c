@@ -1,4 +1,4 @@
-use crate::{codegen::MAX_AGGREGATE_ALIGNMENT, lexer::Token};
+use crate::{ast::AbstractDeclarator, codegen::MAX_AGGREGATE_ALIGNMENT, lexer::Token};
 
 use anyhow::{Context, Result, bail};
 use std::num::NonZeroUsize;
@@ -31,12 +31,30 @@ pub enum BaseType {
 }
 
 impl Type {
+    pub const USIZE: Self = Self::U64;
+    pub const U64: Self = Self {
+        base: BaseType::Int {
+            nbytes: core::mem::size_of::<u64>(),
+            signed: Some(false),
+        },
+        alignment: NonZeroUsize::new(core::mem::size_of::<u64>()).unwrap(),
+        is_const: false,
+    };
     pub const U32: Self = Self {
         base: BaseType::Int {
             nbytes: core::mem::size_of::<u32>(),
             signed: Some(false),
         },
         alignment: NonZeroUsize::new(core::mem::size_of::<u32>()).unwrap(),
+        is_const: false,
+    };
+    pub const ISIZE: Self = Self::I64;
+    pub const I64: Self = Self {
+        base: BaseType::Int {
+            nbytes: core::mem::size_of::<i64>(),
+            signed: Some(true),
+        },
+        alignment: NonZeroUsize::new(core::mem::size_of::<i64>()).unwrap(),
         is_const: false,
     };
     pub const I32: Self = Self {
@@ -130,7 +148,8 @@ impl BaseType {
             BaseType::Array { element, size } => element.base.nbytes() * size,
             BaseType::Fun { .. } => unreachable!(),
             BaseType::Struct => unreachable!(),
-            BaseType::Void => unreachable!(),
+            // Sentinel value
+            BaseType::Void => 0,
         }
     }
 
@@ -143,7 +162,8 @@ impl BaseType {
             BaseType::Array { element, .. } => element.base.size_of_base_type(),
             BaseType::Fun { .. } => unreachable!(),
             BaseType::Struct => unreachable!(),
-            BaseType::Void => unreachable!(),
+            // Sentinel value
+            BaseType::Void => 0,
         }
     }
 
@@ -219,7 +239,8 @@ impl BaseType {
                 NonZeroUsize::new(calculate_alignment(element.alignment.get(), *size)).unwrap()
             }
             Self::Struct => todo!(),
-            Self::Void => todo!(),
+            // Sentinel value- don't ever let an instance of void be created
+            Self::Void => NonZeroUsize::new(1).unwrap(),
         }
     }
 
@@ -397,6 +418,11 @@ impl Type {
         NonZeroUsize::new(core::mem::size_of::<usize>()).unwrap();
 
     pub const PTRDIFF_T: Self = Self::int(core::mem::size_of::<isize>(), Some(true));
+    pub const VOID: Self = Self {
+        base: BaseType::Void,
+        alignment: NonZeroUsize::new(1).unwrap(),
+        is_const: false,
+    };
 
     pub fn bool() -> Self {
         Self::int(core::mem::size_of::<i32>(), None)
@@ -428,12 +454,53 @@ impl Type {
         }
     }
 
+    pub fn pointer(to: Box<Self>) -> Self {
+        Self {
+            base: BaseType::Ptr {
+                to,
+                is_restrict: false,
+            },
+            alignment: Self::PTR_ALIGNMENT,
+            is_const: false,
+        }
+    }
+
+    pub fn is_scalar(&self) -> bool {
+        !(self.is_array() || self.is_function() || self.is_void())
+    }
+
+    pub fn is_complete(&self) -> bool {
+        !self.is_void()
+    }
+
+    pub fn is_pointer_to_complete(&self) -> bool {
+        match self {
+            Self {
+                base: BaseType::Ptr { to, .. },
+                ..
+            } => to.is_complete(),
+            _ => false,
+        }
+    }
+
     pub fn size_of(&self) -> usize {
         self.base.nbytes()
     }
 
     pub fn is_pointer(&self) -> bool {
         matches!(self.base, BaseType::Ptr { .. })
+    }
+
+    pub fn is_void(&self) -> bool {
+        *self == Self::VOID
+    }
+
+    pub fn is_void_pointer(&self) -> bool {
+        if let BaseType::Ptr { to, .. } = &self.base {
+            to.base == BaseType::Void
+        } else {
+            false
+        }
     }
 
     pub fn is_arithmetic(&self) -> bool {
@@ -523,7 +590,8 @@ impl std::fmt::Display for Type {
 }
 
 #[derive(Debug, Default, Clone, PartialEq)]
-pub struct TypeBuilder {
+pub struct TypeBuilder<'a> {
+    tokens: &'a [Token],
     stream_offset: usize,
     n_longs: usize,
     is_signed: Option<bool>,
@@ -534,13 +602,16 @@ pub struct TypeBuilder {
     base: Option<BaseType>,
 }
 
-impl TypeBuilder {
-    pub fn new() -> Self {
-        Self::default()
+impl<'a> TypeBuilder<'a> {
+    pub fn new(tokens: &'a [Token]) -> Self {
+        Self {
+            tokens,
+            ..Default::default()
+        }
     }
 
-    pub fn get_base(mut self, tokens: &[Token]) -> Result<Self> {
-        let mut remaining = tokens;
+    fn get_base(&mut self) -> Result<&mut Self> {
+        let mut remaining = self.tokens;
         while let Some(t) = remaining.first() {
             if self.check_for_specifier(t)? || self.check_for_storage(t)? || self.check_for_const(t)
             {
@@ -592,12 +663,12 @@ impl TypeBuilder {
             }
         }
 
-        self.stream_offset = tokens.len() - remaining.len();
+        self.stream_offset = self.tokens.len() - remaining.len();
 
         Ok(self)
     }
 
-    fn check_for_base_type<'a>(&mut self, tokens: &'a [Token]) -> Result<(bool, &'a [Token])> {
+    fn check_for_base_type(&mut self, tokens: &'a [Token]) -> Result<(bool, &'a [Token])> {
         if let Ok((r#type, tokens)) = BaseType::consume(tokens) {
             if self.base.is_some() {
                 bail!("Error: Found two conflicting types.");
@@ -675,24 +746,39 @@ impl TypeBuilder {
         }
     }
 
-    pub fn into_type(self) -> Result<(usize, Type, Option<StorageClass>)> {
-        if let Some(base) = self.base {
+    fn _into_type(&mut self) -> Result<Type> {
+        if let Some(base) = self.base.take() {
             let alignment = self.alignment.unwrap_or(base.default_alignment());
             if !alignment.is_power_of_two() {
                 bail!("Alignment must be a power of 2");
             }
 
-            Ok((
-                self.stream_offset,
-                Type {
-                    base,
-                    alignment,
-                    is_const: self.is_const,
-                },
-                self.storage,
-            ))
+            Ok(Type {
+                base,
+                alignment,
+                is_const: self.is_const,
+            })
         } else {
             bail!("Type builder has not parsed a base type yet");
         }
+    }
+    pub fn build(mut self) -> Result<(usize, Type, Option<StorageClass>)> {
+        self.get_base()?
+            ._into_type()
+            .map(|ty| (self.stream_offset, ty, self.storage))
+    }
+
+    /// Build the current type then parse for an optional abstract declarator
+    /// after it.
+    pub fn build_with_abstract_declarator(mut self) -> Result<(usize, Type, Option<StorageClass>)> {
+        let ty = self.get_base()?._into_type()?;
+        let tokens = &self.tokens[self.stream_offset..];
+        let (ty, new_tokens) = if let Ok((decl, tokens)) = AbstractDeclarator::consume(tokens) {
+            (AbstractDeclarator::process(decl, ty)?, tokens)
+        } else {
+            (ty, tokens)
+        };
+        self.stream_offset += tokens.len() - new_tokens.len();
+        Ok((self.stream_offset, ty, self.storage))
     }
 }

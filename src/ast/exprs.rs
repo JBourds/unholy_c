@@ -87,7 +87,7 @@ impl Expr {
         symbols: &T,
     ) -> Type {
         match self {
-            Self::Var(symbol) => symbols.get_type(&symbol),
+            Self::Var(symbol) => symbols.get_type(symbol),
             Self::Assignment { lvalue, .. } => lvalue.get_type_of_already_typed_function(symbols),
             Self::Cast { target, .. } => target.clone(),
             Self::Constant(constant) => constant.get_type(),

@@ -133,6 +133,8 @@ pub enum Token {
     BitNot,
     Mod,
     Ternary,
+    Arrow,
+    Dot,
     DoubleQuote,
     SingleQuote,
 }
@@ -237,6 +239,8 @@ impl std::fmt::Display for Token {
             Self::BitNot => write!(f, "BitNot"),
             Self::Mod => write!(f, "Mod"),
             Self::Ternary => write!(f, "Ternary"),
+            Self::Arrow => write!(f, "Arrow"),
+            Self::Dot => write!(f, "Dot"),
             Self::DoubleQuote => write!(f, "DoubleQuote"),
             Self::SingleQuote => write!(f, "SingleQuote"),
         }
@@ -332,6 +336,8 @@ impl Token {
         (":", Token::Colon),
         (",", Token::Comma),
         ("?", Token::Ternary),
+        ("->", Token::Arrow),
+        (".", Token::Dot),
     ];
     pub fn consume<'a>(
         mut stream: &'a str,
@@ -422,6 +428,11 @@ impl Token {
                     if let Ok(s) = Self::match_regex(stream, Self::FLOAT) {
                         let actual_len = s.len() - 1;
                         let s = &s[..actual_len];
+                        // Constants cannot be followed by a period, this
+                        // happening indicated the constant is malformed
+                        if stream[s.len()..].starts_with(".") {
+                            return None;
+                        }
                         Some((
                             Token::Constant {
                                 text: Rc::new(s.to_string()),
@@ -447,6 +458,12 @@ impl Token {
                             }
                             _ => (s.to_string(), None),
                         };
+
+                        // Constants cannot be followed by a period, this
+                        // happening indicated the constant is malformed
+                        if stream[s.len()..].starts_with(".") {
+                            return None;
+                        }
                         Some((
                             Token::Constant {
                                 text: Rc::new(text),
@@ -504,6 +521,12 @@ impl Token {
             .iter()
             .find(|(symbol_str, _)| stream.starts_with(symbol_str))
         {
+            // .digit (i.e. .1, .2, .10) should be parsed as a constant
+            Some((_, Token::Dot))
+                if stream.chars().nth(1).map(|c| c.is_digit(10)) == Some(true) =>
+            {
+                None
+            }
             Some((symbol_str, token)) => {
                 let len = symbol_str.len();
                 *character += len;

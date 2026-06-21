@@ -160,7 +160,30 @@ pub struct MemberDecl {
 
 impl MemberDecl {
     pub fn consume(tokens: &[Token]) -> Result<(Self, &[Token])> {
-        todo!()
+        let (stream_offset, base, storage_class) = TypeBuilder::new(tokens)
+            .build()
+            .context("Error building base type from token stream.")?;
+        ensure!(
+            storage_class.is_none(),
+            "member variables are not allowed to have storage class"
+        );
+        ensure!(!base.is_function(), "member variables cannot be functions");
+
+        let (declarator, tokens) = Declarator::consume(&tokens[stream_offset..])
+            .context("ast.MemberDecl.consume(): error while parsing member declarator")?;
+
+        let Declarator::Ident(Some(name)) = declarator else {
+            bail!(
+                "ast.MemberDecl.consume(), member declarators must be named identifiers, got {declarator:?} instead"
+            );
+        };
+        Ok((
+            MemberDecl {
+                name: name,
+                r#type: base,
+            },
+            tokens,
+        ))
     }
 }
 

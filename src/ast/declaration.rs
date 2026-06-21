@@ -129,6 +129,12 @@ pub struct MemberDecl {
     pub r#type: Type,
 }
 
+impl MemberDecl {
+    pub fn consume(tokens: &[Token]) -> Result<(Self, &[Token])> {
+        todo!()
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum Declaration {
     FunDecl(FunDecl),
@@ -157,6 +163,45 @@ impl Declaration {
         let (stream_offset, base, storage_class) = TypeBuilder::new(tokens)
             .build()
             .context("Error building base type from token stream.")?;
+
+        // Structs are to be handled seperatly
+        if base.is_struct() {
+            ensure!(
+                storage_class.is_none(),
+                "structs cannot have an associated storage class"
+            );
+            let BaseType::Struct(tag) = base.base else {
+                unreachable!()
+            };
+            let tokens = &tokens[stream_offset..];
+            let mut members = vec![];
+
+            return match tokens {
+                [Token::Semi, tokens @ ..] => {
+                    Ok((Declaration::StructDecl(StructDecl { tag, members }), tokens))
+                }
+                [Token::LSquirly, tokens @ ..] => {
+                    let mut tokens = tokens;
+                    while let Ok((member, remaining)) = MemberDecl::consume(tokens) {
+                        members.push(member);
+                        tokens = remaining;
+                    }
+                    match tokens {
+                        [Token::RSquirly, Token::Semi, tokens @ ..] => {
+                            Ok((Declaration::StructDecl(StructDecl { tag, members }), tokens))
+                        }
+                        [tokens @ ..] => bail!(
+                            "struct with member declaration must be followed by semicolon, found {:?} instead",
+                            tokens.first()
+                        ),
+                    }
+                }
+                [tokens @ ..] => bail!(
+                    "struct with no members must end with semicolon, found {:?} instead",
+                    tokens.first()
+                ),
+            };
+        }
         let (declarator, tokens) = Declarator::consume(&tokens[stream_offset..])
             .context("ast.Declaration.consume(): Error while parsing declarator.")?;
 

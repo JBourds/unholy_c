@@ -60,6 +60,7 @@ pub fn validate(stage: SemaStage<Initial>) -> Result<SemaStage<IdentResolution>>
             ast::Declaration::VarDecl(v) => Ok(ast::Declaration::VarDecl(
                 resolve_file_scope_var_decl(v, &mut ident_map),
             )),
+            ast::Declaration::StructDecl(..) => todo!(),
         })
         .collect::<Result<Vec<ast::Declaration>, Error>>()?;
 
@@ -233,6 +234,7 @@ fn resolve_decl(
         ast::Declaration::FunDecl(decl) => {
             resolve_fun_decl(decl, ident_map, make_temporary).map(ast::Declaration::FunDecl)
         }
+        ast::Declaration::StructDecl(..) => todo!(),
     }
 }
 
@@ -438,5 +440,7 @@ fn resolve_expr(expr: ast::Expr, ident_map: &HashMap<Rc<String>, IdentEntry>) ->
         expr @ ast::Expr::String { .. } => Ok(expr),
         ast::Expr::SizeOf(expr) => Ok(ast::Expr::SizeOf(resolve_expr(*expr, ident_map)?.into())),
         v @ ast::Expr::SizeOfT(_) => Ok(v),
+        ast::Expr::Dot { .. } => todo!(),
+        ast::Expr::Arrow { .. } => todo!(),
     }
 }

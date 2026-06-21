@@ -317,6 +317,8 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
                 r#type: ast::Type::USIZE,
             })
         }
+        ast::Expr::Dot { .. } => todo!(),
+        ast::Expr::Arrow { .. } => todo!(),
     }
 }
 

@@ -2,6 +2,7 @@ use crate::{ast::AbstractDeclarator, codegen::MAX_AGGREGATE_ALIGNMENT, lexer::To
 
 use anyhow::{Context, Result, bail};
 use std::num::NonZeroUsize;
+use std::rc::Rc;
 
 use super::{Constant, StorageClass};
 
@@ -25,8 +26,7 @@ pub enum BaseType {
         element: Box<Type>,
         size: usize,
     },
-    // TODO: Implement later and make this a non unit variant
-    Struct,
+    Struct(Rc<String>),
     Void,
 }
 
@@ -147,7 +147,7 @@ impl BaseType {
             BaseType::Ptr { .. } => core::mem::size_of::<usize>(),
             BaseType::Array { element, size } => element.base.nbytes() * size,
             BaseType::Fun { .. } => unreachable!(),
-            BaseType::Struct => unreachable!(),
+            BaseType::Struct(..) => todo!(),
             // Sentinel value
             BaseType::Void => 0,
         }
@@ -161,7 +161,7 @@ impl BaseType {
             BaseType::Ptr { to, .. } => to.size_of(),
             BaseType::Array { element, .. } => element.base.size_of_base_type(),
             BaseType::Fun { .. } => unreachable!(),
-            BaseType::Struct => unreachable!(),
+            BaseType::Struct(..) => todo!(),
             // Sentinel value
             BaseType::Void => 0,
         }
@@ -238,7 +238,7 @@ impl BaseType {
             Self::Array { element, size } => {
                 NonZeroUsize::new(calculate_alignment(element.alignment.get(), *size)).unwrap()
             }
-            Self::Struct => todo!(),
+            Self::Struct(..) => todo!(),
             // Sentinel value- don't ever let an instance of void be created
             Self::Void => NonZeroUsize::new(1).unwrap(),
         }
@@ -308,7 +308,7 @@ impl BaseType {
                 Token::Float => Ok((Self::Float(std::mem::size_of::<f32>()), &tokens[1..])),
                 Token::Double => Ok((Self::Double(std::mem::size_of::<f64>()), &tokens[1..])),
                 // TODO: Recursive parsing logic for structs
-                Token::Struct => Ok((Self::Struct, &tokens[1..])),
+                Token::Struct => todo!(), //Ok((Self::Struct, &tokens[1..])),
                 Token::Char => Ok((Self::int(1, None), &tokens[1..])),
                 _ => bail!("Could not parse base type."),
             }
@@ -346,7 +346,7 @@ impl std::fmt::Display for BaseType {
             Self::Array { element, size } => write!(f, "{element}[{size}]"),
             Self::Float(_) => write!(f, "float"),
             Self::Double(_) => write!(f, "double"),
-            Self::Struct => todo!(),
+            Self::Struct(..) => todo!(),
             Self::Fun { ret_t, param_types } => {
                 write!(f, "(")?;
                 for (index, t) in param_types.iter().enumerate() {

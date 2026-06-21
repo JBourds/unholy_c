@@ -32,6 +32,7 @@ impl From<sema::ValidAst> for Program {
                     }
                 }
                 ast::Declaration::VarDecl(_) => {}
+                ast::Declaration::StructDecl(..) => todo!(),
             };
         }
         Self { top_level, symbols }

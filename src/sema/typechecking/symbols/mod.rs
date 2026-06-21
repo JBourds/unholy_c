@@ -200,6 +200,7 @@ impl SymbolTable {
                 storage_class.as_ref().copied(),
                 init.is_some(),
             ),
+            ast::Declaration::StructDecl(..) => todo!(),
         }
     }
 
@@ -331,6 +332,7 @@ impl SymbolTable {
                             }
                         }
                     }
+                    ast::Declaration::StructDecl(..) => todo!(),
                 }
                 SymbolEntry {
                     r#type: new_type,

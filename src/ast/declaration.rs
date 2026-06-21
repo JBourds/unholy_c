@@ -118,9 +118,22 @@ impl VarDecl {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+pub struct StructDecl {
+    pub tag: Rc<String>,
+    pub members: Vec<MemberDecl>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct MemberDecl {
+    pub name: Rc<String>,
+    pub r#type: Type,
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub enum Declaration {
     FunDecl(FunDecl),
     VarDecl(VarDecl),
+    StructDecl(StructDecl),
 }
 
 impl Declaration {
@@ -128,6 +141,7 @@ impl Declaration {
         match self {
             Declaration::FunDecl(decl) => decl.block.is_some(),
             Declaration::VarDecl(decl) => decl.init.is_some(),
+            Declaration::StructDecl(..) => unreachable!(),
         }
     }
 
@@ -135,6 +149,7 @@ impl Declaration {
         match self {
             Declaration::FunDecl(decl) => decl.storage_class.as_ref(),
             Declaration::VarDecl(decl) => decl.storage_class.as_ref(),
+            Declaration::StructDecl(..) => unreachable!(),
         }
     }
 
@@ -199,6 +214,7 @@ impl From<&Declaration> for Type {
         match value {
             Declaration::FunDecl(decl) => decl.r#type.clone(),
             Declaration::VarDecl(decl) => decl.r#type.clone(),
+            Declaration::StructDecl(..) => todo!(),
         }
     }
 }

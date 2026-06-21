@@ -147,6 +147,8 @@ impl Expr {
             ast::Expr::SizeOf(_) => unreachable!(
                 "This branch should have been rewritten to SizeOfT during typechecking"
             ),
+            ast::Expr::Dot { .. } => todo!(),
+            ast::Expr::Arrow { .. } => todo!(),
         }
     }
 

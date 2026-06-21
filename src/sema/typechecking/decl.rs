@@ -25,5 +25,6 @@ pub fn typecheck_decl(
                     .context(format!("Unable to typecheck \"{name}\" declaration"))?,
             )
         }
+        ast::Declaration::StructDecl(..) => todo!(),
     })
 }

@@ -17,6 +17,7 @@ pub fn validate(stage: SemaStage<TypeChecking>) -> Result<SemaStage<GotoValidati
                 Ok(ast::Declaration::FunDecl(ast::FunDecl { block, ..f }))
             }
             ast::Declaration::VarDecl(v) => Ok(ast::Declaration::VarDecl(v)),
+            ast::Declaration::StructDecl(..) => todo!(),
         })
         .collect::<Result<Vec<ast::Declaration>, Error>>()?;
 

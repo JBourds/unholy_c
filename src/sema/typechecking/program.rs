@@ -26,6 +26,7 @@ pub fn typecheck_program(program: ast::Program, symbols: &mut SymbolTable) -> Re
                     ))?,
                 ));
             }
+            ast::Declaration::StructDecl(..) => todo!(),
         }
     }
     Ok(ast::Program { declarations })

@@ -43,6 +43,14 @@ pub enum Expr {
     },
     SizeOf(Box<Expr>),
     SizeOfT(Type),
+    Dot {
+        structure: Box<Expr>,
+        member: Rc<String>,
+    },
+    Arrow {
+        pointer: Box<Expr>,
+        member: Rc<String>,
+    },
 }
 
 impl Expr {
@@ -115,6 +123,8 @@ impl Expr {
             Self::String { value } => symbols.get_type(value),
             Self::SizeOf(expr) => expr.get_type_of_already_typed_function(symbols),
             Self::SizeOfT(r#type) => r#type.clone(),
+            Self::Dot { .. } => todo!(),
+            Self::Arrow { .. } => todo!(),
         }
     }
 

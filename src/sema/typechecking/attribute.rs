@@ -101,6 +101,7 @@ impl Attribute {
             ast::Declaration::VarDecl(v) => Self::from_var_with_scope(v, scope, symbols).context(
                 format!("Failed to process attributes for variable \"{}\"", v.name),
             ),
+            ast::Declaration::StructDecl(..) => todo!(),
         }
     }
 

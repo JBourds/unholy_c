@@ -105,6 +105,7 @@ impl Instruction {
                 Self::parse_var_decl_with(decl, symbols, make_temp_var)
             }
             ast::Declaration::FunDecl(decl) => Self::parse_fun_decl_with(decl, make_temp_var),
+            ast::Declaration::StructDecl(..) => todo!(),
         }
     }
 

@@ -307,8 +307,13 @@ impl BaseType {
                 )),
                 Token::Float => Ok((Self::Float(std::mem::size_of::<f32>()), &tokens[1..])),
                 Token::Double => Ok((Self::Double(std::mem::size_of::<f64>()), &tokens[1..])),
-                // TODO: Recursive parsing logic for structs
-                Token::Struct => todo!(), //Ok((Self::Struct, &tokens[1..])),
+                Token::Struct => {
+                    let tokens = &tokens[1..];
+                    let Some(Token::Ident(tag)) = tokens.first() else {
+                        bail!("Struct must be followed by an identifier")
+                    };
+                    Ok((Self::Struct(Rc::clone(tag)), &tokens[1..]))
+                }
                 Token::Char => Ok((Self::int(1, None), &tokens[1..])),
                 _ => bail!("Could not parse base type."),
             }
@@ -528,6 +533,10 @@ impl Type {
 
     pub fn is_char(&self) -> bool {
         self.base.is_char()
+    }
+
+    pub fn is_struct(&self) -> bool {
+        matches!(self.base, BaseType::Struct(..))
     }
 
     pub fn deref(self) -> Self {

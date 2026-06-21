@@ -123,6 +123,35 @@ pub struct StructDecl {
     pub members: Vec<MemberDecl>,
 }
 
+impl StructDecl {
+    pub fn consume(tokens: &[Token], tag: Rc<String>) -> Result<(Self, &[Token])> {
+        let mut members = vec![];
+        match tokens {
+            [Token::Semi, tokens @ ..] => Ok((StructDecl { tag, members }, tokens)),
+            [Token::LSquirly, tokens @ ..] => {
+                let mut tokens = tokens;
+                while let Ok((member, remaining)) = MemberDecl::consume(tokens) {
+                    members.push(member);
+                    tokens = remaining;
+                }
+                match tokens {
+                    [Token::RSquirly, Token::Semi, tokens @ ..] => {
+                        Ok((StructDecl { tag, members }, tokens))
+                    }
+                    [tokens @ ..] => bail!(
+                        "struct with member declaration must be followed by semicolon, found {:?} instead",
+                        tokens.first()
+                    ),
+                }
+            }
+            [tokens @ ..] => bail!(
+                "struct with no members must end with semicolon, found {:?} instead",
+                tokens.first()
+            ),
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct MemberDecl {
     pub name: Rc<String>,
@@ -173,34 +202,9 @@ impl Declaration {
             let BaseType::Struct(tag) = base.base else {
                 unreachable!()
             };
-            let tokens = &tokens[stream_offset..];
-            let mut members = vec![];
-
-            return match tokens {
-                [Token::Semi, tokens @ ..] => {
-                    Ok((Declaration::StructDecl(StructDecl { tag, members }), tokens))
-                }
-                [Token::LSquirly, tokens @ ..] => {
-                    let mut tokens = tokens;
-                    while let Ok((member, remaining)) = MemberDecl::consume(tokens) {
-                        members.push(member);
-                        tokens = remaining;
-                    }
-                    match tokens {
-                        [Token::RSquirly, Token::Semi, tokens @ ..] => {
-                            Ok((Declaration::StructDecl(StructDecl { tag, members }), tokens))
-                        }
-                        [tokens @ ..] => bail!(
-                            "struct with member declaration must be followed by semicolon, found {:?} instead",
-                            tokens.first()
-                        ),
-                    }
-                }
-                [tokens @ ..] => bail!(
-                    "struct with no members must end with semicolon, found {:?} instead",
-                    tokens.first()
-                ),
-            };
+            let (struct_decl, tokens) = StructDecl::consume(&tokens[stream_offset..], tag)
+                .context("failed to parse struct declaration after parsing struct type")?;
+            return Ok((Declaration::StructDecl(struct_decl), tokens));
         }
         let (declarator, tokens) = Declarator::consume(&tokens[stream_offset..])
             .context("ast.Declaration.consume(): Error while parsing declarator.")?;

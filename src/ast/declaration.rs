@@ -130,7 +130,13 @@ impl StructDecl {
             [Token::Semi, tokens @ ..] => Ok((StructDecl { tag, members }, tokens)),
             [Token::LSquirly, tokens @ ..] => {
                 let mut tokens = tokens;
-                while let Ok((member, remaining)) = MemberDecl::consume(tokens) {
+                let error;
+                loop {
+                    let val = MemberDecl::consume(tokens);
+                    let Ok((member, remaining)) = val else {
+                        error = Some(val);
+                        break;
+                    };
                     members.push(member);
                     tokens = remaining;
                 }
@@ -139,7 +145,7 @@ impl StructDecl {
                         Ok((StructDecl { tag, members }, tokens))
                     }
                     [tokens @ ..] => bail!(
-                        "struct with member declaration must be followed by semicolon, found {:?} instead",
+                        "struct with member declaration must be followed by semicolon, found {:?} instead. Error from member decl parse: {error:?}",
                         tokens.first()
                     ),
                 }

@@ -4,6 +4,8 @@ use crate::{
 };
 use anyhow::{Context, Result};
 
+use std::rc::Rc;
+
 /// <postfix-exp> grammar rule
 pub(in crate::ast) struct PostfixExpr;
 
@@ -26,6 +28,20 @@ impl PostfixExpr {
                     tokens,
                 )
             }
+            [Token::Dot, Token::Ident(name), tokens @ ..] => Self::check_for_postfix(
+                Expr::Dot {
+                    structure: Box::new(expr),
+                    member: Rc::clone(name),
+                },
+                tokens,
+            ),
+            [Token::Arrow, Token::Ident(name), tokens @ ..] => Self::check_for_postfix(
+                Expr::Arrow {
+                    pointer: Box::new(expr),
+                    member: Rc::clone(name),
+                },
+                tokens,
+            ),
             // A call binds as a postfix op, so it applies to any named operand,
             // including a parenthesized one like "(foo)(args)".
             [Token::LParen, ..] if matches!(expr, Expr::Var(_)) => {

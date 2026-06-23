@@ -145,6 +145,10 @@ impl StructDecl {
                         ),
                     }
                 }
+                ensure!(
+                    !members.is_empty(),
+                    "cannot declare struct declaration with empty member list"
+                );
                 match tokens {
                     [Token::RSquirly, Token::Semi, tokens @ ..] => {
                         Ok(Some((StructDecl { tag, members }, tokens)))

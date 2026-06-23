@@ -124,10 +124,9 @@ pub struct StructDecl {
 }
 
 impl StructDecl {
-    pub fn consume(tokens: &[Token], tag: Rc<String>) -> Result<(Self, &[Token])> {
+    pub fn consume(tokens: &[Token], tag: Rc<String>) -> Result<Option<(Self, &[Token])>> {
         let mut members = vec![];
         match tokens {
-            [Token::Semi, tokens @ ..] => Ok((StructDecl { tag, members }, tokens)),
             [Token::LSquirly, tokens @ ..] => {
                 let mut tokens = tokens;
                 let error;
@@ -148,7 +147,7 @@ impl StructDecl {
                 }
                 match tokens {
                     [Token::RSquirly, Token::Semi, tokens @ ..] => {
-                        Ok((StructDecl { tag, members }, tokens))
+                        Ok(Some((StructDecl { tag, members }, tokens)))
                     }
                     [tokens @ ..] => bail!(
                         "struct with member declaration must be followed by semicolon, found {:?} instead. Error from member decl parse: {error:?}",
@@ -156,10 +155,7 @@ impl StructDecl {
                     ),
                 }
             }
-            [tokens @ ..] => bail!(
-                "struct with no members must end with semicolon, found {:?} instead",
-                tokens.first()
-            ),
+            _ => Ok(None),
         }
     }
 }
@@ -234,12 +230,15 @@ impl Declaration {
                 storage_class.is_none(),
                 "structs cannot have an associated storage class"
             );
-            let BaseType::Struct(tag) = base.base else {
+            let BaseType::Struct(ref tag) = base.base else {
                 unreachable!()
             };
-            let (struct_decl, tokens) = StructDecl::consume(&tokens[stream_offset..], tag)
-                .context("failed to parse struct declaration after parsing struct type")?;
-            return Ok((Declaration::StructDecl(struct_decl), tokens));
+            if let Some((struct_decl, tokens)) =
+                StructDecl::consume(&tokens[stream_offset..], Rc::clone(tag))
+                    .context("failed to parse struct declaration after parsing struct type")?
+            {
+                return Ok((Declaration::StructDecl(struct_decl), tokens));
+            }
         }
         let (declarator, tokens) = Declarator::consume(&tokens[stream_offset..])
             .context("ast.Declaration.consume(): Error while parsing declarator.")?;

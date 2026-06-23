@@ -138,7 +138,13 @@ impl StructDecl {
                         break;
                     };
                     members.push(member);
-                    tokens = remaining;
+                    match remaining {
+                        [Token::Semi, remaining @ ..] => tokens = remaining,
+                        [remaining @ ..] => bail!(
+                            "Expected semi colon after member declaration, found {:?} instead",
+                            remaining.first()
+                        ),
+                    }
                 }
                 match tokens {
                     [Token::RSquirly, Token::Semi, tokens @ ..] => {
@@ -178,18 +184,18 @@ impl MemberDecl {
         let (declarator, tokens) = Declarator::consume(&tokens[stream_offset..])
             .context("ast.MemberDecl.consume(): error while parsing member declarator")?;
 
-        let Declarator::Ident(Some(name)) = declarator else {
-            bail!(
-                "ast.MemberDecl.consume(), member declarators must be named identifiers, got {declarator:?} instead"
-            );
+        ensure!(
+            !matches!(declarator, Declarator::Fun { .. }),
+            "member declarations for structs can't be functions",
+        );
+
+        let (Some(name), r#type, ..) = Declarator::process(declarator, base)
+            .context("could not process declarator of member declaration")?
+        else {
+            bail!("member declarations need to be named");
         };
-        Ok((
-            MemberDecl {
-                name: name,
-                r#type: base,
-            },
-            tokens,
-        ))
+
+        Ok((MemberDecl { name, r#type }, tokens))
     }
 }
 

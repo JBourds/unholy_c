@@ -226,10 +226,6 @@ impl Declaration {
 
         // Structs are to be handled seperatly
         if base.is_struct() {
-            ensure!(
-                storage_class.is_none(),
-                "structs cannot have an associated storage class"
-            );
             let BaseType::Struct(ref tag) = base.base else {
                 unreachable!()
             };
@@ -237,6 +233,10 @@ impl Declaration {
                 StructDecl::consume(&tokens[stream_offset..], Rc::clone(tag))
                     .context("failed to parse struct declaration after parsing struct type")?
             {
+                ensure!(
+                    storage_class.is_none(),
+                    "structs cannot have an associated storage class"
+                );
                 return Ok((Declaration::StructDecl(struct_decl), tokens));
             }
         }

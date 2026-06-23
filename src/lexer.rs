@@ -311,6 +311,7 @@ impl Token {
         ("%=", Token::ModAssign),
         ("--", Token::Decrement),
         ("++", Token::Increment),
+        ("->", Token::Arrow),
         ("<<", Token::LShift),
         (">>", Token::RShift),
         ("^", Token::BitXor),
@@ -336,7 +337,6 @@ impl Token {
         (":", Token::Colon),
         (",", Token::Comma),
         ("?", Token::Ternary),
-        ("->", Token::Arrow),
         (".", Token::Dot),
     ];
     pub fn consume<'a>(

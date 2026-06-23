@@ -155,6 +155,7 @@ impl StructDecl {
                     ),
                 }
             }
+            [Token::Semi, tokens @ ..] => Ok(Some((StructDecl { tag, members }, tokens))),
             _ => Ok(None),
         }
     }

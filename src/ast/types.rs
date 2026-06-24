@@ -27,6 +27,7 @@ pub enum BaseType {
         size: usize,
     },
     Struct(Rc<String>),
+    Union(Rc<String>),
     Void,
 }
 
@@ -148,6 +149,7 @@ impl BaseType {
             BaseType::Array { element, size } => element.base.nbytes() * size,
             BaseType::Fun { .. } => unreachable!(),
             BaseType::Struct(..) => todo!(),
+            BaseType::Union(..) => todo!(),
             // Sentinel value
             BaseType::Void => 0,
         }
@@ -162,6 +164,7 @@ impl BaseType {
             BaseType::Array { element, .. } => element.base.size_of_base_type(),
             BaseType::Fun { .. } => unreachable!(),
             BaseType::Struct(..) => todo!(),
+            BaseType::Union(..) => todo!(),
             // Sentinel value
             BaseType::Void => 0,
         }
@@ -238,7 +241,7 @@ impl BaseType {
             Self::Array { element, size } => {
                 NonZeroUsize::new(calculate_alignment(element.alignment.get(), *size)).unwrap()
             }
-            Self::Struct(..) => NonZeroUsize::new(1).unwrap(), // FIXME: this is probably wrong
+            Self::Struct(..) | Self::Union(..) => NonZeroUsize::new(1).unwrap(), // FIXME: this is wrong, but we haven't gotten to calculating alignment for these types
             // Sentinel value- don't ever let an instance of void be created
             Self::Void => NonZeroUsize::new(1).unwrap(),
         }
@@ -352,6 +355,7 @@ impl std::fmt::Display for BaseType {
             Self::Float(_) => write!(f, "float"),
             Self::Double(_) => write!(f, "double"),
             Self::Struct(..) => todo!(),
+            Self::Union(..) => todo!(),
             Self::Fun { ret_t, param_types } => {
                 write!(f, "(")?;
                 for (index, t) in param_types.iter().enumerate() {

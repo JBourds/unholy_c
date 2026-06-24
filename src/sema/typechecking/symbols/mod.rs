@@ -201,6 +201,7 @@ impl SymbolTable {
                 init.is_some(),
             ),
             ast::Declaration::StructDecl(..) => todo!(),
+            ast::Declaration::UnionDecl(..) => todo!(),
         }
     }
 
@@ -333,6 +334,7 @@ impl SymbolTable {
                         }
                     }
                     ast::Declaration::StructDecl(..) => todo!(),
+                    ast::Declaration::UnionDecl(..) => todo!(),
                 }
                 SymbolEntry {
                     r#type: new_type,

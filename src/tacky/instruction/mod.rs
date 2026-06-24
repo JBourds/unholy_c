@@ -106,6 +106,7 @@ impl Instruction {
             }
             ast::Declaration::FunDecl(decl) => Self::parse_fun_decl_with(decl, make_temp_var),
             ast::Declaration::StructDecl(..) => todo!(),
+            ast::Declaration::UnionDecl(..) => todo!(),
         }
     }
 

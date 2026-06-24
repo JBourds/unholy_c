@@ -102,6 +102,7 @@ impl Attribute {
                 format!("Failed to process attributes for variable \"{}\"", v.name),
             ),
             ast::Declaration::StructDecl(..) => todo!(),
+            ast::Declaration::UnionDecl(..) => todo!(),
         }
     }
 

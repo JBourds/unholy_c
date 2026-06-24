@@ -26,5 +26,6 @@ pub fn typecheck_decl(
             )
         }
         ast::Declaration::StructDecl(..) => todo!(),
+        ast::Declaration::UnionDecl(..) => todo!(),
     })
 }

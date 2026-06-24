@@ -253,6 +253,7 @@ pub enum Declaration {
     FunDecl(FunDecl),
     VarDecl(VarDecl),
     StructDecl(StructDecl),
+    UnionDecl(UnionDecl),
 }
 
 impl Declaration {
@@ -261,6 +262,7 @@ impl Declaration {
             Declaration::FunDecl(decl) => decl.block.is_some(),
             Declaration::VarDecl(decl) => decl.init.is_some(),
             Declaration::StructDecl(..) => unreachable!(),
+            Declaration::UnionDecl(..) => unreachable!(),
         }
     }
 
@@ -269,6 +271,7 @@ impl Declaration {
             Declaration::FunDecl(decl) => decl.storage_class.as_ref(),
             Declaration::VarDecl(decl) => decl.storage_class.as_ref(),
             Declaration::StructDecl(..) => unreachable!(),
+            Declaration::UnionDecl(..) => unreachable!(),
         }
     }
 
@@ -351,6 +354,7 @@ impl From<&Declaration> for Type {
             Declaration::FunDecl(decl) => decl.r#type.clone(),
             Declaration::VarDecl(decl) => decl.r#type.clone(),
             Declaration::StructDecl(..) => todo!(),
+            Declaration::UnionDecl(..) => todo!(),
         }
     }
 }

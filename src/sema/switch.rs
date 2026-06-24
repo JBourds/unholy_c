@@ -40,6 +40,7 @@ pub fn validate(stage: SemaStage<IdentResolution>) -> Result<SemaStage<SwitchLab
             ast::Declaration::FunDecl(f) => Ok(ast::Declaration::FunDecl(resolve_function(f)?)),
             ast::Declaration::VarDecl(v) => Ok(ast::Declaration::VarDecl(v)),
             ast::Declaration::StructDecl(..) => todo!(),
+            ast::Declaration::UnionDecl(..) => todo!(),
         })
         .collect::<Result<Vec<ast::Declaration>, Error>>()?;
     Ok(SemaStage {

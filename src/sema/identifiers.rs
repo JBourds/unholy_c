@@ -61,6 +61,7 @@ pub fn validate(stage: SemaStage<Initial>) -> Result<SemaStage<IdentResolution>>
                 resolve_file_scope_var_decl(v, &mut ident_map),
             )),
             ast::Declaration::StructDecl(..) => todo!(),
+            ast::Declaration::UnionDecl(..) => todo!(),
         })
         .collect::<Result<Vec<ast::Declaration>, Error>>()?;
 
@@ -235,6 +236,7 @@ fn resolve_decl(
             resolve_fun_decl(decl, ident_map, make_temporary).map(ast::Declaration::FunDecl)
         }
         ast::Declaration::StructDecl(..) => todo!(),
+        ast::Declaration::UnionDecl(..) => todo!(),
     }
 }
 

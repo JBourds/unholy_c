@@ -151,7 +151,7 @@ impl StructDecl {
                 );
                 match tokens {
                     [Token::RSquirly, Token::Semi, tokens @ ..] => {
-                        Ok(Some((StructDecl { tag, members }, tokens)))
+                        Ok(Some((Self { tag, members }, tokens)))
                     }
                     [tokens @ ..] => bail!(
                         "struct with member declaration must be followed by semicolon, found {:?} instead. Error from member decl parse: {error:?}",
@@ -160,6 +160,54 @@ impl StructDecl {
                 }
             }
             [Token::Semi, tokens @ ..] => Ok(Some((StructDecl { tag, members }, tokens))),
+            _ => Ok(None),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct UnionDecl {
+    pub tag: Rc<String>,
+    pub members: Vec<MemberDecl>,
+}
+
+impl UnionDecl {
+    pub fn consume(tokens: &[Token], tag: Rc<String>) -> Result<Option<(Self, &[Token])>> {
+        let mut members = vec![];
+        match tokens {
+            [Token::LSquirly, tokens @ ..] => {
+                let mut tokens = tokens;
+                let error;
+                loop {
+                    let val = MemberDecl::consume(tokens);
+                    let Ok((member, remaining)) = val else {
+                        error = Some(val);
+                        break;
+                    };
+                    members.push(member);
+                    match remaining {
+                        [Token::Semi, remaining @ ..] => tokens = remaining,
+                        [remaining @ ..] => bail!(
+                            "Expected semi colon after member declaration, found {:?} instead",
+                            remaining.first()
+                        ),
+                    }
+                }
+                ensure!(
+                    !members.is_empty(),
+                    "cannot declare union declaration with empty member list"
+                );
+                match tokens {
+                    [Token::RSquirly, Token::Semi, tokens @ ..] => {
+                        Ok(Some((Self { tag, members }, tokens)))
+                    }
+                    [tokens @ ..] => bail!(
+                        "struct with member declaration must be followed by semicolon, found {:?} instead. Error from member decl parse: {error:?}",
+                        tokens.first()
+                    ),
+                }
+            }
+            [Token::Semi, tokens @ ..] => Ok(Some((Self { tag, members }, tokens))),
             _ => Ok(None),
         }
     }

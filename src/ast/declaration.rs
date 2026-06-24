@@ -295,6 +295,20 @@ impl Declaration {
                 );
                 return Ok((Declaration::StructDecl(struct_decl), tokens));
             }
+        } else if base.is_union() {
+            let BaseType::Union(ref tag) = base.base else {
+                unreachable!()
+            };
+            if let Some((struct_decl, tokens)) =
+                UnionDecl::consume(&tokens[stream_offset..], Rc::clone(tag))
+                    .context("failed to parse union declaration after parsing struct type")?
+            {
+                ensure!(
+                    storage_class.is_none(),
+                    "unions cannot have an associated storage class"
+                );
+                return Ok((Declaration::UnionDecl(struct_decl), tokens));
+            }
         }
         let (declarator, tokens) = Declarator::consume(&tokens[stream_offset..])
             .context("ast.Declaration.consume(): Error while parsing declarator.")?;

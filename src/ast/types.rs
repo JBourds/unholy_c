@@ -317,6 +317,14 @@ impl BaseType {
                     };
                     Ok((Self::Struct(Rc::clone(tag)), &tokens[1..]))
                 }
+                Token::Union => {
+                    let tokens = &tokens[1..];
+                    let Some(Token::Ident(tag)) = tokens.first() else {
+                        bail!("Union must be followed by an identifier")
+                    };
+                    Ok((Self::Union(Rc::clone(tag)), &tokens[1..]))
+                }
+
                 Token::Char => Ok((Self::int(1, None), &tokens[1..])),
                 _ => bail!("Could not parse base type."),
             }

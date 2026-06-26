@@ -18,7 +18,7 @@ use anyhow::{Context, Result, bail, ensure};
 
 // Re-export these types for convenience
 pub use constants::Constant;
-pub use declaration::{Declaration, FunDecl, VarDecl};
+pub use declaration::{Declaration, FunDecl, MemberDecl, StructDecl, UnionDecl, VarDecl};
 pub use declarators::{AbstractDeclarator, Declarator};
 pub use exprs::Expr;
 pub use operators::{BinaryOp, UnaryOp};

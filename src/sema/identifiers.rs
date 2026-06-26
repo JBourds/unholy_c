@@ -1,5 +1,7 @@
 use super::*;
 
+use anyhow::Context;
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct IdentEntry {
     pub from_current_scope: bool,
@@ -30,6 +32,37 @@ impl IdentEntry {
     }
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct TagEntry {
+    pub from_current_scope: bool,
+    pub name: Rc<String>,
+}
+
+impl TagEntry {
+    fn new_local(name: Rc<String>) -> Self {
+        Self {
+            from_current_scope: true,
+            name,
+        }
+    }
+
+    fn from_parent_scope(entry: &Self) -> Self {
+        Self {
+            from_current_scope: false,
+            ..entry.clone()
+        }
+    }
+
+    fn make_new_scope(tag_map: &HashMap<Rc<String>, Self>) -> HashMap<Rc<String>, Self> {
+        tag_map
+            .iter()
+            .fold(HashMap::new(), |mut map, (key, entry)| {
+                map.insert(Rc::clone(key), Self::from_parent_scope(entry));
+                map
+            })
+    }
+}
+
 fn make_new_scope(ident_map: &HashMap<Rc<String>, IdentEntry>) -> HashMap<Rc<String>, IdentEntry> {
     ident_map
         .iter()
@@ -41,6 +74,7 @@ fn make_new_scope(ident_map: &HashMap<Rc<String>, IdentEntry>) -> HashMap<Rc<Str
 
 pub fn validate(stage: SemaStage<Initial>) -> Result<SemaStage<IdentResolution>> {
     let mut ident_map = HashMap::new();
+    let mut tag_map = HashMap::new();
     let mut count = 0;
     let mut unique_name_generator = move |name: &str| -> String {
         let new_name = format!("{name}.{count}");
@@ -55,6 +89,7 @@ pub fn validate(stage: SemaStage<Initial>) -> Result<SemaStage<IdentResolution>>
             ast::Declaration::FunDecl(f) => Ok(ast::Declaration::FunDecl(resolve_fun_decl(
                 f,
                 &mut ident_map,
+                &mut tag_map,
                 &mut unique_name_generator,
             )?)),
             ast::Declaration::VarDecl(v) => Ok(ast::Declaration::VarDecl(
@@ -77,6 +112,7 @@ pub fn validate(stage: SemaStage<Initial>) -> Result<SemaStage<IdentResolution>>
 fn validate_block(
     block: ast::Block,
     ident_map: &mut HashMap<Rc<String>, IdentEntry>,
+    tag_map: &mut HashMap<Rc<String>, TagEntry>,
     make_temporary: &mut impl FnMut(&str) -> String,
 ) -> Result<ast::Block> {
     let valid_items =
@@ -84,7 +120,12 @@ fn validate_block(
             .into_items()
             .into_iter()
             .try_fold(Vec::new(), |mut items, block_item| {
-                items.push(validate_blockitem(block_item, ident_map, make_temporary)?);
+                items.push(validate_blockitem(
+                    block_item,
+                    ident_map,
+                    tag_map,
+                    make_temporary,
+                )?);
                 Ok::<Vec<ast::BlockItem>, anyhow::Error>(items)
             })?;
     Ok(ast::Block(valid_items))
@@ -173,6 +214,7 @@ fn resolve_automatic(
 fn resolve_fun_decl(
     decl: ast::FunDecl,
     ident_map: &mut HashMap<Rc<String>, IdentEntry>,
+    tag_map: &mut HashMap<Rc<String>, TagEntry>,
     make_temporary: &mut impl FnMut(&str) -> String,
 ) -> Result<ast::FunDecl> {
     // Reject a duplicate declaration if it is from the current scope but
@@ -192,6 +234,7 @@ fn resolve_fun_decl(
         IdentEntry::new_external(Rc::clone(&decl.name)),
     );
     let mut inner_map = make_new_scope(ident_map);
+    let mut inner_tag_map = TagEntry::make_new_scope(tag_map);
     let new_params = decl
         .params
         .into_iter()
@@ -209,7 +252,9 @@ fn resolve_fun_decl(
         let items = body
             .into_items()
             .into_iter()
-            .map(|item| validate_blockitem(item, &mut inner_map, make_temporary))
+            .map(|item| {
+                validate_blockitem(item, &mut inner_map, &mut inner_tag_map, make_temporary)
+            })
             .collect::<Result<Vec<ast::BlockItem>, Error>>()?;
         Some(ast::Block(items))
     } else {
@@ -223,9 +268,76 @@ fn resolve_fun_decl(
     })
 }
 
+fn resolve_struct_decl(
+    decl: ast::StructDecl,
+    tag_map: &mut HashMap<Rc<String>, TagEntry>,
+    make_temporary: &mut impl FnMut(&str) -> String,
+) -> Result<ast::StructDecl> {
+    let unique_tag = match tag_map.get(&decl.tag) {
+        Some(entry) => Rc::clone(&entry.name),
+        None => {
+            let tag = Rc::new(make_temporary(&decl.tag));
+            let entry = TagEntry::new_local(Rc::clone(&tag));
+            tag_map.insert(Rc::clone(&decl.tag), entry);
+            tag
+        }
+    };
+
+    let members = decl
+        .members
+        .into_iter()
+        .map(|member| {
+            Ok(ast::MemberDecl {
+                r#type: resolve_type(member.r#type, tag_map)
+                    .context(format!("failed to process {}.{}", decl.tag, member.name,))?,
+                ..member
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+
+    Ok(ast::StructDecl {
+        tag: unique_tag,
+        members,
+    })
+}
+
+fn resolve_union_decl(
+    decl: ast::UnionDecl,
+    tag_map: &mut HashMap<Rc<String>, TagEntry>,
+    make_temporary: &mut impl FnMut(&str) -> String,
+) -> Result<ast::UnionDecl> {
+    let unique_tag = match tag_map.get(&decl.tag) {
+        Some(entry) => Rc::clone(&entry.name),
+        None => {
+            let tag = Rc::new(make_temporary(&decl.tag));
+            let entry = TagEntry::new_local(Rc::clone(&tag));
+            tag_map.insert(Rc::clone(&decl.tag), entry);
+            tag
+        }
+    };
+
+    let members = decl
+        .members
+        .into_iter()
+        .map(|member| {
+            Ok(ast::MemberDecl {
+                r#type: resolve_type(member.r#type, tag_map)
+                    .context(format!("failed to process {}.{}", decl.tag, member.name,))?,
+                ..member
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+
+    Ok(ast::UnionDecl {
+        tag: unique_tag,
+        members,
+    })
+}
+
 fn resolve_decl(
     decl: ast::Declaration,
     ident_map: &mut HashMap<Rc<String>, IdentEntry>,
+    tag_map: &mut HashMap<Rc<String>, TagEntry>,
     make_temporary: &mut impl FnMut(&str) -> String,
 ) -> Result<ast::Declaration> {
     match decl {
@@ -233,27 +345,35 @@ fn resolve_decl(
             resolve_local_var_decl(decl, ident_map, make_temporary).map(ast::Declaration::VarDecl)
         }
         ast::Declaration::FunDecl(decl) => {
-            resolve_fun_decl(decl, ident_map, make_temporary).map(ast::Declaration::FunDecl)
+            resolve_fun_decl(decl, ident_map, tag_map, make_temporary)
+                .map(ast::Declaration::FunDecl)
         }
-        ast::Declaration::StructDecl(..) => todo!(),
-        ast::Declaration::UnionDecl(..) => todo!(),
+        ast::Declaration::StructDecl(decl) => {
+            resolve_struct_decl(decl, tag_map, make_temporary).map(ast::Declaration::StructDecl)
+        }
+        ast::Declaration::UnionDecl(decl) => {
+            resolve_union_decl(decl, tag_map, make_temporary).map(ast::Declaration::UnionDecl)
+        }
     }
 }
 
 fn validate_blockitem(
     item: ast::BlockItem,
     ident_map: &mut HashMap<Rc<String>, IdentEntry>,
+    tag_map: &mut HashMap<Rc<String>, TagEntry>,
     make_temporary: &mut impl FnMut(&str) -> String,
 ) -> Result<ast::BlockItem> {
     match item {
         ast::BlockItem::Stmt(stmt) => Ok(ast::BlockItem::Stmt(resolve_stmt(
             stmt,
             ident_map,
+            tag_map,
             make_temporary,
         )?)),
         ast::BlockItem::Decl(decl) => Ok(ast::BlockItem::Decl(resolve_decl(
             decl,
             ident_map,
+            tag_map,
             make_temporary,
         )?)),
     }
@@ -262,6 +382,7 @@ fn validate_blockitem(
 fn resolve_stmt(
     stmt: ast::Stmt,
     ident_map: &HashMap<Rc<String>, IdentEntry>,
+    tag_map: &HashMap<Rc<String>, TagEntry>,
     make_temporary: &mut impl FnMut(&str) -> String,
 ) -> Result<ast::Stmt> {
     match stmt {
@@ -276,9 +397,14 @@ fn resolve_stmt(
             r#else,
         } => Ok(ast::Stmt::If {
             condition: resolve_expr(condition, ident_map)?,
-            then: Box::new(resolve_stmt(*then, ident_map, make_temporary)?),
+            then: Box::new(resolve_stmt(*then, ident_map, tag_map, make_temporary)?),
             r#else: match r#else {
-                Some(r#else) => Some(Box::new(resolve_stmt(*r#else, ident_map, make_temporary)?)),
+                Some(r#else) => Some(Box::new(resolve_stmt(
+                    *r#else,
+                    ident_map,
+                    tag_map,
+                    make_temporary,
+                )?)),
                 None => None,
             },
         }),
@@ -290,7 +416,7 @@ fn resolve_stmt(
             label,
         } => Ok(ast::Stmt::While {
             condition: resolve_expr(condition, ident_map)?,
-            body: Box::new(resolve_stmt(*body, ident_map, make_temporary)?),
+            body: Box::new(resolve_stmt(*body, ident_map, tag_map, make_temporary)?),
             label,
         }),
         ast::Stmt::DoWhile {
@@ -299,7 +425,7 @@ fn resolve_stmt(
             label,
         } => Ok(ast::Stmt::DoWhile {
             condition: resolve_expr(condition, ident_map)?,
-            body: Box::new(resolve_stmt(*body, ident_map, make_temporary)?),
+            body: Box::new(resolve_stmt(*body, ident_map, tag_map, make_temporary)?),
             label,
         }),
         ast::Stmt::For {
@@ -310,6 +436,7 @@ fn resolve_stmt(
             label,
         } => {
             let mut new_map = make_new_scope(ident_map);
+            let new_tag_map = TagEntry::make_new_scope(tag_map);
             let init = match *init {
                 ast::ForInit::Decl(ref decl) => ast::ForInit::Decl(resolve_local_var_decl(
                     decl.clone(),
@@ -335,23 +462,24 @@ fn resolve_stmt(
                 init: Box::new(init),
                 condition,
                 post,
-                body: Box::new(resolve_stmt(*body, &new_map, make_temporary)?),
+                body: Box::new(resolve_stmt(*body, &new_map, &new_tag_map, make_temporary)?),
                 label,
             })
         }
         ast::Stmt::Null => Ok(ast::Stmt::Null),
         ast::Stmt::Compound(block) => {
             let mut new_map = make_new_scope(ident_map);
-            let block = validate_block(block, &mut new_map, make_temporary)?;
+            let mut new_tag_map = TagEntry::make_new_scope(tag_map);
+            let block = validate_block(block, &mut new_map, &mut new_tag_map, make_temporary)?;
             Ok(ast::Stmt::Compound(block))
         }
         ast::Stmt::Goto(label) => Ok(ast::Stmt::Goto(label)),
         ast::Stmt::Label { name, stmt } => Ok(ast::Stmt::Label {
             name,
-            stmt: Box::new(resolve_stmt(*stmt, ident_map, make_temporary)?),
+            stmt: Box::new(resolve_stmt(*stmt, ident_map, tag_map, make_temporary)?),
         }),
         ast::Stmt::Default { stmt, label } => Ok(ast::Stmt::Default {
-            stmt: Box::new(resolve_stmt(*stmt, ident_map, make_temporary)?),
+            stmt: Box::new(resolve_stmt(*stmt, ident_map, tag_map, make_temporary)?),
             label,
         }),
         ast::Stmt::Switch {
@@ -362,14 +490,14 @@ fn resolve_stmt(
             default,
         } => Ok(ast::Stmt::Switch {
             condition: resolve_expr(condition, ident_map)?,
-            body: Box::new(resolve_stmt(*body, ident_map, make_temporary)?),
+            body: Box::new(resolve_stmt(*body, ident_map, tag_map, make_temporary)?),
             label,
             cases,
             default,
         }),
         ast::Stmt::Case { value, stmt, label } => Ok(ast::Stmt::Case {
             value: resolve_expr(value, ident_map)?,
-            stmt: Box::new(resolve_stmt(*stmt, ident_map, make_temporary)?),
+            stmt: Box::new(resolve_stmt(*stmt, ident_map, tag_map, make_temporary)?),
             label,
         }),
     }
@@ -445,4 +573,33 @@ fn resolve_expr(expr: ast::Expr, ident_map: &HashMap<Rc<String>, IdentEntry>) ->
         ast::Expr::Dot { .. } => todo!(),
         ast::Expr::Arrow { .. } => todo!(),
     }
+}
+
+fn resolve_type(r#type: ast::Type, tag_map: &HashMap<Rc<String>, TagEntry>) -> Result<ast::Type> {
+    let base = match r#type.base {
+        ast::BaseType::Struct(tag) => {
+            let Some(new_tag) = tag_map.get(&tag) else {
+                bail!("attempting to use structure {tag} before its defined");
+            };
+            ast::BaseType::Struct(Rc::clone(&new_tag.name))
+        }
+        ast::BaseType::Ptr { to, is_restrict } => ast::BaseType::Ptr {
+            to: resolve_type(*to, tag_map)?.into(),
+            is_restrict,
+        },
+        ast::BaseType::Array { element, size } => ast::BaseType::Array {
+            element: resolve_type(*element, tag_map)?.into(),
+            size,
+        },
+        ast::BaseType::Fun { ret_t, param_types } => ast::BaseType::Fun {
+            ret_t: resolve_type(*ret_t, tag_map)?.into(),
+            param_types: param_types
+                .into_iter()
+                .map(|param| resolve_type(param, tag_map))
+                .collect::<Result<Vec<_>>>()?,
+        },
+        base => base,
+    };
+
+    Ok(ast::Type { base, ..r#type })
 }

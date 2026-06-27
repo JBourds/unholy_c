@@ -591,8 +591,14 @@ fn resolve_expr(expr: ast::Expr, ident_map: &HashMap<Rc<String>, IdentEntry>) ->
         expr @ ast::Expr::String { .. } => Ok(expr),
         ast::Expr::SizeOf(expr) => Ok(ast::Expr::SizeOf(resolve_expr(*expr, ident_map)?.into())),
         v @ ast::Expr::SizeOfT(_) => Ok(v),
-        ast::Expr::Dot { .. } => todo!(),
-        ast::Expr::Arrow { .. } => todo!(),
+        ast::Expr::Dot { structure, member } => Ok(ast::Expr::Dot {
+            structure: resolve_expr(*structure, ident_map)?.into(),
+            member,
+        }),
+        ast::Expr::Arrow { pointer, member } => Ok(ast::Expr::Arrow {
+            pointer: resolve_expr(*pointer, ident_map)?.into(),
+            member,
+        }),
     }
 }
 

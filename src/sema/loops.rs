@@ -8,8 +8,9 @@ pub fn validate(stage: SemaStage<GotoValidation>) -> Result<SemaStage<LoopLabell
         .map(|d| match d {
             ast::Declaration::FunDecl(f) => Ok(ast::Declaration::FunDecl(resolve_function(f)?)),
             ast::Declaration::VarDecl(v) => Ok(ast::Declaration::VarDecl(v)),
-            ast::Declaration::StructDecl(..) => todo!(),
-            ast::Declaration::UnionDecl(..) => todo!(),
+            decl @ ast::Declaration::StructDecl(..) | decl @ ast::Declaration::UnionDecl(..) => {
+                Ok(decl)
+            }
         })
         .collect::<Result<Vec<ast::Declaration>, Error>>()?;
     Ok(SemaStage {

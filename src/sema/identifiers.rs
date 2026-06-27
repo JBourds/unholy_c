@@ -166,7 +166,7 @@ fn resolve_local_var_decl(
     } else {
         let unique_name = resolve_automatic(decl.name, ident_map, make_temporary)?;
         let init = match decl.init {
-            Some(init) => Some(resolve_init(init, ident_map)?),
+            Some(init) => Some(resolve_init(init, ident_map, tag_map)?),
             None => None,
         };
 
@@ -181,15 +181,16 @@ fn resolve_local_var_decl(
 fn resolve_init(
     init: ast::Initializer,
     ident_map: &mut HashMap<Rc<String>, IdentEntry>,
+    tag_map: &HashMap<Rc<String>, TagEntry>,
 ) -> Result<ast::Initializer> {
     match init {
         ast::Initializer::SingleInit(expr) => Ok(ast::Initializer::SingleInit(
-            resolve_expr(*expr, ident_map)?.into(),
+            resolve_expr(*expr, ident_map, tag_map)?.into(),
         )),
         ast::Initializer::CompoundInit(inits) => Ok(ast::Initializer::CompoundInit(
             inits
                 .into_iter()
-                .map(|i| resolve_init(i, ident_map))
+                .map(|i| resolve_init(i, ident_map, tag_map))
                 .collect::<Result<Vec<ast::Initializer>>>()?,
         )),
     }
@@ -406,17 +407,17 @@ fn resolve_stmt(
     make_temporary: &mut impl FnMut(&str) -> String,
 ) -> Result<ast::Stmt> {
     match stmt {
-        ast::Stmt::Return(Some(expr)) => {
-            Ok(ast::Stmt::Return(Some(resolve_expr(expr, ident_map)?)))
-        }
+        ast::Stmt::Return(Some(expr)) => Ok(ast::Stmt::Return(Some(resolve_expr(
+            expr, ident_map, tag_map,
+        )?))),
         ast::Stmt::Return(None) => Ok(ast::Stmt::Return(None)),
-        ast::Stmt::Expr(expr) => Ok(ast::Stmt::Expr(resolve_expr(expr, ident_map)?)),
+        ast::Stmt::Expr(expr) => Ok(ast::Stmt::Expr(resolve_expr(expr, ident_map, tag_map)?)),
         ast::Stmt::If {
             condition,
             then,
             r#else,
         } => Ok(ast::Stmt::If {
-            condition: resolve_expr(condition, ident_map)?,
+            condition: resolve_expr(condition, ident_map, tag_map)?,
             then: Box::new(resolve_stmt(*then, ident_map, tag_map, make_temporary)?),
             r#else: match r#else {
                 Some(r#else) => Some(Box::new(resolve_stmt(
@@ -435,7 +436,7 @@ fn resolve_stmt(
             body,
             label,
         } => Ok(ast::Stmt::While {
-            condition: resolve_expr(condition, ident_map)?,
+            condition: resolve_expr(condition, ident_map, tag_map)?,
             body: Box::new(resolve_stmt(*body, ident_map, tag_map, make_temporary)?),
             label,
         }),
@@ -444,7 +445,7 @@ fn resolve_stmt(
             condition,
             label,
         } => Ok(ast::Stmt::DoWhile {
-            condition: resolve_expr(condition, ident_map)?,
+            condition: resolve_expr(condition, ident_map, tag_map)?,
             body: Box::new(resolve_stmt(*body, ident_map, tag_map, make_temporary)?),
             label,
         }),
@@ -465,17 +466,17 @@ fn resolve_stmt(
                     make_temporary,
                 )?),
                 ast::ForInit::Expr(Some(expr)) => {
-                    ast::ForInit::Expr(Some(resolve_expr(expr, &new_map)?))
+                    ast::ForInit::Expr(Some(resolve_expr(expr, &new_map, &new_tag_map)?))
                 }
                 init => init,
             };
             let condition = if let Some(expr) = condition {
-                Some(resolve_expr(expr, &new_map)?)
+                Some(resolve_expr(expr, &new_map, &new_tag_map)?)
             } else {
                 None
             };
             let post = if let Some(expr) = post {
-                Some(resolve_expr(expr, &new_map)?)
+                Some(resolve_expr(expr, &new_map, &new_tag_map)?)
             } else {
                 None
             };
@@ -510,25 +511,29 @@ fn resolve_stmt(
             cases,
             default,
         } => Ok(ast::Stmt::Switch {
-            condition: resolve_expr(condition, ident_map)?,
+            condition: resolve_expr(condition, ident_map, tag_map)?,
             body: Box::new(resolve_stmt(*body, ident_map, tag_map, make_temporary)?),
             label,
             cases,
             default,
         }),
         ast::Stmt::Case { value, stmt, label } => Ok(ast::Stmt::Case {
-            value: resolve_expr(value, ident_map)?,
+            value: resolve_expr(value, ident_map, tag_map)?,
             stmt: Box::new(resolve_stmt(*stmt, ident_map, tag_map, make_temporary)?),
             label,
         }),
     }
 }
 
-fn resolve_expr(expr: ast::Expr, ident_map: &HashMap<Rc<String>, IdentEntry>) -> Result<ast::Expr> {
+fn resolve_expr(
+    expr: ast::Expr,
+    ident_map: &HashMap<Rc<String>, IdentEntry>,
+    tag_map: &HashMap<Rc<String>, TagEntry>,
+) -> Result<ast::Expr> {
     match expr {
         ast::Expr::Assignment { lvalue, rvalue } => Ok(ast::Expr::Assignment {
-            lvalue: Box::new(resolve_expr(*lvalue, ident_map)?),
-            rvalue: Box::new(resolve_expr(*rvalue, ident_map)?),
+            lvalue: Box::new(resolve_expr(*lvalue, ident_map, tag_map)?),
+            rvalue: Box::new(resolve_expr(*rvalue, ident_map, tag_map)?),
         }),
         ast::Expr::Var(var) => {
             if let Some(IdentEntry { name, .. }) = ident_map.get(&var) {
@@ -542,7 +547,7 @@ fn resolve_expr(expr: ast::Expr, ident_map: &HashMap<Rc<String>, IdentEntry>) ->
             if op.is_valid_for(&expr) {
                 Ok(ast::Expr::Unary {
                     op,
-                    expr: Box::new(resolve_expr(*expr, ident_map)?),
+                    expr: Box::new(resolve_expr(*expr, ident_map, tag_map)?),
                 })
             } else {
                 bail!("Op {:?} is invalid for expression {:?}", op, expr)
@@ -550,17 +555,17 @@ fn resolve_expr(expr: ast::Expr, ident_map: &HashMap<Rc<String>, IdentEntry>) ->
         }
         ast::Expr::Binary { op, left, right } => Ok(ast::Expr::Binary {
             op,
-            left: Box::new(resolve_expr(*left, ident_map)?),
-            right: Box::new(resolve_expr(*right, ident_map)?),
+            left: Box::new(resolve_expr(*left, ident_map, tag_map)?),
+            right: Box::new(resolve_expr(*right, ident_map, tag_map)?),
         }),
         ast::Expr::Conditional {
             condition,
             then,
             r#else,
         } => Ok(ast::Expr::Conditional {
-            condition: Box::new(resolve_expr(*condition, ident_map)?),
-            then: Box::new(resolve_expr(*then, ident_map)?),
-            r#else: Box::new(resolve_expr(*r#else, ident_map)?),
+            condition: Box::new(resolve_expr(*condition, ident_map, tag_map)?),
+            then: Box::new(resolve_expr(*then, ident_map, tag_map)?),
+            r#else: Box::new(resolve_expr(*r#else, ident_map, tag_map)?),
         }),
         ast::Expr::FunCall { name, args } => {
             // Replace the name of the function with whatever is there in
@@ -573,7 +578,7 @@ fn resolve_expr(expr: ast::Expr, ident_map: &HashMap<Rc<String>, IdentEntry>) ->
             };
             let valid_args = args
                 .into_iter()
-                .map(|a| resolve_expr(a, ident_map))
+                .map(|a| resolve_expr(a, ident_map, tag_map))
                 .collect::<Result<Vec<ast::Expr>, Error>>()?;
             Ok(ast::Expr::FunCall {
                 name,
@@ -581,22 +586,24 @@ fn resolve_expr(expr: ast::Expr, ident_map: &HashMap<Rc<String>, IdentEntry>) ->
             })
         }
         ast::Expr::Cast { exp, target } => Ok(ast::Expr::Cast {
-            target,
-            exp: Box::new(resolve_expr(*exp, ident_map)?),
+            target: resolve_type(target, tag_map)?,
+            exp: Box::new(resolve_expr(*exp, ident_map, tag_map)?),
         }),
         ast::Expr::Subscript { expr, index } => Ok(ast::Expr::Subscript {
-            expr: resolve_expr(*expr, ident_map)?.into(),
-            index: resolve_expr(*index, ident_map)?.into(),
+            expr: resolve_expr(*expr, ident_map, tag_map)?.into(),
+            index: resolve_expr(*index, ident_map, tag_map)?.into(),
         }),
         expr @ ast::Expr::String { .. } => Ok(expr),
-        ast::Expr::SizeOf(expr) => Ok(ast::Expr::SizeOf(resolve_expr(*expr, ident_map)?.into())),
+        ast::Expr::SizeOf(expr) => Ok(ast::Expr::SizeOf(
+            resolve_expr(*expr, ident_map, tag_map)?.into(),
+        )),
         v @ ast::Expr::SizeOfT(_) => Ok(v),
         ast::Expr::Dot { structure, member } => Ok(ast::Expr::Dot {
-            structure: resolve_expr(*structure, ident_map)?.into(),
+            structure: resolve_expr(*structure, ident_map, tag_map)?.into(),
             member,
         }),
         ast::Expr::Arrow { pointer, member } => Ok(ast::Expr::Arrow {
-            pointer: resolve_expr(*pointer, ident_map)?.into(),
+            pointer: resolve_expr(*pointer, ident_map, tag_map)?.into(),
             member,
         }),
     }

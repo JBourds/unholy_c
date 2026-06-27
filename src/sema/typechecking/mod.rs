@@ -7,7 +7,9 @@ pub mod init;
 pub mod initial_value;
 pub mod program;
 pub mod statement;
+pub mod struct_union_decl;
 pub mod symbols;
+pub mod type_table;
 pub mod var_init;
 
 use crate::const_eval;
@@ -18,6 +20,7 @@ use crate::ast::{Expr, Type};
 pub use attribute::Attribute;
 pub use initial_value::InitialValue;
 pub use symbols::{Scope, SymbolEntry, SymbolTable, SymbolTableGetType};
+pub use type_table::TypeTable;
 
 use super::*;
 use block::{typecheck_block, typecheck_block_item};

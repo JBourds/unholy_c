@@ -93,7 +93,7 @@ pub fn validate(stage: SemaStage<Initial>) -> Result<SemaStage<IdentResolution>>
                 &mut unique_name_generator,
             )?)),
             ast::Declaration::VarDecl(v) => Ok(ast::Declaration::VarDecl(
-                resolve_file_scope_var_decl(v, &mut ident_map),
+                resolve_file_scope_var_decl(v, &mut ident_map, &tag_map)?,
             )),
             ast::Declaration::StructDecl(..) => todo!(),
             ast::Declaration::UnionDecl(..) => todo!(),
@@ -134,6 +134,7 @@ fn validate_block(
 fn resolve_local_var_decl(
     decl: ast::VarDecl,
     ident_map: &mut HashMap<Rc<String>, IdentEntry>,
+    tag_map: &HashMap<Rc<String>, TagEntry>,
     make_temporary: &mut impl FnMut(&str) -> String,
 ) -> Result<ast::VarDecl> {
     if let Some(prev_entry) = ident_map.get(&decl.name)
@@ -143,6 +144,11 @@ fn resolve_local_var_decl(
     {
         bail!("Conflicting local declaration '{}' ", decl.name);
     }
+    let decl = {
+        let r#type = resolve_type(decl.r#type, tag_map)
+            .context("failed to resolve type for local declaration")?;
+        ast::VarDecl { r#type, ..decl }
+    };
     if let Some(ast::StorageClass::Extern) = decl.storage_class {
         _ = ident_map.insert(
             Rc::clone(&decl.name),
@@ -184,12 +190,17 @@ fn resolve_init(
 fn resolve_file_scope_var_decl(
     decl: ast::VarDecl,
     ident_map: &mut HashMap<Rc<String>, IdentEntry>,
-) -> ast::VarDecl {
+    tag_map: &HashMap<Rc<String>, TagEntry>,
+) -> Result<ast::VarDecl> {
     _ = ident_map.insert(
         Rc::clone(&decl.name),
         IdentEntry::new_external(Rc::clone(&decl.name)),
     );
-    decl
+    let r#type = resolve_type(decl.r#type.clone(), tag_map).context(format!(
+        "use of type before declaration for vardecl: {decl:?}"
+    ))?;
+
+    Ok(ast::VarDecl { r#type, ..decl })
 }
 
 fn resolve_automatic(
@@ -342,7 +353,8 @@ fn resolve_decl(
 ) -> Result<ast::Declaration> {
     match decl {
         ast::Declaration::VarDecl(decl) => {
-            resolve_local_var_decl(decl, ident_map, make_temporary).map(ast::Declaration::VarDecl)
+            resolve_local_var_decl(decl, ident_map, tag_map, make_temporary)
+                .map(ast::Declaration::VarDecl)
         }
         ast::Declaration::FunDecl(decl) => {
             resolve_fun_decl(decl, ident_map, tag_map, make_temporary)
@@ -441,6 +453,7 @@ fn resolve_stmt(
                 ast::ForInit::Decl(ref decl) => ast::ForInit::Decl(resolve_local_var_decl(
                     decl.clone(),
                     &mut new_map,
+                    &new_tag_map,
                     make_temporary,
                 )?),
                 ast::ForInit::Expr(Some(expr)) => {

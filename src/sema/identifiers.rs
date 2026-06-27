@@ -95,8 +95,16 @@ pub fn validate(stage: SemaStage<Initial>) -> Result<SemaStage<IdentResolution>>
             ast::Declaration::VarDecl(v) => Ok(ast::Declaration::VarDecl(
                 resolve_file_scope_var_decl(v, &mut ident_map, &tag_map)?,
             )),
-            ast::Declaration::StructDecl(..) => todo!(),
-            ast::Declaration::UnionDecl(..) => todo!(),
+            ast::Declaration::StructDecl(decl) => {
+                resolve_struct_decl(decl, &mut tag_map, &mut unique_name_generator)
+                    .map(ast::Declaration::StructDecl)
+                    .context("failed to resolve_struct_decl")
+            }
+            ast::Declaration::UnionDecl(decl) => {
+                resolve_union_decl(decl, &mut tag_map, &mut unique_name_generator)
+                    .map(ast::Declaration::UnionDecl)
+                    .context("failed to resolve_union_decl")
+            }
         })
         .collect::<Result<Vec<ast::Declaration>, Error>>()?;
 

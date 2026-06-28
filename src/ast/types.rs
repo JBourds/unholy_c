@@ -26,8 +26,14 @@ pub enum BaseType {
         element: Box<Type>,
         size: usize,
     },
-    Struct(Rc<String>),
-    Union(Rc<String>),
+    Struct {
+        tag: Rc<String>,
+        size: usize,
+    },
+    Union {
+        tag: Rc<String>,
+        size: usize,
+    },
     Void,
 }
 
@@ -148,8 +154,8 @@ impl BaseType {
             BaseType::Ptr { .. } => core::mem::size_of::<usize>(),
             BaseType::Array { element, size } => element.base.nbytes() * size,
             BaseType::Fun { .. } => unreachable!(),
-            BaseType::Struct(..) => todo!(),
-            BaseType::Union(..) => todo!(),
+            BaseType::Struct { .. } => todo!(),
+            BaseType::Union { .. } => todo!(),
             // Sentinel value
             BaseType::Void => 0,
         }
@@ -163,8 +169,8 @@ impl BaseType {
             BaseType::Ptr { to, .. } => to.size_of(),
             BaseType::Array { element, .. } => element.base.size_of_base_type(),
             BaseType::Fun { .. } => unreachable!(),
-            BaseType::Struct(..) => todo!(),
-            BaseType::Union(..) => todo!(),
+            BaseType::Struct { .. } => todo!(),
+            BaseType::Union { .. } => todo!(),
             // Sentinel value
             BaseType::Void => 0,
         }
@@ -241,7 +247,7 @@ impl BaseType {
             Self::Array { element, size } => {
                 NonZeroUsize::new(calculate_alignment(element.alignment.get(), *size)).unwrap()
             }
-            Self::Struct(..) | Self::Union(..) => NonZeroUsize::new(1).unwrap(), // FIXME: this is wrong, but we haven't gotten to calculating alignment for these types
+            Self::Struct { .. } | Self::Union { .. } => NonZeroUsize::new(1).unwrap(), // FIXME: this is wrong, but we haven't gotten to calculating alignment for these types
             // Sentinel value- don't ever let an instance of void be created
             Self::Void => NonZeroUsize::new(1).unwrap(),
         }
@@ -315,14 +321,26 @@ impl BaseType {
                     let Some(Token::Ident(tag)) = tokens.first() else {
                         bail!("Struct must be followed by an identifier")
                     };
-                    Ok((Self::Struct(Rc::clone(tag)), &tokens[1..]))
+                    Ok((
+                        Self::Struct {
+                            tag: Rc::clone(tag),
+                            size: 0,
+                        },
+                        &tokens[1..],
+                    ))
                 }
                 Token::Union => {
                     let tokens = &tokens[1..];
                     let Some(Token::Ident(tag)) = tokens.first() else {
                         bail!("Union must be followed by an identifier")
                     };
-                    Ok((Self::Union(Rc::clone(tag)), &tokens[1..]))
+                    Ok((
+                        Self::Union {
+                            tag: Rc::clone(tag),
+                            size: 0,
+                        },
+                        &tokens[1..],
+                    ))
                 }
 
                 Token::Char => Ok((Self::int(1, None), &tokens[1..])),
@@ -362,8 +380,8 @@ impl std::fmt::Display for BaseType {
             Self::Array { element, size } => write!(f, "{element}[{size}]"),
             Self::Float(_) => write!(f, "float"),
             Self::Double(_) => write!(f, "double"),
-            Self::Struct(..) => todo!(),
-            Self::Union(..) => todo!(),
+            Self::Struct { .. } => todo!(),
+            Self::Union { .. } => todo!(),
             Self::Fun { ret_t, param_types } => {
                 write!(f, "(")?;
                 for (index, t) in param_types.iter().enumerate() {
@@ -558,11 +576,11 @@ impl Type {
     }
 
     pub fn is_struct(&self) -> bool {
-        matches!(self.base, BaseType::Struct(..))
+        matches!(self.base, BaseType::Struct { .. })
     }
 
     pub fn is_union(&self) -> bool {
-        matches!(self.base, BaseType::Union(..))
+        matches!(self.base, BaseType::Union { .. })
     }
 
     pub fn deref(self) -> Self {

@@ -611,11 +611,23 @@ fn resolve_expr(
 
 fn resolve_type(r#type: ast::Type, tag_map: &HashMap<Rc<String>, TagEntry>) -> Result<ast::Type> {
     let base = match r#type.base {
-        ast::BaseType::Struct(tag) => {
+        ast::BaseType::Struct { tag, size } => {
             let Some(new_tag) = tag_map.get(&tag) else {
                 bail!("attempting to use structure {tag} before its defined");
             };
-            ast::BaseType::Struct(Rc::clone(&new_tag.name))
+            ast::BaseType::Struct {
+                tag: Rc::clone(&new_tag.name),
+                size,
+            }
+        }
+        ast::BaseType::Union { tag, size } => {
+            let Some(new_tag) = tag_map.get(&tag) else {
+                bail!("attempting to use union {tag} before its defined");
+            };
+            ast::BaseType::Union {
+                tag: Rc::clone(&new_tag.name),
+                size,
+            }
         }
         ast::BaseType::Ptr { to, is_restrict } => ast::BaseType::Ptr {
             to: resolve_type(*to, tag_map)?.into(),

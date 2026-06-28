@@ -282,7 +282,7 @@ impl Declaration {
 
         // Structs are to be handled seperatly
         if base.is_struct() {
-            let BaseType::Struct(ref tag) = base.base else {
+            let BaseType::Struct { ref tag, .. } = base.base else {
                 unreachable!()
             };
             if let Some((struct_decl, tokens)) =
@@ -296,7 +296,7 @@ impl Declaration {
                 return Ok((Declaration::StructDecl(struct_decl), tokens));
             }
         } else if base.is_union() {
-            let BaseType::Union(ref tag) = base.base else {
+            let BaseType::Union { ref tag, .. } = base.base else {
                 unreachable!()
             };
             if let Some((struct_decl, tokens)) =

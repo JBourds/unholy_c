@@ -8,9 +8,10 @@ pub struct TypeTable {
 
 #[derive(Debug)]
 pub struct StructEntry {
-    alignment: usize,
-    size: usize,
-    members: Vec<MemberEntry>,
+    pub alignment: usize,
+    pub size: usize,
+    pub members: Vec<MemberEntry>,
+    pub tag_type: StructOrUnion,
 }
 
 impl StructEntry {
@@ -19,9 +20,15 @@ impl StructEntry {
     }
 }
 
+#[derive(Debug, Eq, PartialEq)]
+pub enum StructOrUnion {
+    Struct,
+    Union,
+}
+
 #[derive(Debug)]
 pub struct MemberEntry {
-    name: Rc<String>,
-    r#type: ast::Type,
-    offset: usize,
+    pub name: Rc<String>,
+    pub r#type: ast::Type,
+    pub offset: usize,
 }

@@ -154,8 +154,8 @@ impl BaseType {
             BaseType::Ptr { .. } => core::mem::size_of::<usize>(),
             BaseType::Array { element, size } => element.base.nbytes() * size,
             BaseType::Fun { .. } => unreachable!(),
-            BaseType::Struct { .. } => todo!(),
-            BaseType::Union { .. } => todo!(),
+            BaseType::Struct { size, .. } => *size,
+            BaseType::Union { size, .. } => *size,
             // Sentinel value
             BaseType::Void => 0,
         }

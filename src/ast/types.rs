@@ -500,6 +500,16 @@ impl Type {
         }
     }
 
+    pub fn is_array_complete(&self) -> bool {
+        match self {
+            Self {
+                base: BaseType::Array { element, .. },
+                ..
+            } => element.is_complete() && element.is_array_complete(),
+            _ => true,
+        }
+    }
+
     pub fn size_of(&self) -> usize {
         self.base.nbytes()
     }

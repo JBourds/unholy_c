@@ -12,6 +12,8 @@ pub mod symbols;
 pub mod type_table;
 pub mod var_init;
 
+use std::num::NonZeroUsize;
+
 use crate::const_eval;
 
 use anyhow::Context;
@@ -198,4 +200,72 @@ pub(super) fn validate_type_specifier(ty: &ast::Type) -> Result<()> {
         _ => {}
     }
     Ok(())
+}
+
+fn fixup_type(r#type: ast::Type, type_table: &TypeTable) -> ast::Type {
+    match r#type {
+        ast::Type {
+            base: ast::BaseType::Struct { tag, size },
+            is_const,
+            ..
+        } if type_table.get(&tag).is_some() => {
+            let Some(entry) = type_table.get(&tag) else {
+                unreachable!()
+            };
+
+            let base = ast::BaseType::Struct {
+                tag,
+                size: entry.size,
+            };
+            ast::Type {
+                base,
+                alignment: NonZeroUsize::new(entry.alignment).unwrap(),
+                is_const,
+            }
+        }
+        ast::Type {
+            base: ast::BaseType::Union { tag, size },
+            is_const,
+            ..
+        } if type_table.get(&tag).is_some() => {
+            let Some(entry) = type_table.get(&tag) else {
+                unreachable!()
+            };
+
+            let base = ast::BaseType::Union {
+                tag,
+                size: entry.size,
+            };
+            ast::Type {
+                base,
+                alignment: NonZeroUsize::new(entry.alignment).unwrap(),
+                is_const,
+            }
+        }
+        ast::Type {
+            base: ast::BaseType::Array { element, size },
+            alignment,
+            is_const,
+        } => ast::Type {
+            base: ast::BaseType::Array {
+                element: fixup_type(*element, type_table).into(),
+                size,
+            },
+            alignment,
+            is_const,
+        },
+        ast::Type {
+            base: ast::BaseType::Ptr { to, is_restrict },
+            alignment,
+            is_const,
+        } => ast::Type {
+            base: ast::BaseType::Ptr {
+                to: fixup_type(*to, type_table).into(),
+                is_restrict,
+            },
+            alignment,
+            is_const,
+        },
+        _ => r#type,
+    }
 }

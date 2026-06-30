@@ -1,5 +1,7 @@
 use super::*;
 
+use super::symbols::Scope;
+
 #[derive(Debug)]
 pub struct TypeTable {
     pub global: HashMap<Rc<String>, StructEntry>,
@@ -9,6 +11,30 @@ pub struct TypeTable {
 impl TypeTable {
     pub fn get(&self, key: &Rc<String>) -> Option<&StructEntry> {
         Self::get_local(&self.scopes, key).or(Self::get_global(&self.global, key))
+    }
+
+    pub fn declare_struct(&mut self, decl: &ast::StructDecl) -> Result<StructEntry> {
+        todo!()
+    }
+
+    pub fn push_scope(&mut self) {
+        self.scopes.push(HashMap::new());
+    }
+
+    pub fn pop_scope(&mut self) -> Result<HashMap<Rc<String>, StructEntry>> {
+        if self.scopes.is_empty() {
+            bail!("Already in global scope, cannot pop symbol table")
+        } else {
+            Ok(self.scopes.pop().unwrap())
+        }
+    }
+
+    pub fn declare_in_scope(
+        &mut self,
+        decl: &ast::Declaration,
+        scope: Scope,
+    ) -> Result<StructEntry> {
+        todo!()
     }
 
     fn get_local<'a>(

@@ -1,6 +1,5 @@
-use super::*;
-
 use super::symbols::Scope;
+use super::*;
 
 #[derive(Debug)]
 pub struct TypeTable {
@@ -31,10 +30,75 @@ impl TypeTable {
 
     pub fn declare_in_scope(
         &mut self,
-        decl: &ast::Declaration,
+        r#type: ast::Type,
+        member_entries: Vec<MemberEntry>,
         scope: Scope,
-    ) -> Result<StructEntry> {
-        todo!()
+    ) -> Result<()> {
+        let (name, tag_type) = match &r#type {
+            ast::Type {
+                base: ast::BaseType::Struct { tag, .. },
+                ..
+            } => (Rc::clone(tag), StructOrUnion::Struct),
+            ast::Type {
+                base: ast::BaseType::Union { tag, .. },
+                ..
+            } => (Rc::clone(tag), StructOrUnion::Union),
+            _ => unreachable!(),
+        };
+
+        if let Some(entry) = self.get(&name) {
+            // previous entry
+            if !scope.shadows(&entry.scope) {
+                ensure!(
+                    tag_type == entry.tag_type,
+                    "redefining {name} as {tag_type:?} when it was previously defined as {:?}",
+                    entry.tag_type,
+                );
+                ensure!(
+                    entry.members.is_empty() || member_entries.is_empty(),
+                    "cannot define {name} with members twice in one scope"
+                );
+            } else {
+                // we do shadow
+                self.insert_scope(
+                    name,
+                    StructEntry {
+                        alignment: r#type.alignment.into(),
+                        size: r#type.base.nbytes(),
+                        members: member_entries,
+                        tag_type,
+                        scope: self.scope(),
+                    },
+                );
+            }
+        } else {
+            self.insert_scope(
+                name,
+                StructEntry {
+                    alignment: r#type.alignment.into(),
+                    size: r#type.base.nbytes(),
+                    members: member_entries,
+                    tag_type,
+                    scope: self.scope(),
+                },
+            );
+        }
+
+        Ok(())
+    }
+
+    pub fn insert_scope(&mut self, key: Rc<String>, entry: StructEntry) -> Option<StructEntry> {
+        match entry.scope {
+            Scope::Global => self.global.insert(key, entry),
+            Scope::Local(frame) => self.scopes[frame].insert(key, entry),
+        }
+    }
+
+    pub fn scope(&self) -> Scope {
+        match self.scopes.len() {
+            0 => Scope::Global,
+            n => Scope::Local(n - 1),
+        }
     }
 
     fn get_local<'a>(
@@ -63,6 +127,7 @@ pub struct StructEntry {
     pub size: usize,
     pub members: Vec<MemberEntry>,
     pub tag_type: StructOrUnion,
+    pub scope: Scope,
 }
 
 impl StructEntry {

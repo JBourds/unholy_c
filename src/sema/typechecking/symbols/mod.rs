@@ -36,7 +36,7 @@ pub enum Scope {
 }
 
 impl Scope {
-    fn shadows(&self, other: &Self) -> bool {
+    pub fn shadows(&self, other: &Self) -> bool {
         match (self, other) {
             (Self::Global, Self::Global) => false,
             (Self::Global, Self::Local(_)) => false,

@@ -1,13 +1,18 @@
 use crate::{ast, sema::typechecking::validate_type_specifier};
 
-use super::{SymbolTable, typecheck_block_item};
+use super::{SymbolTable, TypeTable, typecheck_block_item};
 
 use anyhow::{Context, Result, ensure};
 
-pub fn typecheck_fun_decl(decl: ast::FunDecl, symbols: &mut SymbolTable) -> Result<ast::FunDecl> {
+pub fn typecheck_fun_decl(
+    decl: ast::FunDecl,
+    symbols: &mut SymbolTable,
+    structs: &mut TypeTable,
+) -> Result<ast::FunDecl> {
     // Special case: Push scope and iterate over block items here so the
     // function parameters get put into the same scope as the block items
     symbols.push_scope();
+    structs.push_scope();
 
     // Make sure that the function does not take or return incomplete types
     validate_type_specifier(&decl.r#type).context("Invalid type in variable declaration")?;
@@ -33,7 +38,7 @@ pub fn typecheck_fun_decl(decl: ast::FunDecl, symbols: &mut SymbolTable) -> Resu
         let items = block
             .into_items()
             .into_iter()
-            .map(|item| typecheck_block_item(item, symbols, Some(decl.name.clone())))
+            .map(|item| typecheck_block_item(item, symbols, structs, Some(decl.name.clone())))
             .collect::<Result<Vec<_>>>()
             .context(format!(
                 "Failed to typecheck function declaration for \"{}\"",
@@ -44,6 +49,9 @@ pub fn typecheck_fun_decl(decl: ast::FunDecl, symbols: &mut SymbolTable) -> Resu
         None
     };
     symbols
+        .pop_scope()
+        .expect("We just popped the scope so this should not fail.");
+    structs
         .pop_scope()
         .expect("We just popped the scope so this should not fail.");
     Ok(ast::FunDecl { block, ..decl })

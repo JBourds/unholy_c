@@ -8,12 +8,15 @@ pub struct TypeTable {
 }
 
 impl TypeTable {
-    pub fn get(&self, key: &Rc<String>) -> Option<&StructEntry> {
-        Self::get_local(&self.scopes, key).or(Self::get_global(&self.global, key))
+    pub fn new_table() -> Self {
+        Self {
+            global: HashMap::new(),
+            scopes: vec![],
+        }
     }
 
-    pub fn declare_struct(&mut self, decl: &ast::StructDecl) -> Result<StructEntry> {
-        todo!()
+    pub fn get(&self, key: &Rc<String>) -> Option<&StructEntry> {
+        Self::get_local(&self.scopes, key).or(Self::get_global(&self.global, key))
     }
 
     pub fn push_scope(&mut self) {

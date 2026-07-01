@@ -1,8 +1,8 @@
 use crate::ast;
 
 use super::{
-    SymbolEntry, SymbolTable, TypedExpr, const_eval, convert_by_assignment, typecheck_block,
-    typecheck_expr_and_convert, typecheck_var_decl,
+    SymbolEntry, SymbolTable, TypeTable, TypedExpr, const_eval, convert_by_assignment,
+    typecheck_block, typecheck_expr_and_convert, typecheck_var_decl,
 };
 use anyhow::{Context, Error, Result, bail, ensure};
 
@@ -12,11 +12,12 @@ use std::rc::Rc;
 pub fn typecheck_stmt(
     stmt: ast::Stmt,
     symbols: &mut SymbolTable,
+    structs: &mut TypeTable,
     function: Option<Rc<String>>,
 ) -> Result<ast::Stmt> {
     match stmt {
         ast::Stmt::Compound(block) => Ok::<ast::Stmt, Error>(ast::Stmt::Compound(
-            typecheck_block(block, symbols, function)
+            typecheck_block(block, symbols, structs, function)
                 .context("Unable to typecheck block withint statement.")?,
         )),
         ast::Stmt::Return(expr) => {
@@ -70,11 +71,11 @@ pub fn typecheck_stmt(
                 condition.r#type.is_scalar(),
                 "If condition expression must be scalar"
             );
-            let then = typecheck_stmt(*then, symbols, function.clone())
+            let then = typecheck_stmt(*then, symbols, structs, function.clone())
                 .context("Failed to typecheck if branch of conditional.")?;
             let r#else = if let Some(r#else) = r#else {
                 Some(
-                    typecheck_stmt(*r#else, symbols, function)
+                    typecheck_stmt(*r#else, symbols, structs, function)
                         .context("Failed to typecheck else branch of conditional.")?,
                 )
             } else {
@@ -97,7 +98,7 @@ pub fn typecheck_stmt(
                 condition.r#type.is_scalar(),
                 "While condition expression must be scalar"
             );
-            let body = typecheck_stmt(*body, symbols, function)
+            let body = typecheck_stmt(*body, symbols, structs, function)
                 .context("Failed to typecheck for loop body.")?;
             Ok(ast::Stmt::While {
                 body: Box::new(body),
@@ -116,7 +117,7 @@ pub fn typecheck_stmt(
                 condition.r#type.is_scalar(),
                 "Do-While condition expression must be scalar"
             );
-            let body = typecheck_stmt(*body, symbols, function)
+            let body = typecheck_stmt(*body, symbols, structs, function)
                 .context("Failed to typecheck for loop body.")?;
             Ok(ast::Stmt::DoWhile {
                 body: Box::new(body),
@@ -171,7 +172,7 @@ pub fn typecheck_stmt(
             } else {
                 None
             };
-            let body = typecheck_stmt(*body, symbols, function)
+            let body = typecheck_stmt(*body, symbols, structs, function)
                 .context("Failed to typecheck for loop body.")?;
             Ok(ast::Stmt::For {
                 init: Box::new(init),
@@ -185,7 +186,7 @@ pub fn typecheck_stmt(
             let value = typecheck_expr_and_convert(&value, symbols)
                 .context("Failed to typecheck case value.")?
                 .expr;
-            let stmt = typecheck_stmt(*stmt, symbols, function)
+            let stmt = typecheck_stmt(*stmt, symbols, structs, function)
                 .context("Failed to typecheck case statement.")?;
             Ok(ast::Stmt::Case {
                 value,
@@ -222,7 +223,7 @@ pub fn typecheck_stmt(
             } else {
                 (condition, condition_type)
             };
-            let body = typecheck_stmt(*body, symbols, function)
+            let body = typecheck_stmt(*body, symbols, structs, function)
                 .context("Failed to typecheck switch body.")?;
             let mut casted_cases = vec![];
             let cases = cases.as_ref().expect(
@@ -258,14 +259,14 @@ pub fn typecheck_stmt(
         ast::Stmt::Label { name, stmt } => Ok(ast::Stmt::Label {
             name,
             stmt: Box::new(
-                typecheck_stmt(*stmt, symbols, function)
+                typecheck_stmt(*stmt, symbols, structs, function)
                     .context("Unable to typecheck statement within label.")?,
             ),
         }),
         ast::Stmt::Default { label, stmt } => Ok(ast::Stmt::Default {
             label,
             stmt: Box::new(
-                typecheck_stmt(*stmt, symbols, function)
+                typecheck_stmt(*stmt, symbols, structs, function)
                     .context("Unable to typecheck statement within default label.")?,
             ),
         }),

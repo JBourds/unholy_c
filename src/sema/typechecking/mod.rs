@@ -32,6 +32,7 @@ use fun_decl::typecheck_fun_decl;
 use init::typecheck_init;
 use program::typecheck_program;
 use statement::typecheck_stmt;
+use struct_union_decl::{typecheck_struct_decl, typecheck_union_decl};
 use var_init::{typecheck_global_var_decl, typecheck_var_decl};
 
 fn is_null_pointer_constant(e: &ast::Expr) -> bool {
@@ -105,9 +106,10 @@ pub struct TypedExpr {
 
 pub fn validate(stage: SemaStage<SwitchLabelling>) -> Result<SemaStage<TypeChecking>> {
     let mut symbols = SymbolTable::new_table();
+    let mut structs = TypeTable::new_table();
 
     Ok(SemaStage {
-        program: typecheck_program(stage.program, &mut symbols)
+        program: typecheck_program(stage.program, &mut symbols, &mut structs)
             .context("Failed to perform typechecking.")?,
         symbols: Some(symbols),
         stage: PhantomData::<TypeChecking>,

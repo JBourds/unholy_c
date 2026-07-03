@@ -253,6 +253,11 @@ fn resolve_fun_decl(
         Rc::clone(&decl.name),
         IdentEntry::new_external(Rc::clone(&decl.name)),
     );
+    let decl = ast::FunDecl {
+        r#type: resolve_type(decl.r#type, tag_map)?,
+        ..decl
+    };
+
     let mut inner_map = make_new_scope(ident_map);
     let mut inner_tag_map = TagEntry::make_new_scope(tag_map);
     let new_params = decl

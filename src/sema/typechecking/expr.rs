@@ -401,8 +401,8 @@ fn typecheck_expr(
                         bail!("could not find struct member {member} in struct {tag}")
                     };
                     Ok(TypedExpr {
-                        expr: ast::Expr::Dot {
-                            structure: expr.into(),
+                        expr: ast::Expr::Arrow {
+                            pointer: expr.into(),
                             member: Rc::clone(member),
                         },
                         r#type: member_entry.r#type.clone(),

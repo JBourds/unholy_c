@@ -332,8 +332,63 @@ fn typecheck_expr(
                 r#type: ast::Type::USIZE,
             })
         }
-        ast::Expr::Dot { .. } => todo!(),
-        ast::Expr::Arrow { .. } => todo!(),
+        ast::Expr::Dot { structure, member } => {
+            let TypedExpr { expr, r#type } =
+                typecheck_expr_and_convert(&*structure, symbols, structs)?;
+            match r#type {
+                ast::Type {
+                    base: ast::BaseType::Struct { tag, .. },
+                    ..
+                } => {
+                    let Some(entry) = structs.get(&tag) else {
+                        bail!("could not find struct {tag} in structure table")
+                    };
+                    let Some(member_entry) = entry.get_member(member) else {
+                        bail!("could not find struct member {member} in struct {tag}")
+                    };
+                    Ok(TypedExpr {
+                        expr: ast::Expr::Dot {
+                            structure: expr.into(),
+                            member: Rc::clone(member),
+                        },
+                        r#type: member_entry.r#type.clone(),
+                    })
+                }
+                _ => bail!("cannot use dot operator on non strucutre type {type}"),
+            }
+        }
+        ast::Expr::Arrow { pointer, member } => {
+            let TypedExpr { expr, r#type } =
+                typecheck_expr_and_convert(&*pointer, symbols, structs)?;
+            match r#type {
+                ast::Type {
+                    base: ast::BaseType::Ptr { to, .. },
+                    ..
+                } if to.is_struct() => {
+                    let ast::Type {
+                        base: ast::BaseType::Struct { tag, .. },
+                        ..
+                    } = *to
+                    else {
+                        unreachable!()
+                    };
+                    let Some(entry) = structs.get(&tag) else {
+                        bail!("could not find struct {tag} in structure table")
+                    };
+                    let Some(member_entry) = entry.get_member(member) else {
+                        bail!("could not find struct member {member} in struct {tag}")
+                    };
+                    Ok(TypedExpr {
+                        expr: ast::Expr::Dot {
+                            structure: expr.into(),
+                            member: Rc::clone(member),
+                        },
+                        r#type: member_entry.r#type.clone(),
+                    })
+                }
+                _ => bail!("cannot use arrow operator on non pointer to strucutre type {type}"),
+            }
+        }
     }
 }
 

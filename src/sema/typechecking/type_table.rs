@@ -134,8 +134,8 @@ pub struct StructEntry {
 }
 
 impl StructEntry {
-    pub fn get_member(&self, name: Rc<String>) -> Option<&MemberEntry> {
-        self.members.iter().find(|member| member.name == name)
+    pub fn get_member(&self, name: &Rc<String>) -> Option<&MemberEntry> {
+        self.members.iter().find(|member| member.name == *name)
     }
 }
 

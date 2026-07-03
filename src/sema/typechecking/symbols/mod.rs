@@ -379,6 +379,8 @@ impl SymbolTable {
         {
             bail!("Attempted to define local function {} as static", decl.name);
         }
+        let mut decl = decl.clone();
+        decl.r#type = fixup_type(decl.r#type, structs);
         let wrapped_decl = ast::Declaration::FunDecl(decl.clone());
         self.declare_in_scope(&wrapped_decl, Scope::Global, structs)?;
         if let scope @ Scope::Local(_) = self.scope() {

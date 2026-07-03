@@ -18,11 +18,12 @@ pub fn typecheck_global_var_decl(
 }
 
 pub fn typecheck_var_decl(
-    decl: ast::VarDecl,
+    mut decl: ast::VarDecl,
     symbols: &mut SymbolTable,
     structs: &TypeTable,
 ) -> Result<ast::VarDecl> {
     let target = fixup_type(decl.r#type.clone(), structs);
+    decl.r#type = target.clone();
     validate_type_specifier(&target).context("Invalid type in variable declaration")?;
     ensure!(!target.is_void(), "Unholy C does not allow void variables!");
     let entry = symbols.declare_var(&decl, structs).context(format!(

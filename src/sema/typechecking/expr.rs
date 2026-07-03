@@ -202,8 +202,10 @@ fn typecheck_expr(
                     },
                 ..
             }) => {
-                // FIXME: Lazy clones
-                let param_types = param_types.clone();
+                let param_types = param_types
+                    .iter()
+                    .map(|param| fixup_type(param.clone(), structs))
+                    .collect::<Vec<_>>();
                 let ret_t = fixup_type(*ret_t.clone(), structs);
                 if args.len() != param_types.len() {
                     bail!(

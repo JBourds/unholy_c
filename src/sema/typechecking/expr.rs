@@ -1,5 +1,5 @@
 use super::{
-    SymbolEntry, SymbolTable, TypeTable, TypedExpr, boolify, convert_by_assignment,
+    SymbolEntry, SymbolTable, TypeTable, TypedExpr, boolify, convert_by_assignment, fixup_type,
     get_common_pointer_type, is_null_pointer_constant, maybe_decay_expr, try_implicit_cast,
 };
 
@@ -27,7 +27,8 @@ fn typecheck_expr(
 ) -> Result<TypedExpr> {
     match expr {
         ast::Expr::Var(var) => {
-            if let Some(t) = symbols.get(var) {
+            if let Some(t) = symbols.get_mut(var) {
+                t.r#type = fixup_type(t.r#type.clone(), structs);
                 Ok(TypedExpr {
                     expr: expr.clone(),
                     r#type: t.r#type.clone(),
@@ -173,7 +174,7 @@ fn typecheck_expr(
             }) => {
                 // FIXME: Lazy clones
                 let param_types = param_types.clone();
-                let ret_t = ret_t.clone();
+                let ret_t = fixup_type(*ret_t.clone(), structs);
                 if args.len() != param_types.len() {
                     bail!(
                         "Expected {} args but received {} when calling \"{name}\".",
@@ -181,7 +182,6 @@ fn typecheck_expr(
                         args.len()
                     );
                 }
-                let ret_t = *ret_t.clone();
                 let args = args
                     .iter()
                     .zip(param_types.iter())

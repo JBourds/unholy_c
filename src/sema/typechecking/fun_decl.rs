@@ -1,6 +1,6 @@
 use crate::{ast, sema::typechecking::validate_type_specifier};
 
-use super::{SymbolTable, TypeTable, typecheck_block_item};
+use super::{SymbolTable, TypeTable, fixup_type, typecheck_block_item};
 
 use anyhow::{Context, Result, ensure};
 
@@ -23,6 +23,7 @@ pub fn typecheck_fun_decl(
     else {
         panic!("Function declaration type isn't a function type?");
     };
+    let ret_t = fixup_type(*ret_t.clone(), structs);
     ensure!(
         !param_types.iter().any(|ty| ty.is_void()),
         "Cannot have void function parameter arguments"
@@ -31,6 +32,20 @@ pub fn typecheck_fun_decl(
         !ret_t.is_array(),
         "Cannot have functions return array types"
     );
+
+    let decl = ast::FunDecl {
+        r#type: ast::Type {
+            base: ast::BaseType::Fun {
+                ret_t: ret_t.into(),
+                param_types: param_types
+                    .iter()
+                    .map(|r#type| fixup_type(r#type.clone(), structs))
+                    .collect(),
+            },
+            ..decl.r#type
+        },
+        ..decl
+    };
 
     symbols.declare_fun(&decl, structs)?;
     // Treat parameters as declarations without values

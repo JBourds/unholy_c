@@ -69,8 +69,7 @@ pub fn typecheck_struct_decl(
 }
 
 pub fn typecheck_union_decl(
-    decl: ast::StructDecl,
-    symbols: &mut SymbolTable,
+    decl: ast::UnionDecl,
     structs: &mut TypeTable,
 ) -> Result<ast::StructDecl> {
     todo!()

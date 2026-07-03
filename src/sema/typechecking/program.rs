@@ -1,6 +1,9 @@
 use crate::ast;
 
-use super::{SymbolTable, TypeTable, typecheck_fun_decl, typecheck_global_var_decl};
+use super::{
+    SymbolTable, TypeTable, typecheck_fun_decl, typecheck_global_var_decl, typecheck_struct_decl,
+    typecheck_union_decl,
+};
 
 use anyhow::{Context, Result};
 
@@ -30,8 +33,20 @@ pub fn typecheck_program(
                     ))?,
                 ));
             }
-            ast::Declaration::StructDecl(..) => todo!(),
-            ast::Declaration::UnionDecl(..) => todo!(),
+            ast::Declaration::StructDecl(s) => {
+                let name = Rc::clone(&s.tag);
+                declarations.push(ast::Declaration::StructDecl(
+                    typecheck_struct_decl(s, structs)
+                        .context(format!("Unable to typecheck struct declaration for {name}"))?,
+                ));
+            }
+            ast::Declaration::UnionDecl(u) => {
+                let name = Rc::clone(&u.tag);
+                declarations.push(ast::Declaration::StructDecl(
+                    typecheck_union_decl(u, structs)
+                        .context(format!("Unable to typecheck union declaration for {name}"))?,
+                ));
+            }
         }
     }
     Ok(ast::Program { declarations })

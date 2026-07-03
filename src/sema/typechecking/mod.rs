@@ -268,6 +268,21 @@ fn fixup_type(r#type: ast::Type, type_table: &TypeTable) -> ast::Type {
             alignment,
             is_const,
         },
+        ast::Type {
+            base: ast::BaseType::Fun { ret_t, param_types },
+            alignment,
+            is_const,
+        } => ast::Type {
+            base: ast::BaseType::Fun {
+                ret_t: fixup_type(*ret_t, type_table).into(),
+                param_types: param_types
+                    .into_iter()
+                    .map(|param| fixup_type(param, type_table))
+                    .collect(),
+            },
+            alignment,
+            is_const,
+        },
         _ => r#type,
     }
 }

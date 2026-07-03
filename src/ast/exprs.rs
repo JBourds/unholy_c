@@ -68,16 +68,17 @@ impl Expr {
     }
 
     pub fn is_lvalue(&self) -> bool {
-        matches!(
-            self,
+        match self {
             Self::Var(_)
-                | Self::Unary {
-                    op: UnaryOp::Deref,
-                    ..
-                }
-                | Self::Subscript { .. }
-                | Self::String { .. }
-        )
+            | Self::Unary {
+                op: UnaryOp::Deref, ..
+            }
+            | Self::Subscript { .. }
+            | Self::String { .. } => true,
+            Self::Dot { structure, .. } => structure.is_lvalue(),
+            Self::Arrow { .. } => true,
+            _ => false,
+        }
     }
 
     pub fn has_compound(&self) -> bool {

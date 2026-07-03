@@ -382,8 +382,8 @@ impl std::fmt::Display for BaseType {
             Self::Array { element, size } => write!(f, "{element}[{size}]"),
             Self::Float(_) => write!(f, "float"),
             Self::Double(_) => write!(f, "double"),
-            Self::Struct { .. } => todo!(),
-            Self::Union { .. } => todo!(),
+            Self::Struct { tag, .. } => write!(f, "struct {tag}"),
+            Self::Union { tag, .. } => write!(f, "union  {tag}"),
             Self::Fun { ret_t, param_types } => {
                 write!(f, "(")?;
                 for (index, t) in param_types.iter().enumerate() {

@@ -136,6 +136,26 @@ fn typecheck_expr(
                 )?,
             );
 
+            match (&then_type, &else_type) {
+                (
+                    ast::Type {
+                        base: ast::BaseType::Struct { tag: then_tag, .. },
+                        ..
+                    },
+                    ast::Type {
+                        base: ast::BaseType::Struct { tag: else_tag, .. },
+                        ..
+                    },
+                ) => ensure!(
+                    then_tag == else_tag,
+                    "cannot have two different struct types {then_tag}, {else_tag} in conditional"
+                ),
+                (then_type, else_type) if then_type.is_struct() || else_type.is_struct() => {
+                    bail!("cannot have conditional where only one side is a struct")
+                }
+                _ => {}
+            }
+
             let common_t = if then_type.is_pointer() || else_type.is_pointer() {
                 get_common_pointer_type(
                     &then_expr,

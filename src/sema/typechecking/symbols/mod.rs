@@ -1,5 +1,5 @@
 use crate::ast;
-use crate::sema::typechecking::TypeTable;
+use crate::sema::typechecking::{TypeTable, fixup_type};
 use crate::tacky::StaticInit;
 
 use super::Attribute;
@@ -308,6 +308,7 @@ impl SymbolTable {
             //      II)  New declaration doesn't shadow (ERROR)
             //      III) New declaration storage class conflicts with previous
             //           one (ERROR)
+            let old_type = fixup_type(old_type, structs);
             if !scope.shadows(&old_scope) {
                 // Cases 1.1 and 2.1
                 if old_type != new_type {

@@ -140,6 +140,8 @@ impl PartialEq for BaseType {
                     size: r_size,
                 },
             ) => *l_element == *r_element && l_size == r_size,
+            (Self::Struct { tag: l_tag, .. }, Self::Struct { tag: r_tag, .. }) => *l_tag == *r_tag,
+            (Self::Union { tag: l_tag, .. }, Self::Union { tag: r_tag, .. }) => *l_tag == *r_tag,
             _ => core::mem::discriminant(self) == core::mem::discriminant(other),
         }
     }

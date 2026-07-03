@@ -25,7 +25,7 @@ pub fn typecheck_program(
             ast::Declaration::VarDecl(v) => {
                 let name = Rc::clone(&v.name);
                 declarations.push(ast::Declaration::VarDecl(
-                    typecheck_global_var_decl(v, symbols).context(format!(
+                    typecheck_global_var_decl(v, symbols, structs).context(format!(
                         "Unable to typecheck variable declaration for {name}"
                     ))?,
                 ));

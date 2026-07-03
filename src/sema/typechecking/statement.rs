@@ -36,8 +36,9 @@ pub fn typecheck_stmt(
             {
                 let return_type = return_type.clone();
                 if let Some(expr) = expr {
-                    let TypedExpr { expr, r#type } = typecheck_expr_and_convert(&expr, symbols)
-                        .context("failed to typecheck expression and convert")?;
+                    let TypedExpr { expr, r#type } =
+                        typecheck_expr_and_convert(&expr, symbols, structs)
+                            .context("failed to typecheck expression and convert")?;
                     Ok(ast::Stmt::Return(Some(
                     convert_by_assignment(expr, &r#type, &return_type.clone()).context(format!(
                         "Unable to implicitly cast return value to expected return type in \"{}\"",
@@ -56,7 +57,7 @@ pub fn typecheck_stmt(
             }
         }
         ast::Stmt::Expr(expr) => Ok(ast::Stmt::Expr(
-            typecheck_expr_and_convert(&expr, symbols)
+            typecheck_expr_and_convert(&expr, symbols, structs)
                 .context("Failed to typecheck expression statement.")?
                 .expr,
         )),
@@ -65,7 +66,7 @@ pub fn typecheck_stmt(
             then,
             r#else,
         } => {
-            let condition = typecheck_expr_and_convert(&condition, symbols)
+            let condition = typecheck_expr_and_convert(&condition, symbols, structs)
                 .context("Failed to typecheck if block condition.")?;
             ensure!(
                 condition.r#type.is_scalar(),
@@ -92,7 +93,7 @@ pub fn typecheck_stmt(
             body,
             label,
         } => {
-            let condition = typecheck_expr_and_convert(&condition, symbols)
+            let condition = typecheck_expr_and_convert(&condition, symbols, structs)
                 .context("Failed to typecheck if block condition.")?;
             ensure!(
                 condition.r#type.is_scalar(),
@@ -111,7 +112,7 @@ pub fn typecheck_stmt(
             condition,
             label,
         } => {
-            let condition = typecheck_expr_and_convert(&condition, symbols)
+            let condition = typecheck_expr_and_convert(&condition, symbols, structs)
                 .context("Failed to typecheck for loop condition.")?;
             ensure!(
                 condition.r#type.is_scalar(),
@@ -141,12 +142,12 @@ pub fn typecheck_stmt(
                         );
                     }
                     ast::ForInit::Decl(
-                        typecheck_var_decl(decl, symbols)
+                        typecheck_var_decl(decl, symbols, structs)
                             .context("Failed to typecheck for loop initializations.")?,
                     )
                 }
                 ast::ForInit::Expr(Some(ref expr)) => ast::ForInit::Expr(Some(
-                    typecheck_expr_and_convert(expr, symbols)
+                    typecheck_expr_and_convert(expr, symbols, structs)
                         .map(|t_expr| t_expr.expr)
                         .context("Failed to typecheck for loop initialization expression.")?,
                 )),
@@ -154,7 +155,7 @@ pub fn typecheck_stmt(
             };
             let post = if let Some(post) = post {
                 Some(
-                    typecheck_expr_and_convert(&post, symbols)
+                    typecheck_expr_and_convert(&post, symbols, structs)
                         .context("Failed to typecheck for loop post condition.")?
                         .expr,
                 )
@@ -162,7 +163,7 @@ pub fn typecheck_stmt(
                 None
             };
             let condition = if let Some(condition) = condition {
-                let condition = typecheck_expr_and_convert(&condition, symbols)
+                let condition = typecheck_expr_and_convert(&condition, symbols, structs)
                     .context("Failed to typecheck for loop condition.")?;
                 ensure!(
                     condition.r#type.is_scalar(),
@@ -183,7 +184,7 @@ pub fn typecheck_stmt(
             })
         }
         ast::Stmt::Case { value, stmt, label } => {
-            let value = typecheck_expr_and_convert(&value, symbols)
+            let value = typecheck_expr_and_convert(&value, symbols, structs)
                 .context("Failed to typecheck case value.")?
                 .expr;
             let stmt = typecheck_stmt(*stmt, symbols, structs, function)
@@ -204,7 +205,7 @@ pub fn typecheck_stmt(
             let TypedExpr {
                 expr: condition,
                 r#type: condition_type,
-            } = typecheck_expr_and_convert(&condition, symbols)
+            } = typecheck_expr_and_convert(&condition, symbols, structs)
                 .context("Failed to typecheck switch expression.")?;
             ensure!(
                 condition_type.is_scalar(),
@@ -232,8 +233,9 @@ pub fn typecheck_stmt(
             let mut case_values = HashSet::new();
             for (val, s) in cases.iter() {
                 let expr = ast::Expr::Constant(*val);
-                let TypedExpr { expr, r#type } = typecheck_expr_and_convert(&expr, symbols)
-                    .context("failed to typecheck and convert expression")?;
+                let TypedExpr { expr, r#type } =
+                    typecheck_expr_and_convert(&expr, symbols, structs)
+                        .context("failed to typecheck and convert expression")?;
                 let expr = convert_by_assignment(expr, &r#type, &condition_type).context(
                     format!("Unable to implicitly case constant to type {condition_type:#?}"),
                 )?;

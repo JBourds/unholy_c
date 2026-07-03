@@ -1,6 +1,6 @@
 use super::{
-    SymbolEntry, SymbolTable, TypedExpr, boolify, convert_by_assignment, get_common_pointer_type,
-    is_null_pointer_constant, maybe_decay_expr, try_implicit_cast,
+    SymbolEntry, SymbolTable, TypeTable, TypedExpr, boolify, convert_by_assignment,
+    get_common_pointer_type, is_null_pointer_constant, maybe_decay_expr, try_implicit_cast,
 };
 
 use anyhow::{Context, Result, bail, ensure};
@@ -14,12 +14,17 @@ use std::rc::Rc;
 pub fn typecheck_expr_and_convert(
     expr: &ast::Expr,
     symbols: &mut SymbolTable,
+    structs: &TypeTable,
 ) -> Result<TypedExpr> {
-    let texpr = typecheck_expr(expr, symbols)?;
+    let texpr = typecheck_expr(expr, symbols, structs)?;
     Ok(maybe_decay_expr(texpr))
 }
 
-fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedExpr> {
+fn typecheck_expr(
+    expr: &ast::Expr,
+    symbols: &mut SymbolTable,
+    structs: &TypeTable,
+) -> Result<TypedExpr> {
     match expr {
         ast::Expr::Var(var) => {
             if let Some(t) = symbols.get(var) {
@@ -38,7 +43,7 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
             let TypedExpr {
                 expr: lexpr,
                 r#type: left_t,
-            } = typecheck_expr_and_convert(lvalue, symbols)
+            } = typecheck_expr_and_convert(lvalue, symbols, structs)
                 .context("Failed to typecheck lvalue in assignment.")?;
             ensure!(
                 lexpr.is_modifiable_lvalue(&left_t),
@@ -47,7 +52,7 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
             let TypedExpr {
                 expr: rexpr,
                 r#type: right_t,
-            } = typecheck_expr_and_convert(rvalue, symbols)
+            } = typecheck_expr_and_convert(rvalue, symbols, structs)
                 .context("Failed to typecheck rvalue in assignment.")?;
 
             // FIXME: Lazy clone :(
@@ -63,7 +68,7 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
                 r#type: left_t,
             })
         }
-        ast::Expr::Unary { op, expr } => typecheck_unary(*op, expr, symbols),
+        ast::Expr::Unary { op, expr } => typecheck_unary(*op, expr, symbols, structs),
         ast::Expr::Binary { op, left, right } => {
             let TypedExpr {
                 expr: left,
@@ -72,16 +77,16 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
                 // Don't allow lvalue conversion when it involves mutating the LHS
                 // as this would change where an array var points to
                 ast::BinaryOp::AddAssign | ast::BinaryOp::SubAssign => {
-                    typecheck_expr(left, symbols)
+                    typecheck_expr(left, symbols, structs)
                         .context("Failed to typecheck lefthand argument of binary operation.")?
                 }
-                _ => typecheck_expr_and_convert(left, symbols)
+                _ => typecheck_expr_and_convert(left, symbols, structs)
                     .context("Failed to typecheck lefthand argument of binary operation.")?,
             };
             let TypedExpr {
                 expr: right,
                 r#type: right_t,
-            } = typecheck_expr_and_convert(right, symbols)
+            } = typecheck_expr_and_convert(right, symbols, structs)
                 .context("Failed to typecheck righthand argument of binary operation.")?;
 
             typecheck_binary(*op, left, left_t, right, right_t)
@@ -94,7 +99,7 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
             let TypedExpr {
                 expr: condition_expr,
                 r#type: condition_type,
-            } = typecheck_expr_and_convert(condition, symbols)
+            } = typecheck_expr_and_convert(condition, symbols, structs)
                 .context("Failed to typecheck ternary expression then branch.")?;
             ensure!(
                 condition_type.is_scalar(),
@@ -104,13 +109,13 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
             let TypedExpr {
                 expr: then_expr,
                 r#type: then_type,
-            } = typecheck_expr_and_convert(then, symbols)
+            } = typecheck_expr_and_convert(then, symbols, structs)
                 .context("Failed to typecheck ternary expression then branch.")?;
 
             let TypedExpr {
                 expr: else_expr,
                 r#type: else_type,
-            } = typecheck_expr_and_convert(r#else, symbols)
+            } = typecheck_expr_and_convert(r#else, symbols, structs)
                 .context("Failed to typecheck ternary expression else branch.")?;
 
             let target = ast::Type::bool();
@@ -181,7 +186,7 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
                     .iter()
                     .zip(param_types.iter())
                     .map(|(arg, exp_t)| {
-                        typecheck_expr_and_convert(arg, symbols).and_then(
+                        typecheck_expr_and_convert(arg, symbols, structs).and_then(
                             |TypedExpr { expr, r#type }| {
                                 convert_by_assignment(expr, &r#type, exp_t)
                                     .context("failed to typecheck and convert expression")
@@ -204,7 +209,7 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
             _ => bail!("Could not find symbol with name {name}."),
         },
         ast::Expr::Cast { target, exp } => {
-            let TypedExpr { expr, r#type } = typecheck_expr_and_convert(exp, symbols)
+            let TypedExpr { expr, r#type } = typecheck_expr_and_convert(exp, symbols, structs)
                 .context("Failed to typecheck casted expression.")?;
 
             if target.is_pointer() && r#type.is_float() {
@@ -249,11 +254,11 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
             let TypedExpr {
                 expr,
                 r#type: expr_t,
-            } = typecheck_expr_and_convert(expr, symbols)?;
+            } = typecheck_expr_and_convert(expr, symbols, structs)?;
             let TypedExpr {
                 expr: index,
                 r#type: index_t,
-            } = typecheck_expr_and_convert(index, symbols)?;
+            } = typecheck_expr_and_convert(index, symbols, structs)?;
             let (ptr, ptr_t, index) = match (expr_t, index_t) {
                 (expr_t, index_t) if expr_t.is_pointer() && index_t.is_integer() => {
                     (expr, expr_t, index)
@@ -296,7 +301,7 @@ fn typecheck_expr(expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<TypedEx
             })
         }
         ast::Expr::SizeOf(expr) => {
-            let TypedExpr { expr: _, r#type } = typecheck_expr(expr, symbols)?;
+            let TypedExpr { expr: _, r#type } = typecheck_expr(expr, symbols, structs)?;
             validate_type_specifier(&r#type).context("Invalid expression to get the size of")?;
             ensure!(
                 r#type.is_complete(),
@@ -326,6 +331,7 @@ fn typecheck_unary(
     op: ast::UnaryOp,
     expr: &ast::Expr,
     symbols: &mut SymbolTable,
+    structs: &TypeTable,
 ) -> Result<TypedExpr> {
     let TypedExpr { expr, r#type } = match op {
         // Don't lvalue convert in these cases
@@ -333,8 +339,8 @@ fn typecheck_unary(
         | ast::UnaryOp::PreInc
         | ast::UnaryOp::PostInc
         | ast::UnaryOp::PreDec
-        | ast::UnaryOp::PostDec => typecheck_expr(expr, symbols),
-        _ => typecheck_expr_and_convert(expr, symbols),
+        | ast::UnaryOp::PostDec => typecheck_expr(expr, symbols, structs),
+        _ => typecheck_expr_and_convert(expr, symbols, structs),
     }
     .context("Failed to typecheck nested unary expression.")?;
     ensure!(

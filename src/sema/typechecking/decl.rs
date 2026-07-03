@@ -25,7 +25,7 @@ pub fn typecheck_decl(
         ast::Declaration::VarDecl(decl) => {
             let name = Rc::clone(&decl.name);
             ast::Declaration::VarDecl(
-                typecheck_var_decl(decl, symbols)
+                typecheck_var_decl(decl, symbols, structs)
                     .context(format!("Unable to typecheck \"{name}\" declaration"))?,
             )
         }

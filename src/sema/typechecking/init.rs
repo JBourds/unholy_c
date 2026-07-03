@@ -1,7 +1,7 @@
 use crate::ast;
 use crate::ast::Type;
 
-use super::{SymbolTable, TypedExpr, convert_by_assignment, typecheck_expr_and_convert};
+use super::{SymbolTable, TypeTable, TypedExpr, convert_by_assignment, typecheck_expr_and_convert};
 
 use anyhow::{Context, Result, bail};
 
@@ -11,6 +11,7 @@ pub fn typecheck_init(
     target: &Type,
     init: ast::Initializer,
     symbols: &mut SymbolTable,
+    structs: &TypeTable,
     name: &Rc<String>,
 ) -> Result<ast::Initializer> {
     match (target, init) {
@@ -41,7 +42,7 @@ pub fn typecheck_init(
             ),
         },
         (_, ast::Initializer::SingleInit(expr)) => {
-            let TypedExpr { expr, r#type } = typecheck_expr_and_convert(&expr, symbols)
+            let TypedExpr { expr, r#type } = typecheck_expr_and_convert(&expr, symbols, structs)
                 .context("failed to typecheck expression and convert")?;
             Ok(ast::Initializer::SingleInit(
                 convert_by_assignment(expr, &r#type, target)
@@ -59,7 +60,7 @@ pub fn typecheck_init(
                 ..
             },
             init @ ast::Initializer::CompoundInit(_),
-        ) => pad_compound_init(target, init, symbols, name),
+        ) => pad_compound_init(target, init, symbols, structs, name),
         _ => bail!("Cannot assign compound initializer to non array var decl"),
     }
 }
@@ -68,6 +69,7 @@ pub fn pad_compound_init(
     target: &Type,
     init: ast::Initializer,
     symbols: &mut SymbolTable,
+    structs: &TypeTable,
     name: &Rc<String>,
 ) -> Result<ast::Initializer> {
     if let ast::Type {
@@ -81,7 +83,7 @@ pub fn pad_compound_init(
         }
         let mut inits = inits
             .into_iter()
-            .map(|i| typecheck_init(element, i, symbols, name))
+            .map(|i| typecheck_init(element, i, symbols, structs, name))
             .collect::<Result<Vec<ast::Initializer>>>()?;
         while inits.len() < *size {
             inits.push(ast::Initializer::zero_initializer(element)?);

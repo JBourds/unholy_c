@@ -8,6 +8,7 @@ use std::cmp;
 use std::rc::Rc;
 
 use crate::ast;
+use crate::sema::typechecking::TypeTable;
 use crate::tacky::StaticInit;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum InitialValue {
@@ -41,6 +42,7 @@ impl InitialValue {
         r#type: &ast::Type,
         init: &ast::Initializer,
         symbols: &mut SymbolTable,
+        structs: &TypeTable,
     ) -> Result<Self> {
         match (r#type, init) {
             (
@@ -92,9 +94,11 @@ impl InitialValue {
                     let label = symbols.get_or_make_string(Rc::clone(value));
                     Ok(Self::Initial(vec![StaticInit::Pointer(label)]))
                 }
-                _ => Self::from_expr(r#type, expr, symbols),
+                _ => Self::from_expr(r#type, expr, symbols, structs),
             },
-            (_, ast::Initializer::SingleInit(init)) => Self::from_expr(r#type, init, symbols),
+            (_, ast::Initializer::SingleInit(init)) => {
+                Self::from_expr(r#type, init, symbols, structs)
+            }
             (
                 ast::Type {
                     base: ast::BaseType::Array { element, size },
@@ -105,7 +109,7 @@ impl InitialValue {
                 ensure!(inits.len() <= *size, "Too many initializers in static init");
                 let mut new_inits = vec![];
                 for init in inits.iter() {
-                    match Self::from_initializer(element, init, symbols)? {
+                    match Self::from_initializer(element, init, symbols, structs)? {
                         Self::Initial(init) => {
                             new_inits.extend(init);
                         }
@@ -119,8 +123,13 @@ impl InitialValue {
         }
     }
     // TODO: Make this not dependent on host computer byte ordering
-    fn from_expr(target: &ast::Type, expr: &ast::Expr, symbols: &mut SymbolTable) -> Result<Self> {
-        let TypedExpr { expr, r#type } = typecheck_expr_and_convert(expr, symbols)
+    fn from_expr(
+        target: &ast::Type,
+        expr: &ast::Expr,
+        symbols: &mut SymbolTable,
+        structs: &TypeTable,
+    ) -> Result<Self> {
+        let TypedExpr { expr, r#type } = typecheck_expr_and_convert(expr, symbols, structs)
             .context("failed to typecheck expression and convert")?;
         let expr = convert_by_assignment(expr, &r#type, target).context(
             "Failed to perform implicit casting when constructing initial value for declaration",
@@ -139,16 +148,17 @@ impl InitialValue {
         var: &ast::VarDecl,
         scope: Scope,
         symbols: &mut SymbolTable,
+        structs: &TypeTable,
     ) -> Result<Option<Self>> {
         match (scope, var.init.as_ref()) {
             (Scope::Global, Some(init)) => {
-                let init = Self::from_initializer(&var.r#type, init, symbols)
+                let init = Self::from_initializer(&var.r#type, init, symbols, structs)
                     .context(format!("Evaluating expression for \"{}\" failed", var.name))?;
                 Ok(Some(init))
             }
             (Scope::Local(..), Some(init)) => match var.storage_class {
                 Some(ast::StorageClass::Static) => Ok(Some(
-                    Self::from_initializer(&var.r#type, init, symbols)
+                    Self::from_initializer(&var.r#type, init, symbols, structs)
                         .context(format!("Evaluating expression for \"{}\" failed", var.name))?,
                 )),
                 None => Ok(None), // Locals technically dont have initial values

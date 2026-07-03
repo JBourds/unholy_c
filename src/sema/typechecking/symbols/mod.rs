@@ -1,4 +1,5 @@
 use crate::ast;
+use crate::sema::typechecking::TypeTable;
 use crate::tacky::StaticInit;
 
 use super::Attribute;
@@ -64,7 +65,12 @@ impl SymbolTable {
         }
     }
 
-    fn new_entry(&mut self, decl: &ast::Declaration, scope: Scope) -> Result<SymbolEntry> {
+    fn new_entry(
+        &mut self,
+        decl: &ast::Declaration,
+        structs: &TypeTable,
+        scope: Scope,
+    ) -> Result<SymbolEntry> {
         let mut r#type: ast::Type = decl.into();
 
         if matches!(decl, &ast::Declaration::FunDecl(..)) {
@@ -74,7 +80,7 @@ impl SymbolTable {
             r#type,
             defined: decl.defining(),
             scope,
-            attribute: Attribute::from_decl_with_scope(decl, scope, self)?,
+            attribute: Attribute::from_decl_with_scope(decl, scope, self, structs)?,
         })
     }
     pub fn get(&self, key: &Rc<String>) -> Option<&SymbolEntry> {
@@ -271,7 +277,12 @@ impl SymbolTable {
         Ok(old_attrib.clone())
     }
 
-    fn declare_in_scope(&mut self, decl: &ast::Declaration, scope: Scope) -> Result<SymbolEntry> {
+    fn declare_in_scope(
+        &mut self,
+        decl: &ast::Declaration,
+        scope: Scope,
+        structs: &TypeTable,
+    ) -> Result<SymbolEntry> {
         let (name, new_type, storage_class, defining_ident) = Self::get_decl_info(decl);
 
         let entry = if let Some(entry) = self.get(&name) {
@@ -312,7 +323,8 @@ impl SymbolTable {
                 match decl {
                     ast::Declaration::FunDecl(..) => {}
                     ast::Declaration::VarDecl(var) => {
-                        let new_attribute = Attribute::from_var_with_scope(var, scope, self)?;
+                        let new_attribute =
+                            Attribute::from_var_with_scope(var, scope, self, structs)?;
                         if let (
                             Attribute::Static {
                                 initial_value: old_val,
@@ -344,17 +356,17 @@ impl SymbolTable {
                 }
             } else {
                 // Local variables can shadow (only if not extern), but functions cannot
-                self.new_entry(decl, scope)?
+                self.new_entry(decl, structs, scope)?
             }
         } else {
-            self.new_entry(decl, scope)?
+            self.new_entry(decl, structs, scope)?
         };
         self.insert_scope(name, entry.clone());
         Ok(entry)
     }
 
     // Lazy clones :(
-    pub fn declare_fun(&mut self, decl: &ast::FunDecl) -> Result<()> {
+    pub fn declare_fun(&mut self, decl: &ast::FunDecl, structs: &TypeTable) -> Result<()> {
         if decl.block.is_some() && matches!(self.scope(), Scope::Local(n) if n > 0) {
             bail!(
                 "Attempted to define function {} outside of global scope.",
@@ -367,10 +379,10 @@ impl SymbolTable {
             bail!("Attempted to define local function {} as static", decl.name);
         }
         let wrapped_decl = ast::Declaration::FunDecl(decl.clone());
-        self.declare_in_scope(&wrapped_decl, Scope::Global)?;
+        self.declare_in_scope(&wrapped_decl, Scope::Global, structs)?;
         if let scope @ Scope::Local(_) = self.scope() {
             // Declare function and all its params into local scope
-            self.declare_in_scope(&wrapped_decl, scope)?;
+            self.declare_in_scope(&wrapped_decl, scope, structs)?;
             for (r#type, name) in decl.signature()
                 .context("sema.typechecking.declare_fun(): Error getting function declaration in signature.")?
                 .into_iter() {
@@ -382,26 +394,26 @@ impl SymbolTable {
                         r#type: r#type.clone(),
                         storage_class: None,
                     });
-                    self.declare_in_scope(&param_decl, scope)?;
+                    self.declare_in_scope(&param_decl, scope, structs)?;
                 }
             }
         }
         Ok(())
     }
 
-    pub fn declare_var(&mut self, decl: &ast::VarDecl) -> Result<SymbolEntry> {
+    pub fn declare_var(&mut self, decl: &ast::VarDecl, structs: &TypeTable) -> Result<SymbolEntry> {
         let key = decl.name.clone();
         let storage_class = decl.storage_class;
         let decl = ast::Declaration::VarDecl(decl.clone());
         match storage_class {
-            Some(ast::StorageClass::Extern) => self.declare_in_scope(&decl, Scope::Global),
+            Some(ast::StorageClass::Extern) => self.declare_in_scope(&decl, Scope::Global, structs),
             Some(ast::StorageClass::Static)
                 if Self::get_global(&self.global, &key).is_none()
                     && self.scope() != Scope::Global =>
             {
-                self.declare_in_scope(&decl, Scope::Global)
+                self.declare_in_scope(&decl, Scope::Global, structs)
             }
-            _ => self.declare_in_scope(&decl, self.scope()),
+            _ => self.declare_in_scope(&decl, self.scope(), structs),
         }
     }
 

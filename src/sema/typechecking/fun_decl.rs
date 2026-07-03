@@ -32,7 +32,7 @@ pub fn typecheck_fun_decl(
         "Cannot have functions return array types"
     );
 
-    symbols.declare_fun(&decl)?;
+    symbols.declare_fun(&decl, structs)?;
     // Treat parameters as declarations without values
     let block = if let Some(block) = decl.block {
         let items = block

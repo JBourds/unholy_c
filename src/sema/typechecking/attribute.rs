@@ -1,4 +1,4 @@
-use super::{InitialValue, Scope, SymbolTable};
+use super::{InitialValue, Scope, SymbolTable, TypeTable};
 use anyhow::{Context, Result, ensure};
 
 use crate::{ast, tacky::StaticInit};
@@ -21,6 +21,7 @@ impl Attribute {
         var: &ast::VarDecl,
         scope: Scope,
         symbols: &mut SymbolTable,
+        structs: &TypeTable,
     ) -> Result<Self> {
         if matches!(scope, Scope::Local(..)) && var.storage_class == Some(ast::StorageClass::Extern)
         {
@@ -31,7 +32,7 @@ impl Attribute {
             );
         }
         let initial_value = if let Some(init_val) =
-            InitialValue::from_var_with_scope(var, scope, symbols)?
+            InitialValue::from_var_with_scope(var, scope, symbols, structs)?
         {
             init_val
         } else {
@@ -95,12 +96,15 @@ impl Attribute {
         decl: &ast::Declaration,
         scope: Scope,
         symbols: &mut SymbolTable,
+        structs: &TypeTable,
     ) -> Result<Self> {
         match decl {
             ast::Declaration::FunDecl(f) => Ok(Self::from_fun(f)),
-            ast::Declaration::VarDecl(v) => Self::from_var_with_scope(v, scope, symbols).context(
-                format!("Failed to process attributes for variable \"{}\"", v.name),
-            ),
+            ast::Declaration::VarDecl(v) => Self::from_var_with_scope(v, scope, symbols, structs)
+                .context(format!(
+                    "Failed to process attributes for variable \"{}\"",
+                    v.name
+                )),
             ast::Declaration::StructDecl(..) => todo!(),
             ast::Declaration::UnionDecl(..) => todo!(),
         }

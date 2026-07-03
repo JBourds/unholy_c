@@ -19,6 +19,10 @@ impl TypeTable {
         Self::get_local(&self.scopes, key).or(Self::get_global(&self.global, key))
     }
 
+    pub fn get_mut(&mut self, key: &Rc<String>) -> Option<&mut StructEntry> {
+        Self::get_mut_local(&mut self.scopes, key).or(Self::get_mut_global(&mut self.global, key))
+    }
+
     pub fn push_scope(&mut self) {
         self.scopes.push(HashMap::new());
     }
@@ -49,7 +53,7 @@ impl TypeTable {
             _ => unreachable!(),
         };
 
-        if let Some(entry) = self.get(&name) {
+        if let Some(entry) = self.get_mut(&name) {
             // previous entry
             if !scope.shadows(&entry.scope) {
                 ensure!(
@@ -61,6 +65,13 @@ impl TypeTable {
                     entry.members.is_empty() || member_entries.is_empty(),
                     "cannot define {name} with members twice in one scope"
                 );
+                if !member_entries.is_empty() {
+                    entry.members = member_entries;
+                }
+                if r#type.alignment != NonZeroUsize::new(1).unwrap() && r#type.base.nbytes() != 0 {
+                    entry.alignment = r#type.alignment.into();
+                    entry.size = r#type.base.nbytes();
+                }
             } else {
                 // we do shadow
                 self.insert_scope(
@@ -121,6 +132,25 @@ impl TypeTable {
         key: &Rc<String>,
     ) -> Option<&'a StructEntry> {
         globals.get(key)
+    }
+
+    fn get_mut_local<'a>(
+        scopes: &'a mut Vec<HashMap<Rc<String>, StructEntry>>,
+        key: &Rc<String>,
+    ) -> Option<&'a mut StructEntry> {
+        for scope in scopes.iter_mut().rev() {
+            if let Some(entry) = scope.get_mut(key) {
+                return Some(entry);
+            }
+        }
+        None
+    }
+
+    fn get_mut_global<'a>(
+        globals: &'a mut HashMap<Rc<String>, StructEntry>,
+        key: &Rc<String>,
+    ) -> Option<&'a mut StructEntry> {
+        globals.get_mut(key)
     }
 }
 

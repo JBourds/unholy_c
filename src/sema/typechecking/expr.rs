@@ -136,26 +136,6 @@ fn typecheck_expr(
                 )?,
             );
 
-            match (&then_type, &else_type) {
-                (
-                    ast::Type {
-                        base: ast::BaseType::Struct { tag: then_tag, .. },
-                        ..
-                    },
-                    ast::Type {
-                        base: ast::BaseType::Struct { tag: else_tag, .. },
-                        ..
-                    },
-                ) => ensure!(
-                    then_tag == else_tag,
-                    "cannot have two different struct types {then_tag}, {else_tag} in conditional"
-                ),
-                (then_type, else_type) if then_type.is_struct() || else_type.is_struct() => {
-                    bail!("cannot have conditional where only one side is a struct")
-                }
-                _ => {}
-            }
-
             let common_t = if then_type.is_pointer() || else_type.is_pointer() {
                 get_common_pointer_type(
                     &then_expr,
@@ -166,6 +146,39 @@ fn typecheck_expr(
             } else {
                 let then_base = match (&then_type.base, &else_type.base) {
                     (ast::BaseType::Void, ast::BaseType::Void) => ast::BaseType::Void,
+
+                    (
+                        ast::BaseType::Struct { tag: then_tag, .. },
+                        ast::BaseType::Struct { tag: else_tag, .. },
+                    ) => {
+                        ensure!(
+                            then_tag == else_tag,
+                            "cannot have two different struct types {then_tag}, {else_tag} in conditional"
+                        );
+                        then_type.base.clone()
+                    }
+                    (
+                        ast::BaseType::Union { tag: then_tag, .. },
+                        ast::BaseType::Union { tag: else_tag, .. },
+                    ) => {
+                        ensure!(
+                            then_tag == else_tag,
+                            "cannot have two different Union types {then_tag}, {else_tag} in conditional"
+                        );
+                        then_type.base.clone()
+                    }
+                    (ast::BaseType::Struct { .. }, else_base) => {
+                        bail!("Cannot have ternary expr with struct and {else_base} type")
+                    }
+                    (then_base, ast::BaseType::Struct { .. }) => {
+                        bail!("Cannot have ternary expr with struct and {then_base} type")
+                    }
+                    (ast::BaseType::Union { .. }, else_base) => {
+                        bail!("Cannot have ternary expr with Union and {else_base} type")
+                    }
+                    (then_base, ast::BaseType::Union { .. }) => {
+                        bail!("Cannot have ternary expr with Union and {then_base} type")
+                    }
                     (then_base, else_base) => {
                         ast::BaseType::lift(then_base.clone(), else_base.clone())
                             .context("Ternary expression branches evaluate to different types.")?

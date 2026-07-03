@@ -17,6 +17,16 @@ pub fn typecheck_expr_and_convert(
     structs: &TypeTable,
 ) -> Result<TypedExpr> {
     let texpr = typecheck_expr(expr, symbols, structs)?;
+    match &texpr.r#type {
+        ast::Type {
+            base: ast::BaseType::Struct { tag, .. },
+            ..
+        } => ensure!(
+            structs.get(tag).is_some(),
+            "Invalid use of incomplete structure type {tag}"
+        ),
+        _ => {}
+    }
     Ok(maybe_decay_expr(texpr))
 }
 

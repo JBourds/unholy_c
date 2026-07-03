@@ -3,7 +3,7 @@ use crate::ast::Type;
 
 use super::{SymbolTable, TypeTable, TypedExpr, convert_by_assignment, typecheck_expr_and_convert};
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result, bail, ensure};
 
 use std::rc::Rc;
 
@@ -41,6 +41,35 @@ pub fn typecheck_init(
                 "Arrays cannot be initialized with a `SingleInit` that aren't string literals"
             ),
         },
+        (
+            ast::Type {
+                base: ast::BaseType::Struct { tag, .. },
+                ..
+            },
+            ast::Initializer::CompoundInit(init),
+        ) => {
+            let Some(entry) = structs.get(tag) else {
+                bail!("cannot initialize struct type thats not been defined");
+            };
+            ensure!(
+                init.len() <= entry.members.len(),
+                "too many element in initializer list"
+            );
+            let mut inits = init
+                .into_iter()
+                .zip(entry.members.iter())
+                .map(|(i, member_entry)| {
+                    typecheck_init(&member_entry.r#type, i, symbols, structs, name)
+                })
+                .collect::<Result<Vec<ast::Initializer>>>()?;
+            if inits.len() < entry.members.len() {
+                for member_entry in &entry.members[entry.members.len() - inits.len()..] {
+                    inits.push(ast::Initializer::zero_initializer(&member_entry.r#type)?);
+                }
+            }
+
+            Ok(ast::Initializer::CompoundInit(inits))
+        }
         (_, ast::Initializer::SingleInit(expr)) => {
             let TypedExpr { expr, r#type } = typecheck_expr_and_convert(&expr, symbols, structs)
                 .context("failed to typecheck expression and convert")?;

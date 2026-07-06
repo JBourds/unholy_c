@@ -175,7 +175,7 @@ pub enum StructOrUnion {
     Union,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct MemberEntry {
     pub name: Rc<String>,
     pub r#type: ast::Type,

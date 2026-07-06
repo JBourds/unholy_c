@@ -60,8 +60,16 @@ pub fn typecheck_struct_decl(
     };
 
     structs
-        .declare_in_scope(r#type, member_entries, structs.scope())
+        .declare_in_scope(r#type, member_entries.to_vec(), structs.scope())
         .context("failed to declare struct in scope")?;
+
+    // fixup the types... AGAIN!
+    for entry in member_entries.iter_mut() {
+        entry.r#type = fixup_type(entry.r#type.clone(), structs);
+    }
+    if let Some(entry) = structs.get_mut(&decl.tag) {
+        entry.members = member_entries;
+    }
     Ok(ast::StructDecl {
         tag: decl.tag,
         members,

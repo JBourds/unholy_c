@@ -257,6 +257,7 @@ fn typecheck_expr(
             let TypedExpr { expr, r#type } = typecheck_expr_and_convert(exp, symbols, structs)
                 .context("Failed to typecheck casted expression.")?;
 
+            let target = fixup_type(target.clone(), structs);
             if target.is_pointer() && r#type.is_float() {
                 bail!("Cannot cast floating point number to pointer");
             }
@@ -272,10 +273,10 @@ fn typecheck_expr(
                 r#type.is_scalar() || target.is_void(),
                 "Can only cast a non-scalar type to void"
             );
-            validate_type_specifier(target)
+            validate_type_specifier(&target)
                 .context("Cast target must be a valid type specifier")?;
 
-            let expr = if *target != r#type {
+            let expr = if target != r#type {
                 expr.cast_to(target.clone())
             } else {
                 expr
@@ -283,7 +284,7 @@ fn typecheck_expr(
 
             Ok(TypedExpr {
                 expr,
-                r#type: target.clone(),
+                r#type: target,
             })
         }
         expr @ ast::Expr::Constant(constant) => Ok(TypedExpr {

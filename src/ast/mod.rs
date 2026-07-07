@@ -10,8 +10,12 @@ mod token_stream;
 pub mod types;
 
 use crate::{
-    ast::token_stream::{eat_rparen, eat_semi},
+    ast::{
+        self,
+        token_stream::{eat_rparen, eat_semi},
+    },
     lexer::Token,
+    sema::tc::TypeTable,
 };
 
 use anyhow::{Context, Result, bail, ensure};
@@ -185,20 +189,31 @@ impl Initializer {
         }
     }
 
-    pub fn zero_initializer(r#type: &Type) -> Result<Self> {
-        if r#type.is_array() {
-            match &r#type.base {
-                BaseType::Array { element, size } => Ok(Self::CompoundInit(
-                    (0..*size)
-                        .map(|_| Self::zero_initializer(element))
-                        .collect::<Result<Vec<Self>>>()?,
-                )),
-                _ => todo!(),
+    pub fn zero_initializer(r#type: &Type, structs: &TypeTable) -> Result<Self> {
+        match &r#type.base {
+            BaseType::Array { element, size } => Ok(Self::CompoundInit(
+                (0..*size)
+                    .map(|_| Self::zero_initializer(element, structs))
+                    .collect::<Result<Vec<Self>>>()?,
+            )),
+            BaseType::Struct { tag, .. } => {
+                let Some(entry) = structs.get(tag) else {
+                    bail!(
+                        "cannot get zero initializer for struct {tag} as its not in the type table"
+                    )
+                };
+
+                Ok(Self::CompoundInit(
+                    entry
+                        .members
+                        .iter()
+                        .map(|member| ast::Initializer::zero_initializer(&member.r#type, structs))
+                        .collect::<Result<Vec<_>>>()?,
+                ))
             }
-        } else {
-            Ok(Self::SingleInit(Box::new(Expr::Constant(
+            _ => Ok(Self::SingleInit(Box::new(Expr::Constant(
                 Constant::const_from_type(r#type, 0)?,
-            ))))
+            )))),
         }
     }
 }

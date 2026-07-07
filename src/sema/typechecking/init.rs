@@ -64,7 +64,10 @@ pub fn typecheck_init(
                 .collect::<Result<Vec<ast::Initializer>>>()?;
             if inits.len() < entry.members.len() {
                 for member_entry in &entry.members[entry.members.len() - inits.len()..] {
-                    inits.push(ast::Initializer::zero_initializer(&member_entry.r#type)?);
+                    inits.push(ast::Initializer::zero_initializer(
+                        &member_entry.r#type,
+                        structs,
+                    )?);
                 }
             }
 
@@ -115,7 +118,7 @@ pub fn pad_compound_init(
             .map(|i| typecheck_init(element, i, symbols, structs, name))
             .collect::<Result<Vec<ast::Initializer>>>()?;
         while inits.len() < *size {
-            inits.push(ast::Initializer::zero_initializer(element)?);
+            inits.push(ast::Initializer::zero_initializer(element, structs)?);
         }
         Ok(ast::Initializer::CompoundInit(inits))
     } else {

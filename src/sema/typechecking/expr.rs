@@ -753,6 +753,34 @@ fn try_pointer_binary(
             !(left_t.is_void_pointer() || right_t.is_void_pointer()),
             "Cannot subtract or add anything with void pointer"
         );
+        match left_t {
+            ast::Type {
+                base: ast::BaseType::Ptr { to: left_to, .. },
+                ..
+            } => {
+                if left_to.is_struct() || left_to.is_union() {
+                    ensure!(
+                        left_to.is_complete(),
+                        "cannot have incomplete struct type in pointer arithmitic"
+                    );
+                }
+            }
+            _ => {}
+        }
+        match right_t {
+            ast::Type {
+                base: ast::BaseType::Ptr { to: right_to, .. },
+                ..
+            } => {
+                if right_to.is_struct() || right_to.is_union() {
+                    ensure!(
+                        right_to.is_complete(),
+                        "cannot have incomplete struct type in pointer arithmitic"
+                    );
+                }
+            }
+            _ => {}
+        }
     }
 
     Ok(None)

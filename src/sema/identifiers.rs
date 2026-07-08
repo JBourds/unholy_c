@@ -602,7 +602,7 @@ fn resolve_expr(
         ast::Expr::SizeOf(expr) => Ok(ast::Expr::SizeOf(
             resolve_expr(*expr, ident_map, tag_map)?.into(),
         )),
-        v @ ast::Expr::SizeOfT(_) => Ok(v),
+        ast::Expr::SizeOfT(ty) => Ok(ast::Expr::SizeOfT(resolve_type(ty, tag_map)?)),
         ast::Expr::Dot { structure, member } => Ok(ast::Expr::Dot {
             structure: resolve_expr(*structure, ident_map, tag_map)?.into(),
             member,

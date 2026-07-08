@@ -155,6 +155,10 @@ fn typecheck_expr(
                             then_tag == else_tag,
                             "cannot have two different struct types {then_tag}, {else_tag} in conditional"
                         );
+                        ensure!(
+                            then_type.is_complete(),
+                            "cannot use incomplete type {then_type} in ternary"
+                        );
                         then_type.base.clone()
                     }
                     (
@@ -164,6 +168,10 @@ fn typecheck_expr(
                         ensure!(
                             then_tag == else_tag,
                             "cannot have two different Union types {then_tag}, {else_tag} in conditional"
+                        );
+                        ensure!(
+                            then_type.is_complete(),
+                            "cannot use incomplete type {then_type} in ternary"
                         );
                         then_type.base.clone()
                     }

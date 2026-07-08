@@ -228,6 +228,12 @@ fn typecheck_expr(
                     .map(|param| fixup_type(param.clone(), structs))
                     .collect::<Vec<_>>();
                 let ret_t = fixup_type(*ret_t.clone(), structs);
+                if ret_t.is_struct() || ret_t.is_union() {
+                    ensure!(
+                        ret_t.is_complete(),
+                        "cannot call function {name} as it returns an incomplete struct/union"
+                    );
+                }
                 if args.len() != param_types.len() {
                     bail!(
                         "Expected {} args but received {} when calling \"{name}\".",

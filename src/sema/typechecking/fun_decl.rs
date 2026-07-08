@@ -36,7 +36,7 @@ pub fn typecheck_fun_decl(
     let decl = ast::FunDecl {
         r#type: ast::Type {
             base: ast::BaseType::Fun {
-                ret_t: ret_t.into(),
+                ret_t: ret_t.clone().into(),
                 param_types: param_types
                     .iter()
                     .map(|r#type| fixup_type(r#type.clone(), structs))
@@ -50,6 +50,12 @@ pub fn typecheck_fun_decl(
     symbols.declare_fun(&decl, structs)?;
     // Treat parameters as declarations without values
     let block = if let Some(block) = decl.block {
+        if ret_t.is_struct() || ret_t.is_union() {
+            ensure!(
+                ret_t.is_complete(),
+                "Cannot have functions return incomplete struct/union types"
+            );
+        }
         let items = block
             .into_items()
             .into_iter()

@@ -435,6 +435,16 @@ fn typecheck_unary(
     symbols: &mut SymbolTable,
     structs: &TypeTable,
 ) -> Result<TypedExpr> {
+    match (op, expr) {
+        (
+            ast::UnaryOp::AddrOf,
+            ast::Expr::Unary {
+                op: ast::UnaryOp::Deref,
+                expr,
+            },
+        ) => return typecheck_expr_and_convert(expr, symbols, structs),
+        _ => {}
+    }
     let TypedExpr { expr, r#type } = match op {
         // Don't lvalue convert in these cases
         ast::UnaryOp::AddrOf

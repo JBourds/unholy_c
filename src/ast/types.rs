@@ -503,7 +503,11 @@ impl Type {
     }
 
     pub fn is_scalar(&self) -> bool {
-        !(self.is_array() || self.is_function() || self.is_void())
+        !(self.is_array()
+            || self.is_function()
+            || self.is_void()
+            || self.is_struct()
+            || self.is_union())
     }
 
     pub fn is_complete(&self) -> bool {

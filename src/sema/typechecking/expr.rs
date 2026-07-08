@@ -360,11 +360,12 @@ fn typecheck_expr(
             })
         }
         ast::Expr::SizeOfT(ty) => {
-            validate_type_specifier(ty).context("Invalid expression to get the size of")?;
+            let ty = fixup_type(ty.clone(), structs);
+            validate_type_specifier(&ty).context("Invalid expression to get the size of")?;
             ensure!(ty.is_complete(), "Cannot get size of an incomplete type");
             ensure!(!ty.is_function(), "Cannot get size of a function");
             Ok(TypedExpr {
-                expr: ast::Expr::SizeOfT(ty.clone()),
+                expr: ast::Expr::SizeOfT(ty),
                 r#type: ast::Type::USIZE,
             })
         }

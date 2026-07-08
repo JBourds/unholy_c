@@ -19,8 +19,9 @@ pub fn typecheck_struct_decl(
             member.name,
             decl.tag
         );
+        let r#type = fixup_type(member.r#type.clone(), structs);
         ensure!(
-            member.r#type.is_complete() && member.r#type.is_array_complete(),
+            r#type.is_complete() && r#type.is_array_complete(),
             "member {} cannot have incomplete type {}",
             member.name,
             member.r#type

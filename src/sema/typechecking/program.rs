@@ -42,7 +42,7 @@ pub fn typecheck_program(
             }
             ast::Declaration::UnionDecl(u) => {
                 let name = Rc::clone(&u.tag);
-                declarations.push(ast::Declaration::StructDecl(
+                declarations.push(ast::Declaration::UnionDecl(
                     typecheck_union_decl(u, structs)
                         .context(format!("Unable to typecheck union declaration for {name}"))?,
                 ));

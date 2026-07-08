@@ -36,6 +36,12 @@ pub fn typecheck_decl(
                     .context(format!("Unable to typecheck \"{name}\" declaration"))?,
             )
         }
-        ast::Declaration::UnionDecl(..) => todo!(),
+        ast::Declaration::UnionDecl(decl) => {
+            let name = Rc::clone(&decl.tag);
+            ast::Declaration::UnionDecl(
+                typecheck_union_decl(decl, structs)
+                    .context(format!("Unable to typecheck \"{name}\" declaration"))?,
+            )
+        }
     })
 }

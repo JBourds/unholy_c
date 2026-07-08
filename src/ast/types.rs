@@ -507,7 +507,11 @@ impl Type {
     }
 
     pub fn is_complete(&self) -> bool {
-        !self.is_void()
+        if self.is_struct() {
+            !(self.base.nbytes() == 0 && self.alignment == NonZeroUsize::new(1).unwrap())
+        } else {
+            !self.is_void()
+        }
     }
 
     pub fn is_pointer_to_complete(&self) -> bool {

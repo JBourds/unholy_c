@@ -466,7 +466,9 @@ fn typecheck_unary(
                 ast::Type {
                     base: ast::BaseType::Float(_)
                         | ast::BaseType::Double(_)
-                        | ast::BaseType::Ptr { .. },
+                        | ast::BaseType::Ptr { .. }
+                        | ast::BaseType::Struct { .. }
+                        | ast::BaseType::Union { .. },
                     ..
                 }
             )),

@@ -150,11 +150,12 @@ pub fn typecheck_stmt(
                     let TypedExpr { expr, r#type } =
                         typecheck_expr_and_convert(expr, symbols, structs)
                             .context("Failed to typecheck for loop initialization expression.")?;
-
-                    ensure!(
-                        (r#type.is_struct() || r#type.is_union()) && r#type.is_complete(),
-                        "cannot use incomplete struct/union as ForInit"
-                    );
+                    if r#type.is_struct() || r#type.is_union() {
+                        ensure!(
+                            r#type.is_complete(),
+                            "cannot use incomplete struct/union as ForInit"
+                        );
+                    }
                     ast::ForInit::Expr(Some(expr))
                 }
                 _ => ast::ForInit::Expr(None),

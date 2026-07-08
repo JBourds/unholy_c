@@ -275,6 +275,12 @@ fn typecheck_expr(
             let TypedExpr { expr, r#type } = typecheck_expr_and_convert(exp, symbols, structs)
                 .context("Failed to typecheck casted expression.")?;
 
+            if !r#type.is_void() {
+                ensure!(
+                    r#type.is_complete(),
+                    "cannot preform cast on incomplete type"
+                );
+            }
             let target = fixup_type(target.clone(), structs);
             if target.is_pointer() && r#type.is_float() {
                 bail!("Cannot cast floating point number to pointer");

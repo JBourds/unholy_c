@@ -66,6 +66,10 @@ fn typecheck_expr(
             } = typecheck_expr_and_convert(rvalue, symbols, structs)
                 .context("Failed to typecheck rvalue in assignment.")?;
 
+            ensure!(
+                left_t.is_complete() && right_t.is_complete(),
+                "cannot preform assignments on incomplete types"
+            );
             // FIXME: Lazy clone :(
             Ok(TypedExpr {
                 expr: ast::Expr::Assignment {

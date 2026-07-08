@@ -13,6 +13,7 @@ pub fn typecheck_init(
     symbols: &mut SymbolTable,
     structs: &TypeTable,
     name: &Rc<String>,
+    is_static: bool,
 ) -> Result<ast::Initializer> {
     match (target, init) {
         (
@@ -59,7 +60,7 @@ pub fn typecheck_init(
                 .into_iter()
                 .zip(entry.members.iter())
                 .map(|(i, member_entry)| {
-                    typecheck_init(&member_entry.r#type, i, symbols, structs, name)
+                    typecheck_init(&member_entry.r#type, i, symbols, structs, name, is_static)
                 })
                 .collect::<Result<Vec<ast::Initializer>>>()?;
             if inits.len() < entry.members.len() {
@@ -72,6 +73,30 @@ pub fn typecheck_init(
             }
 
             Ok(ast::Initializer::CompoundInit(inits))
+        }
+        (
+            ast::Type {
+                base: ast::BaseType::Ptr { to, .. },
+                ..
+            },
+            ast::Initializer::SingleInit(expr),
+        ) if matches!(*expr, ast::Expr::String { .. }) && is_static => {
+            match &**to {
+                ast::Type {
+                    base:
+                        ast::BaseType::Int {
+                            nbytes: 1,
+                            signed: None,
+                        },
+                    ..
+                } => {}
+                _ => bail!("Can't initialize a non-character pointer with a string literal"),
+            };
+            let ast::Expr::String { value } = &*expr else {
+                unreachable!()
+            };
+            let _ = symbols.get_or_make_string(Rc::clone(value));
+            Ok(ast::Initializer::SingleInit(expr))
         }
         (_, ast::Initializer::SingleInit(expr)) => {
             let TypedExpr { expr, r#type } = typecheck_expr_and_convert(&expr, symbols, structs)
@@ -92,7 +117,7 @@ pub fn typecheck_init(
                 ..
             },
             init @ ast::Initializer::CompoundInit(_),
-        ) => pad_compound_init(target, init, symbols, structs, name),
+        ) => pad_compound_init(target, init, symbols, structs, name, is_static),
         _ => bail!("Cannot assign compound initializer to non array var decl"),
     }
 }
@@ -103,6 +128,7 @@ pub fn pad_compound_init(
     symbols: &mut SymbolTable,
     structs: &TypeTable,
     name: &Rc<String>,
+    is_static: bool,
 ) -> Result<ast::Initializer> {
     if let ast::Type {
         base: ast::BaseType::Array { element, size },
@@ -115,7 +141,7 @@ pub fn pad_compound_init(
         }
         let mut inits = inits
             .into_iter()
-            .map(|i| typecheck_init(element, i, symbols, structs, name))
+            .map(|i| typecheck_init(element, i, symbols, structs, name, is_static))
             .collect::<Result<Vec<ast::Initializer>>>()?;
         while inits.len() < *size {
             inits.push(ast::Initializer::zero_initializer(element, structs)?);

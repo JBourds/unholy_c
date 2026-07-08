@@ -47,7 +47,7 @@ pub fn typecheck_var_decl(
             } = entry.attribute
             {
                 // Make sure the init is fixed up
-                let init = pad_compound_init(&target, init, symbols, structs, &decl.name)?;
+                let init = pad_compound_init(&target, init, symbols, structs, &decl.name, true)?;
                 let attribute = Attribute::Static {
                     initial_value: InitialValue::from_initializer(&target, &init, symbols, structs)
                         .context("unable to create initial value from initializer")?,
@@ -63,7 +63,9 @@ pub fn typecheck_var_decl(
                 }
             } else {
                 ast::VarDecl {
-                    init: Some(typecheck_init(&target, init, symbols, structs, &decl.name)?),
+                    init: Some(typecheck_init(
+                        &target, init, symbols, structs, &decl.name, false,
+                    )?),
                     r#type: target,
                     ..decl
                 }

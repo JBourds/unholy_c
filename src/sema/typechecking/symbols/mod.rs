@@ -293,6 +293,13 @@ impl SymbolTable {
                 new_type.is_complete(),
                 "file scope variable {name} defined with incomplete structure type"
             );
+        } else if !matches!(storage_class, Some(ast::StorageClass::Extern))
+            && (new_type.is_struct() || new_type.is_union())
+        {
+            ensure!(
+                new_type.is_complete(),
+                "cannot declare local var {name} with incomplete structure type"
+            );
         }
         let entry = if let Some(entry) = self.get(&name) {
             // FIXME: Lazy way to make rust shutup about the immutable borrow
@@ -392,7 +399,9 @@ impl SymbolTable {
         decl.r#type = fixup_type(decl.r#type, structs);
         let wrapped_decl = ast::Declaration::FunDecl(decl.clone());
         self.declare_in_scope(&wrapped_decl, Scope::Global, structs)?;
-        if let scope @ Scope::Local(_) = self.scope() {
+        if let scope @ Scope::Local(_) = self.scope()
+            && decl.block.is_some()
+        {
             // Declare function and all its params into local scope
             self.declare_in_scope(&wrapped_decl, scope, structs)?;
             for (r#type, name) in decl.signature()

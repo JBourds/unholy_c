@@ -24,6 +24,10 @@ pub fn typecheck_fun_decl(
         panic!("Function declaration type isn't a function type?");
     };
     let ret_t = fixup_type(*ret_t.clone(), structs);
+    let param_types: Vec<_> = param_types
+        .iter()
+        .map(|r#type| fixup_type(r#type.clone(), structs))
+        .collect();
     ensure!(
         !param_types.iter().any(|ty| ty.is_void()),
         "Cannot have void function parameter arguments"
@@ -37,10 +41,7 @@ pub fn typecheck_fun_decl(
         r#type: ast::Type {
             base: ast::BaseType::Fun {
                 ret_t: ret_t.clone().into(),
-                param_types: param_types
-                    .iter()
-                    .map(|r#type| fixup_type(r#type.clone(), structs))
-                    .collect(),
+                param_types: param_types.to_vec(),
             },
             ..decl.r#type
         },
@@ -55,6 +56,14 @@ pub fn typecheck_fun_decl(
                 ret_t.is_complete(),
                 "Cannot have functions return incomplete struct/union types"
             );
+        }
+        for param in param_types {
+            if param.is_struct() || param.is_union() {
+                ensure!(
+                    param.is_complete(),
+                    "param types cannot be incomplete struct/union types"
+                );
+            }
         }
         let items = block
             .into_items()

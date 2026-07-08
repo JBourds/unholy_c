@@ -247,6 +247,10 @@ fn typecheck_expr(
                     .map(|(arg, exp_t)| {
                         typecheck_expr_and_convert(arg, symbols, structs).and_then(
                             |TypedExpr { expr, r#type }| {
+                                ensure!(
+                                    r#type.is_complete(),
+                                    "cannot pass incomplete type as param"
+                                );
                                 convert_by_assignment(expr, &r#type, exp_t)
                                     .context("failed to typecheck and convert expression")
                             },

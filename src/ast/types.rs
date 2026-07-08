@@ -534,6 +534,10 @@ impl Type {
                 base: BaseType::Array { element, .. },
                 ..
             } => element.is_complete() && element.is_array_complete(),
+            Self {
+                base: BaseType::Ptr { to, .. },
+                ..
+            } => to.is_array_complete(),
             _ => true,
         }
     }

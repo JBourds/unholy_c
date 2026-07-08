@@ -146,11 +146,17 @@ pub fn typecheck_stmt(
                             .context("Failed to typecheck for loop initializations.")?,
                     )
                 }
-                ast::ForInit::Expr(Some(ref expr)) => ast::ForInit::Expr(Some(
-                    typecheck_expr_and_convert(expr, symbols, structs)
-                        .map(|t_expr| t_expr.expr)
-                        .context("Failed to typecheck for loop initialization expression.")?,
-                )),
+                ast::ForInit::Expr(Some(ref expr)) => {
+                    let TypedExpr { expr, r#type } =
+                        typecheck_expr_and_convert(expr, symbols, structs)
+                            .context("Failed to typecheck for loop initialization expression.")?;
+
+                    ensure!(
+                        (r#type.is_struct() || r#type.is_union()) && r#type.is_complete(),
+                        "cannot use incomplete struct/union as ForInit"
+                    );
+                    ast::ForInit::Expr(Some(expr))
+                }
                 _ => ast::ForInit::Expr(None),
             };
             let post = if let Some(post) = post {

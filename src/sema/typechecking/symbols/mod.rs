@@ -285,6 +285,15 @@ impl SymbolTable {
     ) -> Result<SymbolEntry> {
         let (name, new_type, storage_class, defining_ident) = Self::get_decl_info(decl);
 
+        if scope == Scope::Global
+            && !matches!(storage_class, Some(ast::StorageClass::Extern))
+            && (new_type.is_struct() || new_type.is_union())
+        {
+            ensure!(
+                new_type.is_complete(),
+                "file scope variable {name} defined with incomplete structure type"
+            );
+        }
         let entry = if let Some(entry) = self.get(&name) {
             // FIXME: Lazy way to make rust shutup about the immutable borrow
             // overlapping with the mutable one

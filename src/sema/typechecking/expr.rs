@@ -433,14 +433,19 @@ fn typecheck_expr(
                 ast::Type {
                     base: ast::BaseType::Ptr { to, .. },
                     ..
-                } if to.is_struct() => {
-                    let ast::Type {
-                        base: ast::BaseType::Struct { tag, .. },
-                        ..
-                    } = *to
-                    else {
-                        unreachable!()
+                } if to.is_struct() || to.is_union() => {
+                    let tag = match *to {
+                        ast::Type {
+                            base: ast::BaseType::Struct { tag, .. },
+                            ..
+                        }
+                        | ast::Type {
+                            base: ast::BaseType::Union { tag, .. },
+                            ..
+                        } => tag,
+                        _ => unreachable!(),
                     };
+
                     let Some(entry) = structs.get(&tag) else {
                         bail!("could not find struct {tag} in structure table")
                     };

@@ -404,6 +404,10 @@ fn typecheck_expr(
                 ast::Type {
                     base: ast::BaseType::Struct { tag, .. },
                     ..
+                }
+                | ast::Type {
+                    base: ast::BaseType::Union { tag, .. },
+                    ..
                 } => {
                     let Some(entry) = structs.get(&tag) else {
                         bail!("could not find struct {tag} in structure table")

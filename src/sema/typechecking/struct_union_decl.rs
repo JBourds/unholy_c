@@ -124,7 +124,7 @@ pub fn typecheck_union_decl(
     union_size = round_up(union_size, union_alignment);
 
     let r#type = ast::Type {
-        base: ast::BaseType::Struct {
+        base: ast::BaseType::Union {
             tag: Rc::clone(&decl.tag),
             size: union_size,
         },

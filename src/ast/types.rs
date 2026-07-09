@@ -511,7 +511,7 @@ impl Type {
     }
 
     pub fn is_complete(&self) -> bool {
-        if self.is_struct() {
+        if self.is_struct() || self.is_union() {
             !(self.base.nbytes() == 0 && self.alignment == NonZeroUsize::new(1).unwrap())
         } else {
             !self.is_void()

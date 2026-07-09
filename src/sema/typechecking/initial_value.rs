@@ -152,6 +152,39 @@ impl InitialValue {
                 }
                 Ok(Self::Initial(new_inits))
             }
+            (
+                ast::Type {
+                    base: ast::BaseType::Union { tag, .. },
+                    ..
+                },
+                ast::Initializer::CompoundInit(inits),
+            ) => {
+                let Some(entry) = structs.get(tag) else {
+                    bail!("cannot initialize union non in type table");
+                };
+                ensure!(
+                    inits.len() <= 1,
+                    "Too many initalizers in static init for union {tag}"
+                );
+                let mut current_offset = 0;
+                let mut new_inits = vec![];
+                for (init, member) in inits.iter().zip(entry.members.iter()) {
+                    if member.offset != current_offset {
+                        new_inits.push(StaticInit::Zero(member.offset - current_offset));
+                    }
+                    match Self::from_initializer(&member.r#type, init, symbols, structs)? {
+                        Self::Initial(init) => {
+                            new_inits.extend(init);
+                        }
+                        _ => unreachable!(),
+                    }
+                    current_offset = member.offset + member.r#type.base.nbytes();
+                }
+                if entry.size != current_offset {
+                    new_inits.push(StaticInit::Zero(entry.size - current_offset));
+                }
+                Ok(Self::Initial(new_inits))
+            }
             _ => bail!("Cannot static init non-array with compound initializer"),
         }
     }

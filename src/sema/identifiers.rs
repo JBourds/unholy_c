@@ -332,8 +332,8 @@ fn resolve_union_decl(
     make_temporary: &mut impl FnMut(&str) -> String,
 ) -> Result<ast::UnionDecl> {
     let unique_tag = match tag_map.get(&decl.tag) {
-        Some(entry) => Rc::clone(&entry.name),
-        None => {
+        Some(entry) if entry.from_current_scope => Rc::clone(&entry.name),
+        _ => {
             let tag = Rc::new(make_temporary(&decl.tag));
             let entry = TagEntry::new_local(Rc::clone(&tag));
             tag_map.insert(Rc::clone(&decl.tag), entry);

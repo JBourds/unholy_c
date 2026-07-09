@@ -76,6 +76,35 @@ pub fn typecheck_init(
         }
         (
             ast::Type {
+                base: ast::BaseType::Union { tag, .. },
+                ..
+            },
+            ast::Initializer::CompoundInit(init),
+        ) => {
+            let Some(entry) = structs.get(tag) else {
+                bail!("cannot initialize union type thats not been defined");
+            };
+            ensure!(init.len() <= 1, "too many element in initializer list");
+            let mut inits = init
+                .into_iter()
+                .zip(entry.members.iter())
+                .map(|(i, member_entry)| {
+                    typecheck_init(&member_entry.r#type, i, symbols, structs, name, is_static)
+                })
+                .collect::<Result<Vec<ast::Initializer>>>()?;
+            if inits.len() < 1 {
+                for member_entry in &entry.members[entry.members.len() - inits.len()..] {
+                    inits.push(ast::Initializer::zero_initializer(
+                        &member_entry.r#type,
+                        structs,
+                    )?);
+                }
+            }
+
+            Ok(ast::Initializer::CompoundInit(inits))
+        }
+        (
+            ast::Type {
                 base: ast::BaseType::Ptr { to, .. },
                 ..
             },

@@ -169,7 +169,7 @@ impl StructEntry {
     }
 }
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum StructOrUnion {
     Struct,
     Union,

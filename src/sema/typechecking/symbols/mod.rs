@@ -1,5 +1,5 @@
 use crate::ast;
-use crate::sema::typechecking::{TypeTable, fixup_type};
+use crate::sema::typechecking::{StructOrUnion, TypeTable, fixup_type};
 use crate::tacky::StaticInit;
 
 use super::Attribute;
@@ -284,7 +284,33 @@ impl SymbolTable {
         structs: &TypeTable,
     ) -> Result<SymbolEntry> {
         let (name, new_type, storage_class, defining_ident) = Self::get_decl_info(decl);
-
+        match &new_type {
+            ast::Type {
+                base: ast::BaseType::Struct { tag, .. },
+                ..
+            } => {
+                let Some(entry) = structs.get(tag) else {
+                    bail!("Cannot declare local var {name} with undeclared struct");
+                };
+                ensure!(
+                    entry.tag_type == StructOrUnion::Struct,
+                    "cannot use entry after its been shadowed"
+                );
+            }
+            ast::Type {
+                base: ast::BaseType::Union { tag, .. },
+                ..
+            } => {
+                let Some(entry) = structs.get(tag) else {
+                    bail!("Cannot declare local var {name} with undeclared struct");
+                };
+                ensure!(
+                    entry.tag_type == StructOrUnion::Union,
+                    "cannot use entry after its been shadowed"
+                );
+            }
+            _ => {}
+        }
         if scope == Scope::Global
             && !matches!(storage_class, Some(ast::StorageClass::Extern))
             && (new_type.is_struct() || new_type.is_union())

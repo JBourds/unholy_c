@@ -211,6 +211,20 @@ impl Initializer {
                         .collect::<Result<Vec<_>>>()?,
                 ))
             }
+            BaseType::Union { tag, .. } => {
+                let Some(entry) = structs.get(tag) else {
+                    bail!(
+                        "cannot get zero initializer for union {tag} as its not in the type table"
+                    )
+                };
+
+                Ok(Self::CompoundInit(vec![
+                    ast::Initializer::SingleInit(
+                        Box::new(ast::Expr::Constant(ast::Constant::U8(0)))
+                    );
+                    entry.size
+                ]))
+            }
             _ => Ok(Self::SingleInit(Box::new(Expr::Constant(
                 Constant::const_from_type(r#type, 0)?,
             )))),

@@ -114,10 +114,8 @@ impl Function {
         let mut mappings = HashMap::new();
         // We always start with a stack bound of 8 for RBP
         // Include register args here since we move into them
-        for (src_reg, (dst_type, dst)) in
-            std::iter::zip(SYSTEM_V_GP_REGS, gpr_args).chain(
-                std::iter::zip(SYSTEM_V_FP_REGS, fpr_args),
-            )
+        for (src_reg, (dst_type, dst)) in std::iter::zip(SYSTEM_V_GP_REGS, gpr_args)
+            .chain(std::iter::zip(SYSTEM_V_FP_REGS, fpr_args))
         {
             instructions.push(Instruction::<Initial>::new(InstructionType::Mov {
                 src: Operand::Reg(

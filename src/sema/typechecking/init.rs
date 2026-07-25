@@ -92,7 +92,7 @@ pub fn typecheck_init(
                     typecheck_init(&member_entry.r#type, i, symbols, structs, name, is_static)
                 })
                 .collect::<Result<Vec<ast::Initializer>>>()?;
-            if inits.len() < 1 {
+            if inits.is_empty() {
                 for member_entry in &entry.members[entry.members.len() - inits.len()..] {
                     inits.push(ast::Initializer::zero_initializer(
                         &member_entry.r#type,

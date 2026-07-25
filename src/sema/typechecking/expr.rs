@@ -17,15 +17,15 @@ pub fn typecheck_expr_and_convert(
     structs: &TypeTable,
 ) -> Result<TypedExpr> {
     let texpr = typecheck_expr(expr, symbols, structs)?;
-    match &texpr.r#type {
-        ast::Type {
-            base: ast::BaseType::Struct { tag, .. },
-            ..
-        } => ensure!(
+    if let ast::Type {
+        base: ast::BaseType::Struct { tag, .. },
+        ..
+    } = &texpr.r#type
+    {
+        ensure!(
             structs.get(tag).is_some(),
             "Invalid use of incomplete structure type {tag}"
-        ),
-        _ => {}
+        )
     }
     Ok(maybe_decay_expr(texpr))
 }
@@ -399,7 +399,7 @@ fn typecheck_expr(
         }
         ast::Expr::Dot { structure, member } => {
             let TypedExpr { expr, r#type } =
-                typecheck_expr_and_convert(&*structure, symbols, structs)?;
+                typecheck_expr_and_convert(structure, symbols, structs)?;
             match r#type {
                 ast::Type {
                     base: ast::BaseType::Struct { tag, .. },
@@ -427,8 +427,7 @@ fn typecheck_expr(
             }
         }
         ast::Expr::Arrow { pointer, member } => {
-            let TypedExpr { expr, r#type } =
-                typecheck_expr_and_convert(&*pointer, symbols, structs)?;
+            let TypedExpr { expr, r#type } = typecheck_expr_and_convert(pointer, symbols, structs)?;
             match r#type {
                 ast::Type {
                     base: ast::BaseType::Ptr { to, .. },
@@ -472,15 +471,15 @@ fn typecheck_unary(
     symbols: &mut SymbolTable,
     structs: &TypeTable,
 ) -> Result<TypedExpr> {
-    match (op, expr) {
-        (
-            ast::UnaryOp::AddrOf,
-            ast::Expr::Unary {
-                op: ast::UnaryOp::Deref,
-                expr,
-            },
-        ) => return typecheck_expr_and_convert(expr, symbols, structs),
-        _ => {}
+    if let (
+        ast::UnaryOp::AddrOf,
+        ast::Expr::Unary {
+            op: ast::UnaryOp::Deref,
+            expr,
+        },
+    ) = (op, expr)
+    {
+        return typecheck_expr_and_convert(expr, symbols, structs);
     }
     let TypedExpr { expr, r#type } = match op {
         // Don't lvalue convert in these cases
@@ -776,33 +775,29 @@ fn try_pointer_binary(
             !(left_t.is_void_pointer() || right_t.is_void_pointer()),
             "Cannot subtract or add anything with void pointer"
         );
-        match left_t {
-            ast::Type {
-                base: ast::BaseType::Ptr { to: left_to, .. },
-                ..
-            } => {
-                if left_to.is_struct() || left_to.is_union() {
-                    ensure!(
-                        left_to.is_complete(),
-                        "cannot have incomplete struct type in pointer arithmitic"
-                    );
-                }
+        if let ast::Type {
+            base: ast::BaseType::Ptr { to: left_to, .. },
+            ..
+        } = left_t
+        {
+            if left_to.is_struct() || left_to.is_union() {
+                ensure!(
+                    left_to.is_complete(),
+                    "cannot have incomplete struct type in pointer arithmitic"
+                );
             }
-            _ => {}
         }
-        match right_t {
-            ast::Type {
-                base: ast::BaseType::Ptr { to: right_to, .. },
-                ..
-            } => {
-                if right_to.is_struct() || right_to.is_union() {
-                    ensure!(
-                        right_to.is_complete(),
-                        "cannot have incomplete struct type in pointer arithmitic"
-                    );
-                }
+        if let ast::Type {
+            base: ast::BaseType::Ptr { to: right_to, .. },
+            ..
+        } = right_t
+        {
+            if right_to.is_struct() || right_to.is_union() {
+                ensure!(
+                    right_to.is_complete(),
+                    "cannot have incomplete struct type in pointer arithmitic"
+                );
             }
-            _ => {}
         }
     }
 

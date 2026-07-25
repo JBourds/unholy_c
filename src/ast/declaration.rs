@@ -139,7 +139,7 @@ impl StructDecl {
                     members.push(member);
                     match remaining {
                         [Token::Semi, remaining @ ..] => tokens = remaining,
-                        [remaining @ ..] => bail!(
+                        remaining => bail!(
                             "Expected semi colon after member declaration, found {:?} instead",
                             remaining.first()
                         ),
@@ -153,7 +153,7 @@ impl StructDecl {
                     [Token::RSquirly, Token::Semi, tokens @ ..] => {
                         Ok(Some((Self { tag, members }, tokens)))
                     }
-                    [tokens @ ..] => bail!(
+                    tokens => bail!(
                         "struct with member declaration must be followed by semicolon, found {:?} instead. Error from member decl parse: {error:?}",
                         tokens.first()
                     ),
@@ -187,7 +187,7 @@ impl UnionDecl {
                     members.push(member);
                     match remaining {
                         [Token::Semi, remaining @ ..] => tokens = remaining,
-                        [remaining @ ..] => bail!(
+                        remaining => bail!(
                             "Expected semi colon after member declaration, found {:?} instead",
                             remaining.first()
                         ),
@@ -201,7 +201,7 @@ impl UnionDecl {
                     [Token::RSquirly, Token::Semi, tokens @ ..] => {
                         Ok(Some((Self { tag, members }, tokens)))
                     }
-                    [tokens @ ..] => bail!(
+                    tokens => bail!(
                         "struct with member declaration must be followed by semicolon, found {:?} instead. Error from member decl parse: {error:?}",
                         tokens.first()
                     ),

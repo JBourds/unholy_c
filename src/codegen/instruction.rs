@@ -853,10 +853,7 @@ impl Instruction<Initial> {
 
         // Setup all the GP and FP regs with arguments
         for (dst_reg, src_arg) in std::iter::zip(SYSTEM_V_GP_REGS.iter(), gpr_args)
-            .chain(std::iter::zip(
-                SYSTEM_V_FP_REGS.iter(),
-                fpr_args,
-            ))
+            .chain(std::iter::zip(SYSTEM_V_FP_REGS.iter(), fpr_args))
         {
             let src_arg = Operand::from_tacky(src_arg, symbols, float_constants);
             let size = src_arg.size();

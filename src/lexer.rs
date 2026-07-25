@@ -523,7 +523,7 @@ impl Token {
         {
             // .digit (i.e. .1, .2, .10) should be parsed as a constant
             Some((_, Token::Dot))
-                if stream.chars().nth(1).map(|c| c.is_digit(10)) == Some(true) =>
+                if stream.chars().nth(1).map(|c| c.is_ascii_digit()) == Some(true) =>
             {
                 None
             }

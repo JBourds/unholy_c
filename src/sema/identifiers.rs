@@ -1,4 +1,4 @@
-use crate::sema::typechecking::StructOrUnion;
+use crate::sema::typechecking::TagType;
 
 use super::*;
 
@@ -38,11 +38,11 @@ impl IdentEntry {
 pub struct TagEntry {
     pub from_current_scope: bool,
     pub name: Rc<String>,
-    pub struct_or_union: StructOrUnion,
+    pub struct_or_union: TagType,
 }
 
 impl TagEntry {
-    fn new_local(name: Rc<String>, struct_or_union: StructOrUnion) -> Self {
+    fn new_local(name: Rc<String>, struct_or_union: TagType) -> Self {
         Self {
             from_current_scope: true,
             name,
@@ -305,7 +305,7 @@ fn resolve_struct_decl(
     let unique_tag = match tag_map.get(&decl.tag) {
         Some(entry) if entry.from_current_scope => {
             ensure!(
-                entry.struct_or_union == StructOrUnion::Struct,
+                entry.struct_or_union == TagType::Struct,
                 "cannot use tag {} in current scope since its taken by a union",
                 decl.tag
             );
@@ -313,7 +313,7 @@ fn resolve_struct_decl(
         }
         _ => {
             let tag = Rc::new(make_temporary(&decl.tag));
-            let entry = TagEntry::new_local(Rc::clone(&tag), StructOrUnion::Struct);
+            let entry = TagEntry::new_local(Rc::clone(&tag), TagType::Struct);
             tag_map.insert(Rc::clone(&decl.tag), entry);
             tag
         }
@@ -345,7 +345,7 @@ fn resolve_union_decl(
     let unique_tag = match tag_map.get(&decl.tag) {
         Some(entry) if entry.from_current_scope => {
             ensure!(
-                entry.struct_or_union == StructOrUnion::Union,
+                entry.struct_or_union == TagType::Union,
                 "cannot use tag {} in current scope since its taken by a struct",
                 decl.tag
             );
@@ -353,7 +353,7 @@ fn resolve_union_decl(
         }
         _ => {
             let tag = Rc::new(make_temporary(&decl.tag));
-            let entry = TagEntry::new_local(Rc::clone(&tag), StructOrUnion::Union);
+            let entry = TagEntry::new_local(Rc::clone(&tag), TagType::Union);
             tag_map.insert(Rc::clone(&decl.tag), entry);
             tag
         }
@@ -639,7 +639,7 @@ fn resolve_type(r#type: ast::Type, tag_map: &HashMap<Rc<String>, TagEntry>) -> R
                 bail!("attempting to use structure {tag} before its defined");
             };
             ensure!(
-                new_tag.struct_or_union == StructOrUnion::Struct,
+                new_tag.struct_or_union == TagType::Struct,
                 "cannot use union tag for struct"
             );
             ast::BaseType::Struct {
@@ -652,7 +652,7 @@ fn resolve_type(r#type: ast::Type, tag_map: &HashMap<Rc<String>, TagEntry>) -> R
                 bail!("attempting to use union {tag} before its defined");
             };
             ensure!(
-                new_tag.struct_or_union == StructOrUnion::Union,
+                new_tag.struct_or_union == TagType::Union,
                 "cannot use struct tag for struct"
             );
             ast::BaseType::Union {

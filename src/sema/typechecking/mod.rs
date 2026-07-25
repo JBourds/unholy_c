@@ -22,7 +22,7 @@ use crate::ast::{Expr, Type};
 pub use attribute::Attribute;
 pub use initial_value::InitialValue;
 pub use symbols::{Scope, SymbolEntry, SymbolTable, SymbolTableGetType};
-pub use type_table::{MemberEntry, StructEntry, StructOrUnion, TypeTable};
+pub use type_table::{MemberEntry, StructEntry, TagType, TypeTable};
 
 use super::*;
 use block::{typecheck_block, typecheck_block_item};

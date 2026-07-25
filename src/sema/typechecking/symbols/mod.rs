@@ -1,5 +1,5 @@
 use crate::ast;
-use crate::sema::typechecking::{StructOrUnion, TypeTable, fixup_type};
+use crate::sema::typechecking::{TagType, TypeTable, fixup_type};
 use crate::tacky::StaticInit;
 
 use super::Attribute;
@@ -293,7 +293,7 @@ impl SymbolTable {
                     bail!("Cannot declare local var {name} with undeclared struct");
                 };
                 ensure!(
-                    entry.tag_type == StructOrUnion::Struct,
+                    entry.tag_type == TagType::Struct,
                     "cannot use entry after its been shadowed"
                 );
             }
@@ -305,7 +305,7 @@ impl SymbolTable {
                     bail!("Cannot declare local var {name} with undeclared struct");
                 };
                 ensure!(
-                    entry.tag_type == StructOrUnion::Union,
+                    entry.tag_type == TagType::Union,
                     "cannot use entry after its been shadowed"
                 );
             }

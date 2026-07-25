@@ -45,11 +45,11 @@ impl TypeTable {
             ast::Type {
                 base: ast::BaseType::Struct { tag, .. },
                 ..
-            } => (Rc::clone(tag), StructOrUnion::Struct),
+            } => (Rc::clone(tag), TagType::Struct),
             ast::Type {
                 base: ast::BaseType::Union { tag, .. },
                 ..
-            } => (Rc::clone(tag), StructOrUnion::Union),
+            } => (Rc::clone(tag), TagType::Union),
             _ => unreachable!(),
         };
 
@@ -159,7 +159,7 @@ pub struct StructEntry {
     pub alignment: usize,
     pub size: usize,
     pub members: Vec<MemberEntry>,
-    pub tag_type: StructOrUnion,
+    pub tag_type: TagType,
     pub scope: Scope,
 }
 
@@ -170,7 +170,7 @@ impl StructEntry {
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
-pub enum StructOrUnion {
+pub enum TagType {
     Struct,
     Union,
 }

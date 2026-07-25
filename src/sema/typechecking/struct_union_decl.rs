@@ -154,9 +154,7 @@ pub fn typecheck_union_decl(
 fn round_up(size: usize, alignment: usize) -> usize {
     assert!(alignment != 0);
     size.checked_add(alignment - 1)
-        .unwrap()
-        .checked_mul(alignment)
-        .unwrap()
-        .checked_div(alignment)
+        .and_then(|size| size.checked_mul(alignment))
+        .and_then(|size| size.checked_div(alignment))
         .unwrap()
 }

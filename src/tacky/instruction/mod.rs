@@ -101,12 +101,10 @@ impl Instruction {
         make_temp_var: &mut impl FnMut() -> String,
     ) -> Vec<Self> {
         match decl {
-            ast::Declaration::VarDecl(decl) => {
-                Self::parse_var_decl_with(decl, symbols, make_temp_var)
-            }
-            ast::Declaration::FunDecl(decl) => Self::parse_fun_decl_with(decl, make_temp_var),
-            ast::Declaration::StructDecl(..) => todo!(),
-            ast::Declaration::UnionDecl(..) => todo!(),
+            ast::Declaration::Var(decl) => Self::parse_var_decl_with(decl, symbols, make_temp_var),
+            ast::Declaration::Fun(decl) => Self::parse_fun_decl_with(decl, make_temp_var),
+            ast::Declaration::Struct(..) => todo!(),
+            ast::Declaration::Union(..) => todo!(),
         }
     }
 
@@ -288,7 +286,7 @@ impl Instruction {
                 // Statics already get initialized at the top level.
                 // If we reinitialized them here they would act like local
                 // variables (suboptimal)
-                ast::BlockItem::Decl(ast::Declaration::VarDecl(ast::VarDecl {
+                ast::BlockItem::Decl(ast::Declaration::Var(ast::VarDecl {
                     storage_class: Some(ast::StorageClass::Static),
                     ..
                 })) => {}

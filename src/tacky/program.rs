@@ -26,14 +26,14 @@ impl From<sema::ValidAst> for Program {
                 // We need to do some fixup so that if the definition for a
                 // function was not marked static but the first declaration was
                 // that the function gets defined as static.
-                ast::Declaration::FunDecl(f) => {
+                ast::Declaration::Fun(f) => {
                     if let Some(f) = Function::from_symbol(f, &mut symbols) {
                         top_level.push(TopLevel::Fun(f));
                     }
                 }
-                ast::Declaration::VarDecl(_) => {}
-                ast::Declaration::StructDecl(..) => todo!(),
-                ast::Declaration::UnionDecl(..) => todo!(),
+                ast::Declaration::Var(_) => {}
+                ast::Declaration::Struct(..) => todo!(),
+                ast::Declaration::Union(..) => todo!(),
             };
         }
         Self { top_level, symbols }

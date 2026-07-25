@@ -73,7 +73,7 @@ impl SymbolTable {
     ) -> Result<SymbolEntry> {
         let mut r#type: ast::Type = decl.into();
 
-        if matches!(decl, &ast::Declaration::FunDecl(..)) {
+        if matches!(decl, &ast::Declaration::Fun(..)) {
             r#type = r#type.maybe_decay();
         }
         Ok(SymbolEntry {
@@ -189,13 +189,13 @@ impl SymbolTable {
         decl: &ast::Declaration,
     ) -> (Rc<String>, ast::Type, Option<ast::StorageClass>, bool) {
         match decl {
-            ast::Declaration::FunDecl(fun) => (
+            ast::Declaration::Fun(fun) => (
                 Rc::clone(&fun.name),
                 ast::Type::from(fun).maybe_decay(),
                 fun.storage_class.as_ref().copied(),
                 fun.block.is_some(),
             ),
-            ast::Declaration::VarDecl(ast::VarDecl {
+            ast::Declaration::Var(ast::VarDecl {
                 r#type,
                 name,
                 init,
@@ -206,8 +206,8 @@ impl SymbolTable {
                 storage_class.as_ref().copied(),
                 init.is_some(),
             ),
-            ast::Declaration::StructDecl(..) => todo!(),
-            ast::Declaration::UnionDecl(..) => todo!(),
+            ast::Declaration::Struct(..) => todo!(),
+            ast::Declaration::Union(..) => todo!(),
         }
     }
 
@@ -364,8 +364,8 @@ impl SymbolTable {
                 let mut attribute =
                     Self::check_attribute(&old_attrib, &name, storage_class, scope)?;
                 match decl {
-                    ast::Declaration::FunDecl(..) => {}
-                    ast::Declaration::VarDecl(var) => {
+                    ast::Declaration::Fun(..) => {}
+                    ast::Declaration::Var(var) => {
                         let new_attribute =
                             Attribute::from_var_with_scope(var, scope, self, structs)?;
                         if let (
@@ -388,8 +388,8 @@ impl SymbolTable {
                             }
                         }
                     }
-                    ast::Declaration::StructDecl(..) => todo!(),
-                    ast::Declaration::UnionDecl(..) => todo!(),
+                    ast::Declaration::Struct(..) => todo!(),
+                    ast::Declaration::Union(..) => todo!(),
                 }
                 SymbolEntry {
                     r#type: new_type,
@@ -423,7 +423,7 @@ impl SymbolTable {
         }
         let mut decl = decl.clone();
         decl.r#type = fixup_type(decl.r#type, structs);
-        let wrapped_decl = ast::Declaration::FunDecl(decl.clone());
+        let wrapped_decl = ast::Declaration::Fun(decl.clone());
         self.declare_in_scope(&wrapped_decl, Scope::Global, structs)?;
         if let scope @ Scope::Local(_) = self.scope()
             && decl.block.is_some()
@@ -435,7 +435,7 @@ impl SymbolTable {
                 .into_iter() {
                 ensure!(r#type != ast::Type::VOID, "Cannot have void function argument");
                 if let Some(name) = name {
-                    let param_decl = ast::Declaration::VarDecl(ast::VarDecl {
+                    let param_decl = ast::Declaration::Var(ast::VarDecl {
                         name: Rc::clone(name),
                         init: None,
                         r#type: r#type.clone(),
@@ -451,7 +451,7 @@ impl SymbolTable {
     pub fn declare_var(&mut self, decl: &ast::VarDecl, structs: &TypeTable) -> Result<SymbolEntry> {
         let key = decl.name.clone();
         let storage_class = decl.storage_class;
-        let decl = ast::Declaration::VarDecl(decl.clone());
+        let decl = ast::Declaration::Var(decl.clone());
         match storage_class {
             Some(ast::StorageClass::Extern) => self.declare_in_scope(&decl, Scope::Global, structs),
             Some(ast::StorageClass::Static)

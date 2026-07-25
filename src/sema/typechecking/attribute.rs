@@ -99,14 +99,14 @@ impl Attribute {
         structs: &TypeTable,
     ) -> Result<Self> {
         match decl {
-            ast::Declaration::FunDecl(f) => Ok(Self::from_fun(f)),
-            ast::Declaration::VarDecl(v) => Self::from_var_with_scope(v, scope, symbols, structs)
+            ast::Declaration::Fun(f) => Ok(Self::from_fun(f)),
+            ast::Declaration::Var(v) => Self::from_var_with_scope(v, scope, symbols, structs)
                 .context(format!(
                     "Failed to process attributes for variable \"{}\"",
                     v.name
                 )),
-            ast::Declaration::StructDecl(..) => todo!(),
-            ast::Declaration::UnionDecl(..) => todo!(),
+            ast::Declaration::Struct(..) => todo!(),
+            ast::Declaration::Union(..) => todo!(),
         }
     }
 

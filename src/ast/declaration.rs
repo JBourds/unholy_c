@@ -250,28 +250,28 @@ impl MemberDecl {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Declaration {
-    FunDecl(FunDecl),
-    VarDecl(VarDecl),
-    StructDecl(StructDecl),
-    UnionDecl(UnionDecl),
+    Fun(FunDecl),
+    Var(VarDecl),
+    Struct(StructDecl),
+    Union(UnionDecl),
 }
 
 impl Declaration {
     pub fn defining(&self) -> bool {
         match self {
-            Declaration::FunDecl(decl) => decl.block.is_some(),
-            Declaration::VarDecl(decl) => decl.init.is_some(),
-            Declaration::StructDecl(..) => unreachable!(),
-            Declaration::UnionDecl(..) => unreachable!(),
+            Declaration::Fun(decl) => decl.block.is_some(),
+            Declaration::Var(decl) => decl.init.is_some(),
+            Declaration::Struct(..) => unreachable!(),
+            Declaration::Union(..) => unreachable!(),
         }
     }
 
     pub fn storage_class(&self) -> Option<&StorageClass> {
         match self {
-            Declaration::FunDecl(decl) => decl.storage_class.as_ref(),
-            Declaration::VarDecl(decl) => decl.storage_class.as_ref(),
-            Declaration::StructDecl(..) => unreachable!(),
-            Declaration::UnionDecl(..) => unreachable!(),
+            Declaration::Fun(decl) => decl.storage_class.as_ref(),
+            Declaration::Var(decl) => decl.storage_class.as_ref(),
+            Declaration::Struct(..) => unreachable!(),
+            Declaration::Union(..) => unreachable!(),
         }
     }
 
@@ -293,7 +293,7 @@ impl Declaration {
                     storage_class.is_none(),
                     "structs cannot have an associated storage class"
                 );
-                return Ok((Declaration::StructDecl(struct_decl), tokens));
+                return Ok((Declaration::Struct(struct_decl), tokens));
             }
         } else if base.is_union() {
             let BaseType::Union { ref tag, .. } = base.base else {
@@ -307,7 +307,7 @@ impl Declaration {
                     storage_class.is_none(),
                     "unions cannot have an associated storage class"
                 );
-                return Ok((Declaration::UnionDecl(struct_decl), tokens));
+                return Ok((Declaration::Union(struct_decl), tokens));
             }
         }
         let (declarator, tokens) = Declarator::consume(&tokens[stream_offset..])
@@ -344,7 +344,7 @@ impl Declaration {
                 .context(format!(
                     "ast.Declaration.consume(): Error parsing function declaration \"{name}\"."
                 ))?;
-                Ok((Declaration::FunDecl(decl), tokens))
+                Ok((Declaration::Fun(decl), tokens))
             }
             _ => {
                 let (decl, tokens) = VarDecl::new_uninit(
@@ -356,7 +356,7 @@ impl Declaration {
                 .context(format!(
                     "ast.Declaration.consume(): Error parsing variable declaration for \"{name}\"."
                 ))?;
-                Ok((Declaration::VarDecl(decl), tokens))
+                Ok((Declaration::Var(decl), tokens))
             }
         }
     }
@@ -365,10 +365,10 @@ impl Declaration {
 impl From<&Declaration> for Type {
     fn from(value: &Declaration) -> Self {
         match value {
-            Declaration::FunDecl(decl) => decl.r#type.clone(),
-            Declaration::VarDecl(decl) => decl.r#type.clone(),
-            Declaration::StructDecl(..) => todo!(),
-            Declaration::UnionDecl(..) => todo!(),
+            Declaration::Fun(decl) => decl.r#type.clone(),
+            Declaration::Var(decl) => decl.r#type.clone(),
+            Declaration::Struct(..) => todo!(),
+            Declaration::Union(..) => todo!(),
         }
     }
 }

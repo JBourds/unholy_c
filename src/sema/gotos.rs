@@ -5,7 +5,7 @@ pub fn validate(stage: SemaStage<TypeChecking>) -> Result<SemaStage<GotoValidati
         .declarations
         .into_iter()
         .map(|d| match d {
-            ast::Declaration::FunDecl(f) => {
+            ast::Declaration::Fun(f) => {
                 let mut label_map = HashMap::new();
                 let block = if let Some(b) = f.block {
                     let b = resolve_block(b, &f.name, &mut label_map)?;
@@ -14,12 +14,10 @@ pub fn validate(stage: SemaStage<TypeChecking>) -> Result<SemaStage<GotoValidati
                 } else {
                     None
                 };
-                Ok(ast::Declaration::FunDecl(ast::FunDecl { block, ..f }))
+                Ok(ast::Declaration::Fun(ast::FunDecl { block, ..f }))
             }
-            ast::Declaration::VarDecl(v) => Ok(ast::Declaration::VarDecl(v)),
-            decl @ ast::Declaration::StructDecl(..) | decl @ ast::Declaration::UnionDecl(..) => {
-                Ok(decl)
-            }
+            ast::Declaration::Var(v) => Ok(ast::Declaration::Var(v)),
+            decl @ ast::Declaration::Struct(..) | decl @ ast::Declaration::Union(..) => Ok(decl),
         })
         .collect::<Result<Vec<ast::Declaration>, Error>>()?;
 

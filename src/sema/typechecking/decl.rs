@@ -15,30 +15,30 @@ pub fn typecheck_decl(
     structs: &mut TypeTable,
 ) -> Result<ast::Declaration> {
     Ok(match decl {
-        ast::Declaration::FunDecl(decl) => {
+        ast::Declaration::Fun(decl) => {
             let name = Rc::clone(&decl.name);
-            ast::Declaration::FunDecl(
+            ast::Declaration::Fun(
                 typecheck_fun_decl(decl, symbols, structs)
                     .context(format!("Unable to typecheck \"{name}\" declaration"))?,
             )
         }
-        ast::Declaration::VarDecl(decl) => {
+        ast::Declaration::Var(decl) => {
             let name = Rc::clone(&decl.name);
-            ast::Declaration::VarDecl(
+            ast::Declaration::Var(
                 typecheck_var_decl(decl, symbols, structs)
                     .context(format!("Unable to typecheck \"{name}\" declaration"))?,
             )
         }
-        ast::Declaration::StructDecl(decl) => {
+        ast::Declaration::Struct(decl) => {
             let name = Rc::clone(&decl.tag);
-            ast::Declaration::StructDecl(
+            ast::Declaration::Struct(
                 typecheck_struct_decl(decl, structs)
                     .context(format!("Unable to typecheck \"{name}\" declaration"))?,
             )
         }
-        ast::Declaration::UnionDecl(decl) => {
+        ast::Declaration::Union(decl) => {
             let name = Rc::clone(&decl.tag);
-            ast::Declaration::UnionDecl(
+            ast::Declaration::Union(
                 typecheck_union_decl(decl, structs)
                     .context(format!("Unable to typecheck \"{name}\" declaration"))?,
             )

@@ -17,32 +17,32 @@ pub fn typecheck_program(
     let mut declarations = vec![];
     for decl in program.declarations.into_iter() {
         match decl {
-            ast::Declaration::FunDecl(f) => {
+            ast::Declaration::Fun(f) => {
                 let name = Rc::clone(&f.name);
-                declarations.push(ast::Declaration::FunDecl(
+                declarations.push(ast::Declaration::Fun(
                     typecheck_fun_decl(f, symbols, structs).context(format!(
                         "Unable to typecheck function declaration for {name}"
                     ))?,
                 ));
             }
-            ast::Declaration::VarDecl(v) => {
+            ast::Declaration::Var(v) => {
                 let name = Rc::clone(&v.name);
-                declarations.push(ast::Declaration::VarDecl(
+                declarations.push(ast::Declaration::Var(
                     typecheck_global_var_decl(v, symbols, structs).context(format!(
                         "Unable to typecheck variable declaration for {name}"
                     ))?,
                 ));
             }
-            ast::Declaration::StructDecl(s) => {
+            ast::Declaration::Struct(s) => {
                 let name = Rc::clone(&s.tag);
-                declarations.push(ast::Declaration::StructDecl(
+                declarations.push(ast::Declaration::Struct(
                     typecheck_struct_decl(s, structs)
                         .context(format!("Unable to typecheck struct declaration for {name}"))?,
                 ));
             }
-            ast::Declaration::UnionDecl(u) => {
+            ast::Declaration::Union(u) => {
                 let name = Rc::clone(&u.tag);
-                declarations.push(ast::Declaration::UnionDecl(
+                declarations.push(ast::Declaration::Union(
                     typecheck_union_decl(u, structs)
                         .context(format!("Unable to typecheck union declaration for {name}"))?,
                 ));

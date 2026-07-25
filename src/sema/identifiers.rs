@@ -90,23 +90,25 @@ pub fn validate(stage: SemaStage<Initial>) -> Result<SemaStage<IdentResolution>>
         .declarations
         .into_iter()
         .map(|d| match d {
-            ast::Declaration::FunDecl(f) => Ok(ast::Declaration::FunDecl(resolve_fun_decl(
+            ast::Declaration::Fun(f) => Ok(ast::Declaration::Fun(resolve_fun_decl(
                 f,
                 &mut ident_map,
                 &mut tag_map,
                 &mut unique_name_generator,
             )?)),
-            ast::Declaration::VarDecl(v) => Ok(ast::Declaration::VarDecl(
-                resolve_file_scope_var_decl(v, &mut ident_map, &tag_map)?,
-            )),
-            ast::Declaration::StructDecl(decl) => {
+            ast::Declaration::Var(v) => Ok(ast::Declaration::Var(resolve_file_scope_var_decl(
+                v,
+                &mut ident_map,
+                &tag_map,
+            )?)),
+            ast::Declaration::Struct(decl) => {
                 resolve_struct_decl(decl, &mut tag_map, &mut unique_name_generator)
-                    .map(ast::Declaration::StructDecl)
+                    .map(ast::Declaration::Struct)
                     .context("failed to resolve_struct_decl")
             }
-            ast::Declaration::UnionDecl(decl) => {
+            ast::Declaration::Union(decl) => {
                 resolve_union_decl(decl, &mut tag_map, &mut unique_name_generator)
-                    .map(ast::Declaration::UnionDecl)
+                    .map(ast::Declaration::Union)
                     .context("failed to resolve_union_decl")
             }
         })
@@ -384,19 +386,18 @@ fn resolve_decl(
     make_temporary: &mut impl FnMut(&str) -> String,
 ) -> Result<ast::Declaration> {
     match decl {
-        ast::Declaration::VarDecl(decl) => {
+        ast::Declaration::Var(decl) => {
             resolve_local_var_decl(decl, ident_map, tag_map, make_temporary)
-                .map(ast::Declaration::VarDecl)
+                .map(ast::Declaration::Var)
         }
-        ast::Declaration::FunDecl(decl) => {
-            resolve_fun_decl(decl, ident_map, tag_map, make_temporary)
-                .map(ast::Declaration::FunDecl)
+        ast::Declaration::Fun(decl) => {
+            resolve_fun_decl(decl, ident_map, tag_map, make_temporary).map(ast::Declaration::Fun)
         }
-        ast::Declaration::StructDecl(decl) => {
-            resolve_struct_decl(decl, tag_map, make_temporary).map(ast::Declaration::StructDecl)
+        ast::Declaration::Struct(decl) => {
+            resolve_struct_decl(decl, tag_map, make_temporary).map(ast::Declaration::Struct)
         }
-        ast::Declaration::UnionDecl(decl) => {
-            resolve_union_decl(decl, tag_map, make_temporary).map(ast::Declaration::UnionDecl)
+        ast::Declaration::Union(decl) => {
+            resolve_union_decl(decl, tag_map, make_temporary).map(ast::Declaration::Union)
         }
     }
 }

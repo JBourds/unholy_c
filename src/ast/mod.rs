@@ -283,8 +283,8 @@ impl ForInit {
         match tokens {
             [Token::Semi, tokens @ ..] => Ok((ForInit::Expr(None), tokens)),
             tokens => match Declaration::consume(tokens) {
-                Ok((Declaration::VarDecl(decl), tokens)) => Ok((ForInit::Decl(decl), tokens)),
-                Ok((Declaration::FunDecl(_), _)) => {
+                Ok((Declaration::Var(decl), tokens)) => Ok((ForInit::Decl(decl), tokens)),
+                Ok((Declaration::Fun(_), _)) => {
                     bail!("ast.ForInit.consume(): Cannot declare function in for loop init.")
                 }
                 _ => {

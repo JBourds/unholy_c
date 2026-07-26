@@ -27,26 +27,28 @@ enum SwitchLabelling {}
 struct SemaStage<T> {
     program: ast::Program,
     symbols: Option<typechecking::SymbolTable>,
+    structs: Option<typechecking::TypeTable>,
     stage: PhantomData<T>,
 }
 
 // Public re-exports
 pub mod tc {
     pub use super::typechecking::{
-        Attribute, InitialValue, SymbolEntry, SymbolTable,
-        SymbolTableGetType, TypeTable,
+        Attribute, InitialValue, SymbolEntry, SymbolTable, SymbolTableGetType, TypeTable,
     };
 }
 
 pub struct ValidAst {
     pub program: ast::Program,
     pub symbols: typechecking::SymbolTable,
+    pub structs: typechecking::TypeTable,
 }
 
 pub fn validate(program: ast::Program) -> Result<ValidAst> {
     let stage = SemaStage {
         program,
         symbols: None,
+        structs: None,
         stage: PhantomData::<Initial>,
     };
     let stage = identifiers::validate(stage)?;
@@ -56,11 +58,15 @@ pub fn validate(program: ast::Program) -> Result<ValidAst> {
     let stage = loops::validate(stage)?;
 
     let SemaStage {
-        program, symbols, ..
+        program,
+        symbols,
+        structs,
+        ..
     } = stage;
 
     Ok(ValidAst {
         program,
         symbols: symbols.expect("Invalid symbol table."),
+        structs: structs.expect("Invalid type table."),
     })
 }

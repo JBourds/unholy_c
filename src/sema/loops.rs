@@ -16,6 +16,7 @@ pub fn validate(stage: SemaStage<GotoValidation>) -> Result<SemaStage<LoopLabell
             declarations: valid_declarations,
         },
         symbols: stage.symbols,
+        structs: stage.structs,
         stage: PhantomData::<LoopLabelling>,
     })
 }

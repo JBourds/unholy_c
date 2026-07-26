@@ -119,6 +119,7 @@ pub fn validate(stage: SemaStage<Initial>) -> Result<SemaStage<IdentResolution>>
             declarations: valid_declarations,
         },
         symbols: stage.symbols,
+        structs: stage.structs,
         stage: PhantomData::<IdentResolution>,
     })
 }

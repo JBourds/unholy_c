@@ -47,6 +47,7 @@ pub fn validate(stage: SemaStage<IdentResolution>) -> Result<SemaStage<SwitchLab
             declarations: valid_declarations,
         },
         symbols: stage.symbols,
+        structs: stage.structs,
         stage: PhantomData::<SwitchLabelling>,
     })
 }

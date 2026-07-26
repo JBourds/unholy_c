@@ -112,6 +112,7 @@ pub fn validate(stage: SemaStage<SwitchLabelling>) -> Result<SemaStage<TypeCheck
         program: typecheck_program(stage.program, &mut symbols, &mut structs)
             .context("Failed to perform typechecking.")?,
         symbols: Some(symbols),
+        structs: Some(structs),
         stage: PhantomData::<TypeChecking>,
     })
 }

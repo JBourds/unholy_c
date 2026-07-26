@@ -8,7 +8,11 @@ pub struct Program {
 
 impl From<sema::ValidAst> for Program {
     fn from(ast: sema::ValidAst) -> Self {
-        let sema::ValidAst { program, symbols } = ast;
+        let sema::ValidAst {
+            program,
+            symbols,
+            structs,
+        } = ast;
         let mut top_level = vec![];
         for (name, symbol) in symbols.global.iter() {
             if let Some(r#static) = StaticVariable::from_symbol_with_name(Rc::clone(name), symbol) {

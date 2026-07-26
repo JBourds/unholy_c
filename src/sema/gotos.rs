@@ -26,6 +26,7 @@ pub fn validate(stage: SemaStage<TypeChecking>) -> Result<SemaStage<GotoValidati
             declarations: valid_declarations,
         },
         symbols: stage.symbols,
+        structs: stage.structs,
         stage: PhantomData::<GotoValidation>,
     })
 }

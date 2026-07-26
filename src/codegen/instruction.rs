@@ -254,6 +254,7 @@ impl Instruction<Initial> {
                     },
                 })]
             }
+            tacky::Instruction::CopyFromOffset { .. } => todo!(),
         }
     }
 

@@ -92,6 +92,11 @@ pub enum Instruction {
         dst: Rc<String>,
         offset: isize,
     },
+    CopyFromOffset {
+        src: Val,
+        dst: Rc<String>,
+        offset: isize,
+    },
 }
 
 impl Instruction {

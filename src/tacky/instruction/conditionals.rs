@@ -1,10 +1,6 @@
 use super::*;
 
-pub(crate) fn parse_switch(
-    stmt: ast::Stmt,
-    symbols: &mut SymbolTable,
-    make_temp_var: &mut impl FnMut() -> String,
-) -> Vec<Instruction> {
+pub(crate) fn parse_switch(stmt: ast::Stmt, ctx: &mut Ctx) -> Vec<Instruction> {
     let ast::Stmt::Switch {
         condition,
         body,
@@ -28,13 +24,12 @@ pub(crate) fn parse_switch(
     // 3. Perform a linear comparison for each case and jump if the
     //  value matches.
     if cases.is_empty() {
-        let Expr { instructions, .. } =
-            Expr::parse_with_and_convert(condition, symbols, make_temp_var);
+        let Expr { instructions, .. } = Expr::parse_with_and_convert(condition, ctx);
         block_instructions.extend(instructions);
         block_instructions.push(Instruction::Jump(
             default.unwrap_or(Rc::clone(&break_label)),
         ));
-        block_instructions.extend(Instruction::parse_stmt_with(*body, symbols, make_temp_var));
+        block_instructions.extend(Instruction::parse_stmt_with(*body, ctx));
     } else if let ast::Expr::Constant(cond) = condition {
         let jump_label = cases
             .iter()
@@ -43,7 +38,7 @@ pub(crate) fn parse_switch(
         let has_jump_label = jump_label.is_some();
         let jump_label = jump_label.unwrap_or(break_label.clone());
         block_instructions.push(Instruction::Jump(jump_label.clone()));
-        block_instructions.extend(Instruction::parse_stmt_with(*body, symbols, make_temp_var));
+        block_instructions.extend(Instruction::parse_stmt_with(*body, ctx));
         if !has_jump_label {
             block_instructions.push(Instruction::Label(jump_label));
         }
@@ -51,15 +46,15 @@ pub(crate) fn parse_switch(
         let Expr {
             instructions,
             val: switch_val,
-        } = Expr::parse_with_and_convert(condition, symbols, make_temp_var);
+        } = Expr::parse_with_and_convert(condition, ctx);
         block_instructions.extend(instructions);
         for (case, label) in cases.iter() {
             let Expr {
                 instructions,
                 val: case_val,
-            } = Expr::parse_with_and_convert(ast::Expr::Constant(*case), symbols, make_temp_var);
+            } = Expr::parse_with_and_convert(ast::Expr::Constant(*case), ctx);
             block_instructions.extend(instructions);
-            let dst = Function::make_tacky_temp_var(ast::Type::bool(), symbols, make_temp_var);
+            let dst = ctx.make_temp_var(ast::Type::bool());
             block_instructions.push(Instruction::Binary {
                 op: BinaryOp::Equal,
                 src1: switch_val.clone(),
@@ -74,18 +69,14 @@ pub(crate) fn parse_switch(
         block_instructions.push(Instruction::Jump(
             default.unwrap_or(Rc::clone(&break_label)),
         ));
-        block_instructions.extend(Instruction::parse_stmt_with(*body, symbols, make_temp_var));
+        block_instructions.extend(Instruction::parse_stmt_with(*body, ctx));
     }
     // Break label always goes after all instructions
     block_instructions.push(Instruction::Label(break_label));
     block_instructions
 }
 
-pub(crate) fn parse_if(
-    stmt: ast::Stmt,
-    symbols: &mut SymbolTable,
-    make_temp_var: &mut impl FnMut() -> String,
-) -> Vec<Instruction> {
+pub(crate) fn parse_if(stmt: ast::Stmt, ctx: &mut Ctx) -> Vec<Instruction> {
     let ast::Stmt::If {
         condition,
         then,
@@ -96,7 +87,7 @@ pub(crate) fn parse_if(
     };
     let mut block_instructions = vec![];
     let (else_label, end_label) = {
-        let label = make_temp_var();
+        let label = ctx.make_temp_var_name();
         // This isn't needed and can be simplified... To Bad!
         let Some((name, count)) = label.as_str().split_once('.') else {
             unreachable!("label should always be name.count");
@@ -108,7 +99,7 @@ pub(crate) fn parse_if(
     let Expr {
         mut instructions,
         val,
-    } = Expr::parse_with_and_convert(condition, symbols, make_temp_var);
+    } = Expr::parse_with_and_convert(condition, ctx);
 
     instructions.push(Instruction::JumpIfZero {
         condition: val,
@@ -120,8 +111,7 @@ pub(crate) fn parse_if(
 
     instructions.extend(Instruction::parse_block_with(
         ast::Block(vec![ast::BlockItem::Stmt(*then)]),
-        symbols,
-        make_temp_var,
+        ctx,
     ));
 
     if let Some(r#else) = r#else {
@@ -129,8 +119,7 @@ pub(crate) fn parse_if(
         instructions.push(Instruction::Label(Rc::clone(&else_label)));
         instructions.extend(Instruction::parse_block_with(
             ast::Block(vec![ast::BlockItem::Stmt(*r#else)]),
-            symbols,
-            make_temp_var,
+            ctx,
         ));
     }
 

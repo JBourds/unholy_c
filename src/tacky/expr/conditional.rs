@@ -1,10 +1,6 @@
 use super::*;
 
-pub(crate) fn parse_conditional(
-    node: ast::Expr,
-    symbols: &mut SymbolTable,
-    make_temp_var: &mut impl FnMut() -> String,
-) -> ExprResult {
+pub(crate) fn parse_conditional(node: ast::Expr, ctx: &mut Ctx) -> ExprResult {
     let ast::Expr::Conditional {
         condition,
         then,
@@ -14,7 +10,7 @@ pub(crate) fn parse_conditional(
         unreachable!();
     };
     let (e2_label, end_label) = {
-        let label = make_temp_var();
+        let label = ctx.make_temp_var_name();
         let e2_label = format!("{label}.cond_e2");
         let end_label = format!("{label}.cond_end");
         (Rc::new(e2_label), Rc::new(end_label))
@@ -22,7 +18,7 @@ pub(crate) fn parse_conditional(
     let Expr {
         mut instructions,
         val,
-    } = Expr::parse_with_and_convert(*condition, symbols, make_temp_var);
+    } = Expr::parse_with_and_convert(*condition, ctx);
 
     instructions.push(Instruction::JumpIfZero {
         condition: val,
@@ -32,13 +28,13 @@ pub(crate) fn parse_conditional(
     let Expr {
         instructions: e1_instructions,
         val: e1_val,
-    } = Expr::parse_with_and_convert(*then, symbols, make_temp_var);
+    } = Expr::parse_with_and_convert(*then, ctx);
 
-    let e1_type = e1_val.get_type(symbols).clone();
+    let e1_type = e1_val.get_type(&ctx.symbols).clone();
     let result = if e1_type.is_void() {
         Val::dummy()
     } else {
-        Function::make_tacky_temp_var(e1_type.clone(), symbols, make_temp_var)
+        ctx.make_temp_var(e1_type.clone())
     };
 
     instructions.extend(e1_instructions);
@@ -55,11 +51,11 @@ pub(crate) fn parse_conditional(
     let Expr {
         instructions: e2_instructions,
         val: e2_val,
-    } = Expr::parse_with_and_convert(*r#else, symbols, make_temp_var);
+    } = Expr::parse_with_and_convert(*r#else, ctx);
 
     instructions.extend(e2_instructions);
 
-    let e2_type = e2_val.get_type(symbols).clone();
+    let e2_type = e2_val.get_type(&ctx.symbols).clone();
     if !e2_type.is_void() {
         instructions.push(Instruction::Copy {
             src: e2_val,

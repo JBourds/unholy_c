@@ -37,17 +37,18 @@ pub enum TopLevel {
 
 #[cfg(test)]
 mod tests {
+    use crate::sema::tc::TypeTable;
+
     use super::*;
 
     #[test]
     fn test_return_literal() {
-        let mut symbols = SymbolTable::default();
+        let symbols = SymbolTable::default();
         let ast = ast::Block(vec![ast::BlockItem::Stmt(ast::Stmt::Return(Some(
             ast::Expr::Constant(ast::Constant::I32(2)),
         )))]);
-        let mut counter = 0;
-        let mut make_temp_var = Function::make_temp_var(Rc::new("test".to_string()), &mut counter);
-        let actual = Instruction::parse_block_with(ast, &mut symbols, &mut make_temp_var);
+        let mut ctx = Ctx::new(symbols, TypeTable::new_table());
+        let actual = Instruction::parse_block_with(ast, &mut ctx);
         let expected = vec![Instruction::Return(Some(Val::Constant(
             ast::Constant::I32(2),
         )))];
@@ -56,16 +57,16 @@ mod tests {
 
     #[test]
     fn test_return_unary() {
-        let mut symbols = SymbolTable::default();
+        let symbols = SymbolTable::default();
         let ast = ast::Block(vec![ast::BlockItem::Stmt(ast::Stmt::Return(Some(
             ast::Expr::Unary {
                 op: ast::UnaryOp::Complement,
                 expr: Box::new(ast::Expr::Constant(ast::Constant::I32(2))),
             },
         )))]);
-        let mut counter = 0;
-        let mut make_temp_var = Function::make_temp_var(Rc::new("test".to_string()), &mut counter);
-        let actual = Instruction::parse_block_with(ast, &mut symbols, &mut make_temp_var);
+        let mut ctx = Ctx::new(symbols, TypeTable::new_table());
+        let actual = Instruction::parse_block_with(ast, &mut ctx);
+        ctx.push_scope("test");
         let expected = vec![
             Instruction::Unary {
                 op: UnaryOp::Complement,
@@ -78,7 +79,7 @@ mod tests {
     }
     #[test]
     fn test_return_nested_unary() {
-        let mut symbols = SymbolTable::default();
+        let symbols = SymbolTable::default();
         let ast = ast::Block(vec![ast::BlockItem::Stmt(ast::Stmt::Return(Some(
             ast::Expr::Unary {
                 op: ast::UnaryOp::Negate,
@@ -91,9 +92,9 @@ mod tests {
                 }),
             },
         )))]);
-        let mut counter = 0;
-        let mut make_temp_var = Function::make_temp_var(Rc::new("test".to_string()), &mut counter);
-        let actual = Instruction::parse_block_with(ast, &mut symbols, &mut make_temp_var);
+        let mut ctx = Ctx::new(symbols, TypeTable::new_table());
+        ctx.push_scope("test");
+        let actual = Instruction::parse_block_with(ast, &mut ctx);
         let expected = vec![
             Instruction::Unary {
                 op: UnaryOp::Negate,

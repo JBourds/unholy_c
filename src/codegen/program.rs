@@ -20,7 +20,7 @@ impl From<tacky::Program> for Program {
                 tacky::TopLevel::Fun(f) => {
                     let fun = Function::from_with_storage(
                         f,
-                        &prog.symbols,
+                        &prog.ctx.symbols,
                         &mut constants,
                         &mut make_label,
                     );
@@ -38,7 +38,7 @@ impl From<tacky::Program> for Program {
         );
         Program {
             top_level,
-            symbols: prog.symbols,
+            symbols: prog.ctx.symbols,
         }
     }
 }

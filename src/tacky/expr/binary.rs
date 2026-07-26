@@ -18,18 +18,17 @@ fn logical_binary(
     op: ast::BinaryOp,
     left: ast::Expr,
     right: ast::Expr,
-    symbols: &mut SymbolTable,
-    make_temp_var: &mut impl FnMut() -> String,
+    ctx: &mut Ctx,
 ) -> ExprResult {
     // <instructions for e1>
     // v1 = <result of e1>
     let Expr {
         mut instructions,
         val: left_val,
-    } = Expr::parse_with_and_convert(left, symbols, make_temp_var);
+    } = Expr::parse_with_and_convert(left, ctx);
 
     let label = {
-        let mut label = make_temp_var();
+        let mut label = ctx.make_temp_var_name();
         // FIXME: make_temp_var() should support making label names
         label.push_str(match op {
             ast::BinaryOp::And => ".binary_false_label",
@@ -51,13 +50,13 @@ fn logical_binary(
     let Expr {
         instructions: right_instructions,
         val: right_val,
-    } = Expr::parse_with_and_convert(right, symbols, make_temp_var);
+    } = Expr::parse_with_and_convert(right, ctx);
     instructions.extend(right_instructions);
 
-    let dst = Function::make_tacky_temp_var(ast::Type::bool(), symbols, make_temp_var);
+    let dst = ctx.make_temp_var(ast::Type::bool());
     let end = {
         // FIXME: Support label use case
-        let mut end = make_temp_var();
+        let mut end = ctx.make_temp_var_name();
         end.push_str(".binary_end_label");
         end.into()
     };
@@ -102,29 +101,25 @@ fn logical_binary(
     })
 }
 
-pub(crate) fn parse_binary(
-    node: ast::Expr,
-    symbols: &mut SymbolTable,
-    make_temp_var: &mut impl FnMut() -> String,
-) -> ExprResult {
+pub(crate) fn parse_binary(node: ast::Expr, ctx: &mut Ctx) -> ExprResult {
     let ast::Expr::Binary { op, left, right } = node else {
         unreachable!();
     };
     if op.is_logical() {
-        logical_binary(op, *left, *right, symbols, make_temp_var)
+        logical_binary(op, *left, *right, ctx)
     } else {
         let Expr {
             mut instructions,
             val: left_val,
-        } = Expr::parse_with_and_convert(*left, symbols, make_temp_var);
+        } = Expr::parse_with_and_convert(*left, ctx);
         let Expr {
             instructions: right_instructions,
             val: right_val,
-        } = Expr::parse_with_and_convert(*right, symbols, make_temp_var);
+        } = Expr::parse_with_and_convert(*right, ctx);
         instructions.extend(right_instructions);
 
-        let left_t = left_val.get_type(symbols);
-        let right_t = right_val.get_type(symbols);
+        let left_t = left_val.get_type(&ctx.symbols);
+        let right_t = right_val.get_type(&ctx.symbols);
 
         let dst_type = if op.is_relational() {
             ast::Type::bool()
@@ -135,12 +130,11 @@ pub(crate) fn parse_binary(
         // pointer arithmetic uses special instruction
         // make sure the pointer is always `src`
         let dst = if op.is_add_sub() && (left_t.is_pointer() || right_t.is_pointer()) {
-            let (new_instructions, dst) =
-                Expr::do_pointer_arithmetic(op, left_val, right_val, make_temp_var, symbols);
+            let (new_instructions, dst) = Expr::do_pointer_arithmetic(op, left_val, right_val, ctx);
             instructions.extend(new_instructions);
             dst
         } else {
-            let dst = Function::make_tacky_temp_var(dst_type, symbols, make_temp_var);
+            let dst = ctx.make_temp_var(dst_type);
             instructions.push(Instruction::Binary {
                 op: op.into(),
                 src1: left_val,

@@ -2,34 +2,25 @@ use crate::tacky;
 
 use super::*;
 
-pub(crate) fn parse_assignment(
-    node: ast::Expr,
-    symbols: &mut SymbolTable,
-    make_temp_var: &mut impl FnMut() -> String,
-) -> ExprResult {
+pub(crate) fn parse_assignment(node: ast::Expr, ctx: &mut Ctx) -> ExprResult {
     let ast::Expr::Assignment { lvalue, rvalue } = node else {
         unreachable!();
     };
     if rvalue.has_compound() {
-        parse_compound_assignment(*lvalue, *rvalue, symbols, make_temp_var)
+        parse_compound_assignment(*lvalue, *rvalue, ctx)
     } else {
-        parse_normal_assignment(*lvalue, *rvalue, symbols, make_temp_var)
+        parse_normal_assignment(*lvalue, *rvalue, ctx)
     }
 }
 
-fn parse_normal_assignment(
-    lvalue: ast::Expr,
-    rvalue: ast::Expr,
-    symbols: &mut SymbolTable,
-    make_temp_var: &mut impl FnMut() -> String,
-) -> ExprResult {
-    let lval = Expr::parse_with(lvalue, symbols, make_temp_var);
+fn parse_normal_assignment(lvalue: ast::Expr, rvalue: ast::Expr, ctx: &mut Ctx) -> ExprResult {
+    let lval = Expr::parse_with(lvalue, ctx);
     match lval {
         ExprResult::PlainOperand(Expr {
             mut instructions,
             val,
         }) => {
-            let t = val.get_type(symbols);
+            let t = val.get_type(&ctx.symbols);
             match t.base {
                 ast::BaseType::Array { element, size }
                     if matches!(rvalue, ast::Expr::String { .. }) && element.is_char() =>
@@ -45,7 +36,7 @@ fn parse_normal_assignment(
                     ExprResult::PlainOperand(Expr { instructions, val })
                 }
                 _ => {
-                    let rval = Expr::parse_with_and_convert(rvalue.clone(), symbols, make_temp_var);
+                    let rval = Expr::parse_with_and_convert(rvalue.clone(), ctx);
                     instructions.extend(rval.instructions);
 
                     instructions.push(Instruction::Copy {
@@ -60,7 +51,7 @@ fn parse_normal_assignment(
             mut instructions,
             val,
         }) => {
-            let rval = Expr::parse_with_and_convert(rvalue.clone(), symbols, make_temp_var);
+            let rval = Expr::parse_with_and_convert(rvalue.clone(), ctx);
             instructions.extend(rval.instructions);
             instructions.push(Instruction::Store {
                 src: rval.val.clone(),
@@ -77,18 +68,12 @@ fn parse_normal_assignment(
 
 // left shifts and right shifts don't require casts, everything else (minus
 // pointers) does though
-fn handle_upcast(
-    op: ast::BinaryOp,
-    val: &Val,
-    arg_type: ast::Type,
-    symbols: &mut SymbolTable,
-    make_temp_var: &mut impl FnMut() -> String,
-) -> Expr {
+fn handle_upcast(op: ast::BinaryOp, val: &Val, arg_type: ast::Type, ctx: &mut Ctx) -> Expr {
     if matches!(op, ast::BinaryOp::LShift | ast::BinaryOp::RShift) {
         // Shifts don't convert the LHS to the RHS/common type, but the LHS
         // still undergoes integer promotion (char -> int).
-        if val.get_type(symbols).is_char() {
-            Expr::cast(val.clone(), ast::Type::int(4, None), symbols, make_temp_var)
+        if val.get_type(&ctx.symbols).is_char() {
+            Expr::cast(val.clone(), ast::Type::int(4, None), ctx)
         } else {
             Expr {
                 instructions: vec![],
@@ -96,18 +81,13 @@ fn handle_upcast(
             }
         }
     } else {
-        Expr::cast(val.clone(), arg_type, symbols, make_temp_var)
+        Expr::cast(val.clone(), arg_type, ctx)
     }
 }
 
 /// need to have a special function for handling compound assignment to avoid
 /// evaluating the LHS more than once
-fn parse_compound_assignment(
-    lvalue: ast::Expr,
-    rvalue: ast::Expr,
-    symbols: &mut SymbolTable,
-    make_temp_var: &mut impl FnMut() -> String,
-) -> ExprResult {
+fn parse_compound_assignment(lvalue: ast::Expr, rvalue: ast::Expr, ctx: &mut Ctx) -> ExprResult {
     let ast::Expr::Binary { op, left, right } = rvalue else {
         unreachable!();
     };
@@ -115,24 +95,24 @@ fn parse_compound_assignment(
         unreachable!();
     };
 
-    let lval = Expr::parse_with(lvalue, symbols, make_temp_var);
-    let rval = Expr::parse_with_and_convert(*right, symbols, make_temp_var);
+    let lval = Expr::parse_with(lvalue, ctx);
+    let rval = Expr::parse_with_and_convert(*right, ctx);
     match lval {
         ExprResult::PlainOperand(Expr {
             mut instructions,
             val,
         }) => {
             instructions.extend(rval.instructions);
-            let lhs_type = val.get_type(symbols);
+            let lhs_type = val.get_type(&ctx.symbols);
             // binary operations on pointers need to be handled specially
             let res = if lhs_type.is_pointer() {
                 let (new_instructions, dst) =
-                    Expr::do_pointer_arithmetic(op, val.clone(), rval.val, make_temp_var, symbols);
+                    Expr::do_pointer_arithmetic(op, val.clone(), rval.val, ctx);
                 instructions.extend(new_instructions);
                 dst
             } else {
-                let arg_type = rval.val.get_type(symbols);
-                let upcasted = handle_upcast(op, &val, arg_type, symbols, make_temp_var);
+                let arg_type = rval.val.get_type(&ctx.symbols);
+                let upcasted = handle_upcast(op, &val, arg_type, ctx);
                 instructions.extend(upcasted.instructions);
                 instructions.push(Instruction::Binary {
                     op: op.into(),
@@ -140,8 +120,8 @@ fn parse_compound_assignment(
                     src2: rval.val.clone(),
                     dst: upcasted.val.clone(),
                 });
-                let dst_type = val.get_type(symbols);
-                let downcasted = Expr::cast(upcasted.val.clone(), dst_type, symbols, make_temp_var);
+                let dst_type = val.get_type(&ctx.symbols);
+                let downcasted = Expr::cast(upcasted.val.clone(), dst_type, ctx);
                 instructions.extend(downcasted.instructions);
                 downcasted.val
             };
@@ -156,15 +136,14 @@ fn parse_compound_assignment(
             val,
         }) => {
             instructions.extend(rval.instructions);
-            let dst_type = val.get_type(symbols).deref();
-            let intermediate =
-                Function::make_tacky_temp_var(dst_type.clone(), symbols, make_temp_var);
+            let dst_type = val.get_type(&ctx.symbols).deref();
+            let intermediate = ctx.make_temp_var(dst_type.clone());
             instructions.push(Instruction::Load {
                 src_ptr: val.clone(),
                 dst: intermediate.clone(),
             });
             let binary_lhs = if let ast::Expr::Cast { target, exp: _ } = *left {
-                handle_upcast(op, &intermediate, target, symbols, make_temp_var)
+                handle_upcast(op, &intermediate, target, ctx)
             } else {
                 Expr {
                     instructions: vec![],
@@ -172,15 +151,10 @@ fn parse_compound_assignment(
                 }
             };
             instructions.extend(binary_lhs.instructions);
-            let arg_type = binary_lhs.val.get_type(symbols);
+            let arg_type = binary_lhs.val.get_type(&ctx.symbols);
             let dst = if arg_type.is_pointer() {
-                let (new_instructions, dst) = Expr::do_pointer_arithmetic(
-                    op,
-                    binary_lhs.val.clone(),
-                    rval.val,
-                    make_temp_var,
-                    symbols,
-                );
+                let (new_instructions, dst) =
+                    Expr::do_pointer_arithmetic(op, binary_lhs.val.clone(), rval.val, ctx);
                 instructions.extend(new_instructions);
                 dst
             } else {
@@ -192,7 +166,7 @@ fn parse_compound_assignment(
                 });
                 binary_lhs.val
             };
-            let downcasted = Expr::cast(dst.clone(), dst_type, symbols, make_temp_var);
+            let downcasted = Expr::cast(dst.clone(), dst_type, ctx);
             instructions.extend(downcasted.instructions);
             instructions.push(Instruction::Store {
                 src: downcasted.val.clone(),

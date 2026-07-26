@@ -1,24 +1,83 @@
+use crate::sema::tc::TypeTable;
+
 use super::*;
 
+mod arrow;
 mod assignment;
 mod binary;
 mod cast;
 mod conditional;
+mod dot;
 mod fun_call;
 mod sizeof;
 mod string;
 mod subscript;
 mod unary;
 
+use arrow::*;
 use assignment::*;
 use binary::*;
 use cast::*;
 use conditional::*;
+use dot::*;
 use fun_call::*;
 use sizeof::*;
+use std::rc::Rc;
 use string::*;
 use subscript::*;
 use unary::*;
+
+/// Struct containing all necessary context for dependecy-injecting
+/// lookup tables throughout stage.
+#[derive(Debug)]
+pub struct Ctx {
+    pub symbols: SymbolTable,
+    pub structs: TypeTable,
+
+    // For creating unique names
+    _scopes: Vec<String>,
+    _counter: usize,
+}
+
+impl Ctx {
+    pub fn new(symbols: SymbolTable, structs: TypeTable) -> Self {
+        Self {
+            symbols,
+            structs,
+            _scopes: Vec::new(),
+            _counter: 0,
+        }
+    }
+
+    pub fn with_scope<T>(&mut self, scope: impl Into<String>, fun: impl FnOnce() -> T) -> T {
+        self.push_scope(scope);
+        let res = fun();
+        self.pop_scope();
+        res
+    }
+
+    pub fn push_scope(&mut self, scope: impl Into<String>) {
+        self._scopes.push(scope.into());
+    }
+
+    pub fn pop_scope(&mut self) -> Option<String> {
+        self._scopes.pop()
+    }
+
+    pub fn make_temp_var_name(&mut self) -> String {
+        self._scopes.push(self._counter.to_string());
+        self._counter += 1;
+        let s = self._scopes.join(".");
+        self._scopes.pop();
+        s
+    }
+
+    pub fn make_temp_var(&mut self, ty: ast::Type) -> Val {
+        let name = Rc::new(self.make_temp_var_name());
+        self.symbols.new_entry(Rc::clone(&name), ty);
+        Val::Var(name)
+    }
+}
 
 #[derive(Debug)]
 pub enum ExprResult {
@@ -37,25 +96,22 @@ impl Expr {
         op: ast::BinaryOp,
         left: Val,
         right: Val,
-        make_temp_var: &mut impl FnMut() -> String,
-        symbols: &mut SymbolTable,
+        ctx: &mut Ctx,
     ) -> (Vec<Instruction>, Val) {
         let mut instructions = vec![];
-        let left_t = left.get_type(symbols);
-        let right_t = right.get_type(symbols);
+        let left_t = left.get_type(&ctx.symbols);
+        let right_t = right.get_type(&ctx.symbols);
 
         // pointer subtraction is special- returns number of indices between them
         if matches!(op, ast::BinaryOp::Subtract) && left_t.is_pointer() && right_t.is_pointer() {
-            let byte_diff =
-                Function::make_tacky_temp_var(ast::Type::PTRDIFF_T, symbols, make_temp_var);
+            let byte_diff = ctx.make_temp_var(ast::Type::PTRDIFF_T);
             instructions.push(Instruction::Binary {
                 op: BinaryOp::Subtract,
                 src1: left,
                 src2: right,
                 dst: byte_diff.clone(),
             });
-            let index_diff =
-                Function::make_tacky_temp_var(ast::Type::PTRDIFF_T, symbols, make_temp_var);
+            let index_diff = ctx.make_temp_var(ast::Type::PTRDIFF_T);
             instructions.push(Instruction::Binary {
                 op: BinaryOp::Divide,
                 src1: byte_diff,
@@ -78,8 +134,7 @@ impl Expr {
         };
 
         if op.is_sub() {
-            let negated_tmp =
-                Function::make_tacky_temp_var(index.get_type(symbols), symbols, make_temp_var);
+            let negated_tmp = ctx.make_temp_var(index.get_type(&ctx.symbols));
             instructions.push(Instruction::Unary {
                 op: UnaryOp::Negate,
                 src: index,
@@ -88,7 +143,7 @@ impl Expr {
             index = negated_tmp;
         }
         let scale = ptr_t.clone().deref().size_of();
-        let dst = Function::make_tacky_temp_var(ptr_t, symbols, make_temp_var);
+        let dst = ctx.make_temp_var(ptr_t);
         instructions.push(Instruction::AddPtr {
             ptr,
             index,
@@ -113,11 +168,7 @@ impl Expr {
         }
     }
 
-    fn parse_with(
-        node: ast::Expr,
-        symbols: &mut SymbolTable,
-        make_temp_var: &mut impl FnMut() -> String,
-    ) -> ExprResult {
+    fn parse_with(node: ast::Expr, ctx: &mut Ctx) -> ExprResult {
         match node {
             ast::Expr::Constant(v) => ExprResult::PlainOperand(Self {
                 instructions: vec![],
@@ -126,23 +177,19 @@ impl Expr {
             ast::Expr::Unary {
                 op: ast::UnaryOp::Deref,
                 expr,
-            } => ExprResult::DereferencedPointer(Self::parse_with_and_convert(
-                *expr,
-                symbols,
-                make_temp_var,
-            )),
-            ast::Expr::Unary { .. } => parse_unary(node, symbols, make_temp_var),
-            ast::Expr::Binary { .. } => parse_binary(node, symbols, make_temp_var),
+            } => ExprResult::DereferencedPointer(Self::parse_with_and_convert(*expr, ctx)),
+            ast::Expr::Unary { .. } => parse_unary(node, ctx),
+            ast::Expr::Binary { .. } => parse_binary(node, ctx),
             ast::Expr::Var(name) => ExprResult::PlainOperand(Self {
                 instructions: vec![],
                 val: Val::Var(name),
             }),
-            ast::Expr::Assignment { .. } => parse_assignment(node, symbols, make_temp_var),
-            ast::Expr::Conditional { .. } => parse_conditional(node, symbols, make_temp_var),
-            ast::Expr::FunCall { .. } => parse_fun_call(node, symbols, make_temp_var),
-            ast::Expr::Cast { .. } => parse_cast(node, symbols, make_temp_var),
-            ast::Expr::Subscript { .. } => parse_subscript(node, symbols, make_temp_var),
-            ast::Expr::String { .. } => parse_string(node, symbols),
+            ast::Expr::Assignment { .. } => parse_assignment(node, ctx),
+            ast::Expr::Conditional { .. } => parse_conditional(node, ctx),
+            ast::Expr::FunCall { .. } => parse_fun_call(node, ctx),
+            ast::Expr::Cast { .. } => parse_cast(node, ctx),
+            ast::Expr::Subscript { .. } => parse_subscript(node, ctx),
+            ast::Expr::String { .. } => parse_string(node, ctx),
             ast::Expr::SizeOfT(_) => parse_sizeof_type(node),
             ast::Expr::SizeOf(_) => unreachable!(
                 "This branch should have been rewritten to SizeOfT during typechecking"
@@ -152,13 +199,8 @@ impl Expr {
         }
     }
 
-    pub fn cast(
-        val: Val,
-        target: ast::Type,
-        symbols: &mut SymbolTable,
-        make_temp_var: &mut impl FnMut() -> String,
-    ) -> Self {
-        let val_type = val.get_type(symbols);
+    pub fn cast(val: Val, target: ast::Type, ctx: &mut Ctx) -> Self {
+        let val_type = val.get_type(&ctx.symbols);
         if target == val_type {
             return Self {
                 instructions: vec![],
@@ -166,7 +208,7 @@ impl Expr {
             };
         }
 
-        let mut emitter = CastEmitter::new(symbols, make_temp_var);
+        let mut emitter = CastEmitter::new(ctx);
         let dst = if target.is_void() {
             Val::dummy()
         } else {
@@ -207,11 +249,7 @@ impl Expr {
         }
     }
 
-    pub(crate) fn convert(
-        node: ExprResult,
-        symbols: &mut SymbolTable,
-        make_temp_var: &mut impl FnMut() -> String,
-    ) -> Expr {
+    pub(crate) fn convert(node: ExprResult, ctx: &mut Ctx) -> Expr {
         match node {
             ExprResult::PlainOperand(expr) => expr,
             ExprResult::DereferencedPointer(expr) => {
@@ -219,11 +257,8 @@ impl Expr {
                     mut instructions,
                     val,
                 } = expr;
-                let dst = Function::make_tacky_temp_var(
-                    val.get_type(symbols).deref(),
-                    symbols,
-                    make_temp_var,
-                );
+                let dst_t = val.get_type(&ctx.symbols).deref();
+                let dst = ctx.make_temp_var(dst_t);
                 instructions.push(Instruction::Load {
                     src_ptr: val,
                     dst: dst.clone(),
@@ -236,13 +271,9 @@ impl Expr {
         }
     }
 
-    pub(crate) fn parse_with_and_convert(
-        node: ast::Expr,
-        symbols: &mut SymbolTable,
-        make_temp_var: &mut impl FnMut() -> String,
-    ) -> Self {
-        let parsed = Self::parse_with(node, symbols, make_temp_var);
-        Self::convert(parsed, symbols, make_temp_var)
+    pub(crate) fn parse_with_and_convert(node: ast::Expr, ctx: &mut Ctx) -> Self {
+        let parsed = Self::parse_with(node, ctx);
+        Self::convert(parsed, ctx)
     }
 }
 
@@ -279,23 +310,21 @@ impl Scalar {
 /// intermediate temporaries it needs. Conversions to/from `double` require the
 /// integer side to be at least int-width, so a 1-byte operand is widened
 /// (before int->double) or produced wide and truncated (after double->int).
-struct CastEmitter<'a, F: FnMut() -> String> {
+struct CastEmitter<'a> {
     instructions: Vec<Instruction>,
-    symbols: &'a mut SymbolTable,
-    make_temp_var: &'a mut F,
+    ctx: &'a mut Ctx,
 }
 
-impl<'a, F: FnMut() -> String> CastEmitter<'a, F> {
-    fn new(symbols: &'a mut SymbolTable, make_temp_var: &'a mut F) -> Self {
+impl<'a> CastEmitter<'a> {
+    fn new(ctx: &'a mut Ctx) -> Self {
         Self {
             instructions: vec![],
-            symbols,
-            make_temp_var,
+            ctx,
         }
     }
 
     fn temp(&mut self, t: ast::Type) -> Val {
-        Function::make_tacky_temp_var(t, self.symbols, self.make_temp_var)
+        self.ctx.make_temp_var(t)
     }
 
     /// A 32-bit temporary matching `signed`, used to stage char conversions.

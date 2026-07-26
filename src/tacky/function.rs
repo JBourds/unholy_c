@@ -9,28 +9,7 @@ pub struct Function {
 }
 
 impl Function {
-    pub(crate) fn make_temp_var(
-        name: Rc<String>,
-        counter: &'_ mut usize,
-    ) -> impl FnMut() -> String + use<'_> {
-        move || {
-            let n = *counter;
-            *counter += 1;
-            format!("tacky.{name}.{n}")
-        }
-    }
-
-    pub(crate) fn make_tacky_temp_var(
-        r#type: ast::Type,
-        symbols: &mut SymbolTable,
-        make_temp_var: &mut impl FnMut() -> String,
-    ) -> Val {
-        let name = Rc::new(make_temp_var());
-        symbols.new_entry(Rc::clone(&name), r#type);
-        Val::Var(name)
-    }
-
-    pub(crate) fn from_symbol(decl: ast::FunDecl, symbols: &mut SymbolTable) -> Option<Self> {
+    pub(crate) fn from_symbol(decl: ast::FunDecl, ctx: &mut Ctx) -> Option<Self> {
         // Insert function parameter types for type inference
         // FIXME: Make sure that parameter names are unique!!!!
         let mut signature = vec![];
@@ -40,7 +19,7 @@ impl Function {
             .into_iter()
         {
             if let Some(name) = name {
-                symbols.new_entry(Rc::clone(name), r#type.clone());
+                ctx.symbols.new_entry(Rc::clone(name), r#type.clone());
                 signature.push((r#type.clone(), Some(Rc::clone(name))));
             } else {
                 signature.push((r#type.clone(), None));
@@ -56,10 +35,9 @@ impl Function {
             return None;
         };
 
-        let mut temp_var_counter = 0;
-        let mut make_temp_var =
-            Function::make_temp_var(Rc::new(name.to_string()), &mut temp_var_counter);
-        let mut instructions = Instruction::parse_block_with(block, symbols, &mut make_temp_var);
+        ctx.push_scope(name.as_ref());
+        let mut instructions = Instruction::parse_block_with(block, ctx);
+        ctx.pop_scope();
 
         // Temporary fix suggested by the book for the case where a function
         // is supposed to return something but does not.
@@ -86,7 +64,7 @@ impl Function {
                         ..
                     },
                 attribute,
-            }) = symbols.get(&name)
+            }) = ctx.symbols.get(&name)
             {
                 attribute.has_external_linkage()
             } else {

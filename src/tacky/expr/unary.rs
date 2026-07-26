@@ -1,27 +1,23 @@
 use super::*;
 
-pub(crate) fn parse_unary(
-    node: ast::Expr,
-    symbols: &mut SymbolTable,
-    make_temp_var: &mut impl FnMut() -> String,
-) -> ExprResult {
+pub(crate) fn parse_unary(node: ast::Expr, ctx: &mut Ctx) -> ExprResult {
     let ast::Expr::Unary { op, expr } = node else {
         unreachable!();
     };
     match op {
-        ast::UnaryOp::AddrOf => addr_of(*expr, symbols, make_temp_var),
-        ast::UnaryOp::PreInc => pre_inc(*expr, symbols, make_temp_var),
-        ast::UnaryOp::PostInc => post_inc(*expr, symbols, make_temp_var),
-        ast::UnaryOp::PreDec => pre_dec(*expr, symbols, make_temp_var),
-        ast::UnaryOp::PostDec => post_dec(*expr, symbols, make_temp_var),
-        ast::UnaryOp::Not => not(*expr, symbols, make_temp_var),
+        ast::UnaryOp::AddrOf => addr_of(*expr, ctx),
+        ast::UnaryOp::PreInc => pre_inc(*expr, ctx),
+        ast::UnaryOp::PostInc => post_inc(*expr, ctx),
+        ast::UnaryOp::PreDec => pre_dec(*expr, ctx),
+        ast::UnaryOp::PostDec => post_dec(*expr, ctx),
+        ast::UnaryOp::Not => not(*expr, ctx),
         // Other operations have tacky unary op equivalents
         _ => {
             let Expr {
                 mut instructions,
                 val,
-            } = Expr::parse_with_and_convert(*expr, symbols, make_temp_var);
-            let dst = Function::make_tacky_temp_var(val.get_type(symbols), symbols, make_temp_var);
+            } = Expr::parse_with_and_convert(*expr, ctx);
+            let dst = ctx.make_temp_var(val.get_type(&ctx.symbols));
             instructions.push(Instruction::Unary {
                 op: UnaryOp::from(op),
                 src: val,
@@ -35,12 +31,8 @@ pub(crate) fn parse_unary(
     }
 }
 
-fn pre_inc(
-    expr: ast::Expr,
-    symbols: &mut SymbolTable,
-    make_temp_var: &mut impl FnMut() -> String,
-) -> ExprResult {
-    match Expr::parse_with(expr, symbols, make_temp_var) {
+fn pre_inc(expr: ast::Expr, ctx: &mut Ctx) -> ExprResult {
+    match Expr::parse_with(expr, ctx) {
         ExprResult::PlainOperand(Expr {
             mut instructions,
             val,
@@ -48,7 +40,7 @@ fn pre_inc(
             instructions.push(Instruction::Binary {
                 op: BinaryOp::Add,
                 src1: val.clone(),
-                src2: Val::Constant(Expr::unary_inc_dec_val(&val.get_type(symbols))),
+                src2: Val::Constant(Expr::unary_inc_dec_val(&val.get_type(&ctx.symbols))),
                 dst: val.clone(),
             });
             ExprResult::PlainOperand(Expr { instructions, val })
@@ -57,9 +49,9 @@ fn pre_inc(
             mut instructions,
             val,
         }) => {
-            let t = val.get_type(symbols).deref();
+            let t = val.get_type(&ctx.symbols).deref();
             let inc_val = Val::Constant(Expr::unary_inc_dec_val(&t));
-            let intermediate = Function::make_tacky_temp_var(t, symbols, make_temp_var);
+            let intermediate = ctx.make_temp_var(t);
             instructions.extend([
                 Instruction::Load {
                     src_ptr: val.clone(),
@@ -84,19 +76,15 @@ fn pre_inc(
     }
 }
 
-fn post_inc(
-    expr: ast::Expr,
-    symbols: &mut SymbolTable,
-    make_temp_var: &mut impl FnMut() -> String,
-) -> ExprResult {
-    match Expr::parse_with(expr, symbols, make_temp_var) {
+fn post_inc(expr: ast::Expr, ctx: &mut Ctx) -> ExprResult {
+    match Expr::parse_with(expr, ctx) {
         ExprResult::PlainOperand(Expr {
             mut instructions,
             val,
         }) => {
-            let t = val.get_type(symbols);
+            let t = val.get_type(&ctx.symbols);
             let inc_val = Val::Constant(Expr::unary_inc_dec_val(&t));
-            let dst = Function::make_tacky_temp_var(t, symbols, make_temp_var);
+            let dst = ctx.make_temp_var(t);
             instructions.push(Instruction::Copy {
                 src: val.clone(),
                 dst: dst.clone(),
@@ -116,10 +104,10 @@ fn post_inc(
             mut instructions,
             val,
         }) => {
-            let typ = val.get_type(symbols).deref();
+            let typ = val.get_type(&ctx.symbols).deref();
             let inc_val = Val::Constant(Expr::unary_inc_dec_val(&typ));
-            let dst = Function::make_tacky_temp_var(typ.clone(), symbols, make_temp_var);
-            let intermediate = Function::make_tacky_temp_var(typ, symbols, make_temp_var);
+            let dst = ctx.make_temp_var(typ.clone());
+            let intermediate = ctx.make_temp_var(typ);
             instructions.extend([
                 Instruction::Load {
                     src_ptr: val.clone(),
@@ -149,12 +137,8 @@ fn post_inc(
     }
 }
 
-fn pre_dec(
-    expr: ast::Expr,
-    symbols: &mut SymbolTable,
-    make_temp_var: &mut impl FnMut() -> String,
-) -> ExprResult {
-    match Expr::parse_with(expr, symbols, make_temp_var) {
+fn pre_dec(expr: ast::Expr, ctx: &mut Ctx) -> ExprResult {
+    match Expr::parse_with(expr, ctx) {
         ExprResult::PlainOperand(Expr {
             mut instructions,
             val,
@@ -162,7 +146,7 @@ fn pre_dec(
             instructions.push(Instruction::Binary {
                 op: BinaryOp::Subtract,
                 src1: val.clone(),
-                src2: Val::Constant(Expr::unary_inc_dec_val(&val.get_type(symbols))),
+                src2: Val::Constant(Expr::unary_inc_dec_val(&val.get_type(&ctx.symbols))),
                 dst: val.clone(),
             });
             ExprResult::PlainOperand(Expr { instructions, val })
@@ -171,9 +155,9 @@ fn pre_dec(
             mut instructions,
             val,
         }) => {
-            let t = val.get_type(symbols).deref();
+            let t = val.get_type(&ctx.symbols).deref();
             let dec_val = Val::Constant(Expr::unary_inc_dec_val(&t));
-            let intermediate = Function::make_tacky_temp_var(t, symbols, make_temp_var);
+            let intermediate = ctx.make_temp_var(t);
             instructions.extend([
                 Instruction::Load {
                     src_ptr: val.clone(),
@@ -198,19 +182,15 @@ fn pre_dec(
     }
 }
 
-fn post_dec(
-    expr: ast::Expr,
-    symbols: &mut SymbolTable,
-    make_temp_var: &mut impl FnMut() -> String,
-) -> ExprResult {
-    match Expr::parse_with(expr, symbols, make_temp_var) {
+fn post_dec(expr: ast::Expr, ctx: &mut Ctx) -> ExprResult {
+    match Expr::parse_with(expr, ctx) {
         ExprResult::PlainOperand(Expr {
             mut instructions,
             val,
         }) => {
-            let t = val.get_type(symbols);
+            let t = val.get_type(&ctx.symbols);
             let dec_val = Val::Constant(Expr::unary_inc_dec_val(&t));
-            let dst = Function::make_tacky_temp_var(t, symbols, make_temp_var);
+            let dst = ctx.make_temp_var(t);
             instructions.push(Instruction::Copy {
                 src: val.clone(),
                 dst: dst.clone(),
@@ -230,10 +210,10 @@ fn post_dec(
             mut instructions,
             val,
         }) => {
-            let typ = val.get_type(symbols).deref();
+            let typ = val.get_type(&ctx.symbols).deref();
             let dec_val = Val::Constant(Expr::unary_inc_dec_val(&typ));
-            let dst = Function::make_tacky_temp_var(typ.clone(), symbols, make_temp_var);
-            let intermediate = Function::make_tacky_temp_var(typ, symbols, make_temp_var);
+            let dst = ctx.make_temp_var(typ.clone());
+            let intermediate = ctx.make_temp_var(typ);
             instructions.extend([
                 Instruction::Load {
                     src_ptr: val.clone(),
@@ -263,16 +243,12 @@ fn post_dec(
     }
 }
 
-fn not(
-    expr: ast::Expr,
-    symbols: &mut SymbolTable,
-    make_temp_var: &mut impl FnMut() -> String,
-) -> ExprResult {
+fn not(expr: ast::Expr, ctx: &mut Ctx) -> ExprResult {
     let Expr {
         mut instructions,
         val,
-    } = Expr::parse_with_and_convert(expr, symbols, make_temp_var);
-    let dst = Function::make_tacky_temp_var(ast::Type::int(4, None), symbols, make_temp_var);
+    } = Expr::parse_with_and_convert(expr, ctx);
+    let dst = ctx.make_temp_var(ast::Type::int(4, None));
     instructions.push(Instruction::Unary {
         op: UnaryOp::Not,
         src: val,
@@ -284,12 +260,8 @@ fn not(
     })
 }
 
-fn addr_of(
-    expr: ast::Expr,
-    symbols: &mut SymbolTable,
-    make_temp_var: &mut impl FnMut() -> String,
-) -> ExprResult {
-    let result_expr = Expr::parse_with(expr, symbols, make_temp_var);
+fn addr_of(expr: ast::Expr, ctx: &mut Ctx) -> ExprResult {
+    let result_expr = Expr::parse_with(expr, ctx);
     match result_expr {
         ExprResult::PlainOperand(expr) => {
             let Expr {
@@ -297,7 +269,7 @@ fn addr_of(
                 val,
             } = expr;
             // array
-            let val_t = val.get_type(symbols);
+            let val_t = val.get_type(&ctx.symbols);
             let t = if val_t.is_array() {
                 val_t.maybe_decay()
             } else {
@@ -310,7 +282,7 @@ fn addr_of(
                     is_const: false,
                 }
             };
-            let dst = Function::make_tacky_temp_var(t, symbols, make_temp_var);
+            let dst = ctx.make_temp_var(t);
             instructions.push(Instruction::GetAddress {
                 src: val,
                 dst: dst.clone(),
@@ -325,7 +297,7 @@ fn addr_of(
             val,
         }) => {
             if let Val::Var(ref name) = val
-                && let Some(ptr) = symbols.get(name)
+                && let Some(ptr) = ctx.symbols.get(name)
             {
                 // Taking the address of a dereferenced pointer yields the
                 // pointer itself. If the pointee is an array it decays to a
@@ -337,7 +309,7 @@ fn addr_of(
                 } else {
                     ptr.r#type.clone()
                 };
-                let tmp = Function::make_tacky_temp_var(dereferenced, symbols, make_temp_var);
+                let tmp = ctx.make_temp_var(dereferenced);
                 instructions.push(Instruction::Copy {
                     src: val,
                     dst: tmp.clone(),

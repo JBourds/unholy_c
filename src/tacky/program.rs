@@ -1,9 +1,10 @@
+use super::Ctx;
 use super::*;
 
 #[derive(Debug)]
 pub struct Program {
     pub top_level: Vec<TopLevel>,
-    pub symbols: SymbolTable,
+    pub ctx: Ctx,
 }
 
 impl From<sema::ValidAst> for Program {
@@ -13,6 +14,7 @@ impl From<sema::ValidAst> for Program {
             symbols,
             structs,
         } = ast;
+
         let mut top_level = vec![];
         for (name, symbol) in symbols.global.iter() {
             if let Some(r#static) = StaticVariable::from_symbol_with_name(Rc::clone(name), symbol) {
@@ -23,7 +25,9 @@ impl From<sema::ValidAst> for Program {
                 top_level.push(TopLevel::StaticConstant(constant));
             }
         }
-        let mut symbols = SymbolTable::from(symbols);
+
+        let mut ctx = Ctx::new(SymbolTable::from(symbols), structs);
+        ctx.push_scope("tacky");
         for decl in program.declarations.into_iter() {
             match decl {
                 // Only declarations with bodies will be returned here.
@@ -31,7 +35,7 @@ impl From<sema::ValidAst> for Program {
                 // function was not marked static but the first declaration was
                 // that the function gets defined as static.
                 ast::Declaration::Fun(f) => {
-                    if let Some(f) = Function::from_symbol(f, &mut symbols) {
+                    if let Some(f) = Function::from_symbol(f, &mut ctx) {
                         top_level.push(TopLevel::Fun(f));
                     }
                 }
@@ -40,6 +44,6 @@ impl From<sema::ValidAst> for Program {
                 ast::Declaration::Union(..) => todo!(),
             };
         }
-        Self { top_level, symbols }
+        Self { top_level, ctx }
     }
 }

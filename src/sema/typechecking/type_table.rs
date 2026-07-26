@@ -167,6 +167,10 @@ impl StructEntry {
     pub fn get_member(&self, name: &Rc<String>) -> Option<&MemberEntry> {
         self.members.iter().find(|member| member.name == *name)
     }
+
+    pub fn get_member_at_offset(&self, offset: usize) -> Option<&MemberEntry> {
+        self.members.iter().find(|member| member.offset == offset)
+    }
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]

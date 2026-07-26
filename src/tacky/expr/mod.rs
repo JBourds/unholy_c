@@ -83,6 +83,7 @@ impl Ctx {
 pub enum ExprResult {
     PlainOperand(Expr),
     DereferencedPointer(Expr),
+    SubObject { base: Rc<String>, offset: usize },
 }
 
 #[derive(Debug, PartialEq)]
@@ -263,6 +264,32 @@ impl Expr {
                     src_ptr: val,
                     dst: dst.clone(),
                 });
+                Self {
+                    instructions,
+                    val: dst,
+                }
+            }
+            ExprResult::SubObject { base, offset } => {
+                let struct_t = &ctx
+                    .symbols
+                    .get(&base)
+                    .expect("couldn't get type of struct variable")
+                    .r#type
+                    .base;
+                let ast::BaseType::Struct { tag, .. } = struct_t else {
+                    unreachable!()
+                };
+                let member = ctx
+                    .structs
+                    .get(&tag)
+                    .and_then(|r#struct| r#struct.get_member_at_offset(offset))
+                    .expect("Couldn't locate member at offset");
+                let dst = ctx.make_temp_var(member.r#type.clone());
+                let instructions = vec![Instruction::CopyFromOffset {
+                    src: base,
+                    dst: dst.clone(),
+                    offset: offset.try_into().unwrap(),
+                }];
                 Self {
                     instructions,
                     val: dst,

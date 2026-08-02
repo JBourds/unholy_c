@@ -66,7 +66,7 @@ impl TypeTable {
                     "cannot define {name} with members twice in one scope"
                 );
                 if !member_entries.is_empty() {
-                    entry.members = member_entries;
+                    entry.members = member_entries.into();
                 }
                 if r#type.alignment != NonZeroUsize::new(1).unwrap() && r#type.base.nbytes() != 0 {
                     entry.alignment = r#type.alignment.into();
@@ -79,7 +79,7 @@ impl TypeTable {
                     StructEntry {
                         alignment: r#type.alignment.into(),
                         size: r#type.base.nbytes(),
-                        members: member_entries,
+                        members: member_entries.into(),
                         tag_type,
                         scope: self.scope(),
                     },
@@ -91,7 +91,7 @@ impl TypeTable {
                 StructEntry {
                     alignment: r#type.alignment.into(),
                     size: r#type.base.nbytes(),
-                    members: member_entries,
+                    members: member_entries.into(),
                     tag_type,
                     scope: self.scope(),
                 },
@@ -158,7 +158,7 @@ impl TypeTable {
 pub struct StructEntry {
     pub alignment: usize,
     pub size: usize,
-    pub members: Vec<MemberEntry>,
+    pub members: Rc<[MemberEntry]>,
     pub tag_type: TagType,
     pub scope: Scope,
 }

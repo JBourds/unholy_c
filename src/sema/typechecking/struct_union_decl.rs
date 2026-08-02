@@ -70,7 +70,7 @@ pub fn typecheck_struct_decl(
             entry.r#type = fixup_type(entry.r#type.clone(), structs);
         }
         if let Some(entry) = structs.get_mut(&decl.tag) {
-            entry.members = member_entries;
+            entry.members = member_entries.into();
         }
     }
     Ok(ast::StructDecl {
@@ -142,7 +142,7 @@ pub fn typecheck_union_decl(
             entry.r#type = fixup_type(entry.r#type.clone(), structs);
         }
         if let Some(entry) = structs.get_mut(&decl.tag) {
-            entry.members = member_entries;
+            entry.members = member_entries.into();
         }
     }
     Ok(ast::UnionDecl {

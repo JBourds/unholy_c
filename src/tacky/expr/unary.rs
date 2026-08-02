@@ -1,3 +1,5 @@
+use crate::ast::Type;
+
 use super::*;
 
 pub(crate) fn parse_unary(node: ast::Expr, ctx: &mut Ctx) -> ExprResult {
@@ -321,6 +323,29 @@ fn addr_of(expr: ast::Expr, ctx: &mut Ctx) -> ExprResult {
             } else {
                 unreachable!("cannot have constant expression for dereferenced pointer.");
             }
+        }
+        ExprResult::SubObject { base, offset } => {
+            let mem_t = ctx
+                .get_struct_member_type(&base, offset)
+                .expect("couldn't get type of struct member");
+            let ptr_mem_t = Type::pointer(Box::new(mem_t));
+            let dst = ctx.make_temp_var(ptr_mem_t);
+            let instructions = vec![
+                Instruction::GetAddress {
+                    src: Val::Var(base),
+                    dst: dst.clone(),
+                },
+                Instruction::AddPtr {
+                    ptr: dst.clone(),
+                    index: Val::Constant(ast::Constant::I64(offset.try_into().unwrap())),
+                    scale: 1,
+                    dst: dst.clone(),
+                },
+            ];
+            ExprResult::PlainOperand(Expr {
+                instructions,
+                val: dst,
+            })
         }
     }
 }

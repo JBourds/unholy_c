@@ -2,7 +2,7 @@ use std::rc::Rc;
 
 use crate::{
     ast::{self, Constant},
-    tacky::{Ctx, Expr, ExprResult, Instruction, Val},
+    tacky::{Ctx, Expr, ExprResult, Instruction, Val, expr::arrow::member_of_deref_pointer},
 };
 
 pub(crate) fn parse_dot_member(
@@ -32,27 +32,6 @@ pub(crate) fn parse_dot_member(
                 offset: offset + inner_member.offset,
             }
         }
-        ExprResult::DereferencedPointer(expr) => {
-            let Expr {
-                mut instructions,
-                val,
-            } = expr;
-            // TODO: Is the type of expr in here a *T or T?
-            let ptr_expr_type = val.get_type(&ctx.symbols);
-            let dst_ptr = ctx.make_temp_var(ptr_expr_type.clone());
-            let deref_expr_type = ptr_expr_type.deref();
-            let struct_tag = deref_expr_type.assert_struct_get_tag();
-            let member_entry = ctx.get_struct_member_by_name(&struct_tag, &member);
-            instructions.push(Instruction::AddPtr {
-                ptr: val,
-                index: Val::Constant(Constant::I64(member_entry.offset.try_into().unwrap())),
-                scale: 1,
-                dst: dst_ptr.clone(),
-            });
-            ExprResult::DereferencedPointer(Expr {
-                instructions,
-                val: dst_ptr,
-            })
-        }
+        ExprResult::DereferencedPointer(expr) => member_of_deref_pointer(expr, member, ctx),
     }
 }

@@ -49,6 +49,17 @@ impl Ctx {
         }
     }
 
+    pub fn get_struct_member_type(
+        &self,
+        struct_name: &Rc<String>,
+        offset: usize,
+    ) -> Option<ast::Type> {
+        self.structs
+            .get(struct_name)
+            .and_then(|struct_t| struct_t.get_member_at_offset(offset))
+            .map(|mem_entry| mem_entry.r#type.clone())
+    }
+
     pub fn with_scope<T>(&mut self, scope: impl Into<String>, fun: impl FnOnce() -> T) -> T {
         self.push_scope(scope);
         let res = fun();
@@ -270,21 +281,10 @@ impl Expr {
                 }
             }
             ExprResult::SubObject { base, offset } => {
-                let struct_t = &ctx
-                    .symbols
-                    .get(&base)
-                    .expect("couldn't get type of struct variable")
-                    .r#type
-                    .base;
-                let ast::BaseType::Struct { tag, .. } = struct_t else {
-                    unreachable!()
-                };
-                let member = ctx
-                    .structs
-                    .get(&tag)
-                    .and_then(|r#struct| r#struct.get_member_at_offset(offset))
-                    .expect("Couldn't locate member at offset");
-                let dst = ctx.make_temp_var(member.r#type.clone());
+                let member_t = ctx
+                    .get_struct_member_type(&base, offset)
+                    .expect("couldn't get struct member");
+                let dst = ctx.make_temp_var(member_t.clone());
                 let instructions = vec![Instruction::CopyFromOffset {
                     src: base,
                     dst: dst.clone(),

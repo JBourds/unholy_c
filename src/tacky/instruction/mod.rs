@@ -104,8 +104,8 @@ impl Instruction {
         match decl {
             ast::Declaration::Var(decl) => Self::parse_var_decl_with(decl, ctx),
             ast::Declaration::Fun(decl) => Self::parse_fun_decl_with(decl),
-            ast::Declaration::Struct(..) => todo!(),
-            ast::Declaration::Union(..) => todo!(),
+            ast::Declaration::Struct(..) => vec![],
+            ast::Declaration::Union(..) => vec![],
         }
     }
 

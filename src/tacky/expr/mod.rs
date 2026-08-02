@@ -1,4 +1,4 @@
-use crate::sema::tc::{MemberEntry, SymbolTableGetType, TypeTable};
+use crate::sema::tc::{MemberEntry, StructEntry, SymbolTableGetType, TypeTable};
 
 use super::*;
 
@@ -51,6 +51,12 @@ impl Ctx {
 
     pub fn get_var_type(&self, name: &Rc<String>) -> ast::Type {
         self.symbols.get_type(name)
+    }
+
+    pub fn get_struct(&self, struct_name: &Rc<String>) -> &StructEntry {
+        self.structs
+            .get(struct_name)
+            .expect("could not find struct by name")
     }
 
     pub fn get_struct_member_by_offset(

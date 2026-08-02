@@ -15,6 +15,7 @@ pub(crate) fn parse_assignment(node: ast::Expr, ctx: &mut Ctx) -> ExprResult {
 
 fn parse_normal_assignment(lvalue: ast::Expr, rvalue: ast::Expr, ctx: &mut Ctx) -> ExprResult {
     let lval = Expr::parse_with(lvalue, ctx);
+    let rval = Expr::parse_with_and_convert(rvalue.clone(), ctx);
     match lval {
         ExprResult::PlainOperand(Expr {
             mut instructions,
@@ -36,9 +37,7 @@ fn parse_normal_assignment(lvalue: ast::Expr, rvalue: ast::Expr, ctx: &mut Ctx) 
                     ExprResult::PlainOperand(Expr { instructions, val })
                 }
                 _ => {
-                    let rval = Expr::parse_with_and_convert(rvalue.clone(), ctx);
                     instructions.extend(rval.instructions);
-
                     instructions.push(Instruction::Copy {
                         src: rval.val,
                         dst: val.clone(),
@@ -51,7 +50,6 @@ fn parse_normal_assignment(lvalue: ast::Expr, rvalue: ast::Expr, ctx: &mut Ctx) 
             mut instructions,
             val,
         }) => {
-            let rval = Expr::parse_with_and_convert(rvalue.clone(), ctx);
             instructions.extend(rval.instructions);
             instructions.push(Instruction::Store {
                 src: rval.val.clone(),
@@ -61,6 +59,21 @@ fn parse_normal_assignment(lvalue: ast::Expr, rvalue: ast::Expr, ctx: &mut Ctx) 
             ExprResult::PlainOperand(Expr {
                 instructions,
                 val: rval.val,
+            })
+        }
+        ExprResult::SubObject { base, offset } => {
+            let Expr {
+                mut instructions,
+                val: rval,
+            } = rval;
+            instructions.push(Instruction::CopyToOffset {
+                src: rval.clone(),
+                dst: base,
+                offset: offset.try_into().unwrap(),
+            });
+            ExprResult::PlainOperand(Expr {
+                instructions,
+                val: rval,
             })
         }
     }

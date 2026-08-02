@@ -331,18 +331,18 @@ fn addr_of(expr: ast::Expr, ctx: &mut Ctx) -> ExprResult {
                 ast::Type::pointer(Box::new(member_type))
             };
             let dst = ctx.make_temp_var(ptr_member_type);
-            let instructions = vec![
-                Instruction::GetAddress {
-                    src: Val::Var(base),
-                    dst: dst.clone(),
-                },
-                Instruction::AddPtr {
+            let mut instructions = vec![Instruction::GetAddress {
+                src: Val::Var(base),
+                dst: dst.clone(),
+            }];
+            if offset != 0 {
+                instructions.push(Instruction::AddPtr {
                     ptr: dst.clone(),
                     index: Val::Constant(ast::Constant::I64(offset.try_into().unwrap())),
                     scale: 1,
                     dst: dst.clone(),
-                },
-            ];
+                });
+            }
             ExprResult::PlainOperand(Expr {
                 instructions,
                 val: dst,

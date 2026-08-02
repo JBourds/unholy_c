@@ -279,14 +279,7 @@ fn addr_of(expr: ast::Expr, ctx: &mut Ctx) -> ExprResult {
             let t = if val_t.is_array() {
                 val_t.maybe_decay()
             } else {
-                ast::Type {
-                    base: ast::BaseType::Ptr {
-                        to: Box::new(val_t),
-                        is_restrict: false,
-                    },
-                    alignment: ast::Type::PTR_ALIGNMENT,
-                    is_const: false,
-                }
+                ast::Type::pointer(Box::new(val_t))
             };
             let dst = ctx.make_temp_var(t);
             instructions.push(Instruction::GetAddress {
@@ -332,7 +325,7 @@ fn addr_of(expr: ast::Expr, ctx: &mut Ctx) -> ExprResult {
             let base_type = ctx.get_var_type(&base);
             let struct_tag = base_type.assert_struct_get_tag();
             let member_type = ctx.get_struct_member_type_by_offset(&struct_tag, offset);
-            let ptr_member_type = Type::pointer(Box::new(member_type));
+            let ptr_member_type = Type::pointer(Box::new(member_type.maybe_decay()));
             let dst = ctx.make_temp_var(ptr_member_type);
             let instructions = vec![
                 Instruction::GetAddress {

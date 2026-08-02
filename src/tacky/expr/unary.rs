@@ -325,7 +325,11 @@ fn addr_of(expr: ast::Expr, ctx: &mut Ctx) -> ExprResult {
             let base_type = ctx.get_var_type(&base);
             let struct_tag = base_type.assert_struct_get_tag();
             let member_type = ctx.get_struct_member_type_by_offset(&struct_tag, offset);
-            let ptr_member_type = Type::pointer(Box::new(member_type.maybe_decay()));
+            let ptr_member_type = if member_type.is_array() {
+                member_type.maybe_decay()
+            } else {
+                ast::Type::pointer(Box::new(member_type))
+            };
             let dst = ctx.make_temp_var(ptr_member_type);
             let instructions = vec![
                 Instruction::GetAddress {

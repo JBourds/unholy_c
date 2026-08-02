@@ -779,25 +779,23 @@ fn try_pointer_binary(
             base: ast::BaseType::Ptr { to: left_to, .. },
             ..
         } = left_t
+            && (left_to.is_struct() || left_to.is_union())
         {
-            if left_to.is_struct() || left_to.is_union() {
-                ensure!(
-                    left_to.is_complete(),
-                    "cannot have incomplete struct type in pointer arithmitic"
-                );
-            }
+            ensure!(
+                left_to.is_complete(),
+                "cannot have incomplete struct type in pointer arithmitic"
+            );
         }
         if let ast::Type {
             base: ast::BaseType::Ptr { to: right_to, .. },
             ..
         } = right_t
+            && (right_to.is_struct() || right_to.is_union())
         {
-            if right_to.is_struct() || right_to.is_union() {
-                ensure!(
-                    right_to.is_complete(),
-                    "cannot have incomplete struct type in pointer arithmitic"
-                );
-            }
+            ensure!(
+                right_to.is_complete(),
+                "cannot have incomplete struct type in pointer arithmitic"
+            );
         }
     }
 

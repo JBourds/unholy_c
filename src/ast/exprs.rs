@@ -1,7 +1,7 @@
 use anyhow::{Context, Result, bail};
 use std::rc::Rc;
 
-use super::{BaseType, BinaryOp, Constant, Type, UnaryOp};
+use super::{BinaryOp, Constant, Type, UnaryOp};
 use crate::{ast::cast_expr::CastExpr, lexer::Token};
 
 #[derive(Debug, PartialEq, Clone)]

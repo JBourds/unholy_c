@@ -1,5 +1,3 @@
-use crate::ast::Type;
-
 use super::*;
 
 pub(crate) fn parse_unary(node: ast::Expr, ctx: &mut Ctx) -> ExprResult {

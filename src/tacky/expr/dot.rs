@@ -1,8 +1,8 @@
 use std::rc::Rc;
 
 use crate::{
-    ast::{self, Constant},
-    tacky::{Ctx, Expr, ExprResult, Instruction, Val, expr::arrow::member_of_deref_pointer},
+    ast::{self},
+    tacky::{Ctx, Expr, ExprResult, expr::arrow::member_of_deref_pointer},
 };
 
 pub(crate) fn parse_dot_member(

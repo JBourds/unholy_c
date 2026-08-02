@@ -22,6 +22,13 @@ impl Val {
         }
     }
 
+    pub fn assert_var_get_name(&self) -> Rc<String> {
+        match self {
+            Val::Var(name) => name.clone(),
+            _ => panic!("expected Val to be a var"),
+        }
+    }
+
     pub fn dummy() -> Self {
         Val::Var(Rc::new("DUMMY".to_string()))
     }

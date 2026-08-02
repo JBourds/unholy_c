@@ -502,6 +502,17 @@ impl Type {
         }
     }
 
+    pub fn assert_struct_get_tag(&self) -> Rc<String> {
+        let Type {
+            base: BaseType::Struct { tag, .. },
+            ..
+        } = self
+        else {
+            panic!("{self:?} is not a struct");
+        };
+        tag.clone()
+    }
+
     pub fn is_scalar(&self) -> bool {
         !(self.is_array()
             || self.is_function()

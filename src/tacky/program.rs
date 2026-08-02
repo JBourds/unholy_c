@@ -40,8 +40,8 @@ impl From<sema::ValidAst> for Program {
                     }
                 }
                 ast::Declaration::Var(_) => {}
-                ast::Declaration::Struct(..) => todo!(),
-                ast::Declaration::Union(..) => todo!(),
+                ast::Declaration::Struct(..) => {}
+                ast::Declaration::Union(..) => {}
             };
         }
         Self { top_level, ctx }

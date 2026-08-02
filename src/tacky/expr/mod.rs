@@ -249,8 +249,8 @@ impl Expr {
             ast::Expr::SizeOf(_) => unreachable!(
                 "This branch should have been rewritten to SizeOfT during typechecking"
             ),
-            ast::Expr::Dot { .. } => todo!(),
-            ast::Expr::Arrow { .. } => todo!(),
+            ast::Expr::Dot { structure, member } => parse_dot_member(*structure, member, ctx),
+            ast::Expr::Arrow { pointer, member } => parse_arrow_member(*pointer, member, ctx),
         }
     }
 

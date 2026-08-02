@@ -75,6 +75,7 @@ fn pre_inc(expr: ast::Expr, ctx: &mut Ctx) -> ExprResult {
                 val: intermediate,
             })
         }
+        _ => unreachable!("SubObject should have already been converted"),
     }
 }
 
@@ -136,6 +137,7 @@ fn post_inc(expr: ast::Expr, ctx: &mut Ctx) -> ExprResult {
                 val: dst,
             })
         }
+        _ => unreachable!("SubObject should have already been converted"),
     }
 }
 
@@ -181,6 +183,7 @@ fn pre_dec(expr: ast::Expr, ctx: &mut Ctx) -> ExprResult {
                 val: intermediate,
             })
         }
+        _ => unreachable!("SubObject should have already been converted"),
     }
 }
 
@@ -242,6 +245,7 @@ fn post_dec(expr: ast::Expr, ctx: &mut Ctx) -> ExprResult {
                 val: dst,
             })
         }
+        _ => unreachable!("SubObject should have already been converted"),
     }
 }
 

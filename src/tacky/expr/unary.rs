@@ -329,9 +329,11 @@ fn addr_of(expr: ast::Expr, ctx: &mut Ctx) -> ExprResult {
             }
         }
         ExprResult::SubObject { base, offset } => {
-            let mem_t = ctx.get_struct_member_type_by_offset(&base, offset);
-            let ptr_mem_t = Type::pointer(Box::new(mem_t));
-            let dst = ctx.make_temp_var(ptr_mem_t);
+            let base_type = ctx.get_var_type(&base);
+            let struct_tag = base_type.assert_struct_get_tag();
+            let member_type = ctx.get_struct_member_type_by_offset(&struct_tag, offset);
+            let ptr_member_type = Type::pointer(Box::new(member_type));
+            let dst = ctx.make_temp_var(ptr_member_type);
             let instructions = vec![
                 Instruction::GetAddress {
                     src: Val::Var(base),

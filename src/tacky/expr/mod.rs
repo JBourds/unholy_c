@@ -330,8 +330,10 @@ impl Expr {
                 }
             }
             ExprResult::SubObject { base, offset } => {
-                let member_t = ctx.get_struct_member_type_by_offset(&base, offset);
-                let dst = ctx.make_temp_var(member_t.clone());
+                let base_type = ctx.get_var_type(&base);
+                let struct_tag = base_type.assert_struct_get_tag();
+                let member_type = ctx.get_struct_member_type_by_offset(&struct_tag, offset);
+                let dst = ctx.make_temp_var(member_type);
                 let instructions = vec![Instruction::CopyFromOffset {
                     src: base,
                     dst: dst.clone(),

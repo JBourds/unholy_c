@@ -1,4 +1,4 @@
-use crate::sema::tc::TypeTable;
+use crate::sema::tc::{MemberEntry, SymbolTableGetType, TypeTable};
 
 use super::*;
 
@@ -49,15 +49,58 @@ impl Ctx {
         }
     }
 
-    pub fn get_struct_member_type(
+    pub fn get_var_type(&self, name: &Rc<String>) -> ast::Type {
+        self.symbols.get_type(name)
+    }
+
+    pub fn get_struct_member_by_offset(
         &self,
         struct_name: &Rc<String>,
         offset: usize,
-    ) -> Option<ast::Type> {
-        self.structs
+    ) -> &MemberEntry {
+        let Some(member) = self
+            .structs
             .get(struct_name)
             .and_then(|struct_t| struct_t.get_member_at_offset(offset))
-            .map(|mem_entry| mem_entry.r#type.clone())
+        else {
+            panic!("Couldn't get struct member at offset {offset} for struct {struct_name}")
+        };
+        member
+    }
+
+    pub fn get_struct_member_type_by_offset(
+        &self,
+        struct_name: &Rc<String>,
+        offset: usize,
+    ) -> ast::Type {
+        self.get_struct_member_by_offset(struct_name, offset)
+            .r#type
+            .clone()
+    }
+
+    pub fn get_struct_member_by_name(
+        &self,
+        struct_name: &Rc<String>,
+        member_name: &Rc<String>,
+    ) -> &MemberEntry {
+        let Some(member) = self
+            .structs
+            .get(struct_name)
+            .and_then(|struct_t| struct_t.get_member(member_name))
+        else {
+            panic!("Couldn't get struct member {member_name} for struct {struct_name}")
+        };
+        member
+    }
+
+    pub fn get_struct_member_type_by_name(
+        &self,
+        struct_name: &Rc<String>,
+        member_name: &Rc<String>,
+    ) -> ast::Type {
+        self.get_struct_member_by_name(struct_name, member_name)
+            .r#type
+            .clone()
     }
 
     pub fn with_scope<T>(&mut self, scope: impl Into<String>, fun: impl FnOnce() -> T) -> T {
@@ -281,9 +324,7 @@ impl Expr {
                 }
             }
             ExprResult::SubObject { base, offset } => {
-                let member_t = ctx
-                    .get_struct_member_type(&base, offset)
-                    .expect("couldn't get struct member");
+                let member_t = ctx.get_struct_member_type_by_offset(&base, offset);
                 let dst = ctx.make_temp_var(member_t.clone());
                 let instructions = vec![Instruction::CopyFromOffset {
                     src: base,

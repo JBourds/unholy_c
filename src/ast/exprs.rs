@@ -89,6 +89,13 @@ impl Expr {
         }
     }
 
+    pub fn assert_var_get_name(&self) -> Rc<String> {
+        let Self::Var(name) = self else {
+            panic!("{self:?} is not a struct");
+        };
+        name.clone()
+    }
+
     pub fn parse<'a>(tokens: &'a [Token], min_precedence: u32) -> Result<(Expr, &'a [Token])> {
         let (mut left, mut tokens) = CastExpr::parse(tokens)?;
         loop {

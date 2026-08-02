@@ -325,9 +325,7 @@ fn addr_of(expr: ast::Expr, ctx: &mut Ctx) -> ExprResult {
             }
         }
         ExprResult::SubObject { base, offset } => {
-            let mem_t = ctx
-                .get_struct_member_type(&base, offset)
-                .expect("couldn't get type of struct member");
+            let mem_t = ctx.get_struct_member_type_by_offset(&base, offset);
             let ptr_mem_t = Type::pointer(Box::new(mem_t));
             let dst = ctx.make_temp_var(ptr_mem_t);
             let instructions = vec![

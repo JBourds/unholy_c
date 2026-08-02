@@ -1,4 +1,4 @@
-use crate::tacky::mov_chunker::MovChunker;
+use crate::{sema::tc::MemberEntry, tacky::mov_chunker::MovChunker};
 
 use super::*;
 
@@ -156,12 +156,22 @@ impl Instruction {
                 instructions
             }
             ast::Initializer::CompoundInit(inits) => {
-                let element_t = match &r#type.base {
-                    ast::BaseType::Array { element, .. } => element.as_ref(),
-                    _ => r#type,
+                // Get a trait object over Iterator<&ast::Type> to avoid making
+                // expensive clones for array/struct types and be able to
+                // uniformly handle the compound initializers below.
+                let members: Rc<[MemberEntry]>;
+                let element_types: Box<dyn Iterator<Item = &ast::Type> + '_> = match &r#type.base {
+                    ast::BaseType::Array { element, size } => {
+                        Box::new(std::iter::repeat_n(element.as_ref(), *size))
+                    }
+                    ast::BaseType::Struct { tag, .. } => {
+                        members = ctx.get_struct(tag).members.clone();
+                        Box::new(members.iter().map(|mem| &mem.r#type))
+                    }
+                    _ => Box::new(std::iter::once(r#type)),
                 };
                 let mut instructions = vec![];
-                for init in inits {
+                for (init, element_t) in inits.into_iter().zip(element_types) {
                     instructions.extend(Self::process_initializer_rec(
                         base,
                         true,

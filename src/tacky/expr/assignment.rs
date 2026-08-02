@@ -191,5 +191,20 @@ fn parse_compound_assignment(lvalue: ast::Expr, rvalue: ast::Expr, ctx: &mut Ctx
                 val: downcasted.val,
             })
         }
+        ExprResult::SubObject { base, offset } => {
+            let Expr {
+                mut instructions,
+                val: rval,
+            } = rval;
+            instructions.push(Instruction::CopyToOffset {
+                src: rval.clone(),
+                dst: base,
+                offset: offset.try_into().unwrap(),
+            });
+            ExprResult::PlainOperand(Expr {
+                instructions,
+                val: rval,
+            })
+        }
     }
 }
